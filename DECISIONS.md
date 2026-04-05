@@ -1,164 +1,92 @@
-# GIS — DESIGN DECISIONS
-*Proč bylo co jak navrženo. Přidávat po každém rozhodnutí které nebylo triviální.*
-*Formát: Kontext → Rozhodnutí → Důvod → Alternativy které neprošly*
+# GIS — ROZHODNUTÍ & ARCHITEKTURA
+
+*Aktualizováno 5. 4. 2026 · v182en*
 
 ---
 
-## Architektura — základní rozhodnutí
+## GitHub jako zdroj modulů (5. 4. 2026)
 
-### Single-file HTML app
-**Rozhodnutí:** Distribuce jako jeden `.html` soubor. Od v90: build z 19 modulů → single file.
-**Důvod:** Nulová instalace. Funguje z `file://` v Chrome. Jednoduché sdílení a verzování.
+**Problém:** `/mnt/project/` na Claude.ai platformě má cache bug — může vracet stale verze souborů i po re-uploadu. To způsobovalo opakované regrese (switchView block/flex, copyright 2025/2026).
 
-### IndexedDB pro galerii a assets
-**Rozhodnutí:** Veškerá data v IndexedDB (ne localStorage, ne server).
-**Důvod:** localStorage limit ~5MB. IndexedDB pojme stovky MB obrázků a videa.
+**Rozhodnutí:** Zdrojové moduly přesunuty na GitHub: https://github.com/petrsajner/GIS-modules
 
-### Proxy jen pro CORS-blokované endpointy
-**Rozhodnutí:** Worker proxy jen pro: xAI, Luma, Magnific, fal.ai queue, Topaz, Replicate.
-**Důvod:** CF Worker free tier 100K req/den. Zbytečné proxování plýtvá limitem.
-**Pravidlo:** Vždy ověřit CORS kompatibilitu před implementací — drahá chyba.
+**Workflow:**
+- Konec session → Petr nahraje nové moduly na GitHub
+- Začátek session → Claude fetchne moduly z GitHub blob URL (web_fetch)
+- /mnt/project/ zůstává jako záloha pro syntax check
 
-### CF Worker free tier — polling NIKDY uvnitř Workeru
-**Rozhodnutí:** Worker = submit → okamžitá odpověď s job ID. Polling loop vždy v GIS (browser).
-**Důvod:** CF Worker free tier má ~30s wall-clock limit. Async generace trvá minuty.
-**Pravidlo:** Worker vždy odpoví do 5s. Nikdy nečeká na výsledek.
+**Odmítnuto:** Google Drive — connector funguje ale čte pouze Google Docs (.js soubory nelze)
 
 ---
 
-## v102en — Refs architektura refactor
+## Magnific Video — fal.ai storage upload (5. 4. 2026)
 
-### refs[] jako asset linky (ne inline data)
-**Kontext:** Refs ukládaly imageData přímo. Galerie záznamy měly MB navíc za každý ref.
-**Rozhodnutí:** `refs[]` = `{assetId, thumb, dims}`. `getRefDataForApi()` načítá data on-demand z DB.
-**Důvod:** Galerie záznamy ~50 bytů místo MB. Eliminace duplicit.
+**Problém:** Freepik Video Upscaler vracel 400 "HTTP video URL not allowed" při posílání raw base64.
 
-### usedVideoRefs — ukládá imageData (v132)
-**Kontext:** Video ref systém v102+ ukládal jen assetId. Smazáním assetu se ref ztratil.
-**Rozhodnutí:** `videoRefsAtSubmit` je async a ukládá `imageData` přímo do snapshotu.
-**Důvod:** Video je archivní médium — jeho setup musí být self-contained.
+**Analýza:** Freepik API přijímá HTTPS URL nebo base64, ale base64 řetězec velký soubor může začínat znaky podobnými URL — nebo jde o limit velikosti Cloudflare Worker requestu.
+
+**Rozhodnutí:** Video se před odesláním Freepiku uploaduje na fal.ai storage (`https://storage.fal.run/files`) → vrátí HTTPS URL → ta se pošle proxy. Vyžaduje fal.ai klíč v job objektu.
+
+**Proxy:** `handleMagnificVideoUpscale` přijímá `video_url` (preferovaný) i `video_b64` (fallback).
 
 ---
 
-## v107–v115en — Video model systém
+## Freepik Edit Tools jako image modely (5. 4. 2026)
 
-### KLING_GROUPS — generický group systém pro varianty
-**Kontext:** Kling má 7+ variant. Všechny v hlavním selectu = chaos.
-**Rozhodnutí:** Group key → sub-select s variantami. `getActiveVideoModelKey()` vrátí konkrétní klíč.
+**Problém:** Relight/Style Transfer/Skin Enhancer byly v Edit modalu na kartách — špatné UX, špatná dostupnost.
 
-### audioField / durationInt / multiShots flags
-**Problém:** Různé modely používají různé pole (`generate_audio` vs `audio`; string vs int duration).
-**Rozhodnutí:** Model flags v VIDEO_MODELS definici. Payload builder čte flag.
-**Příklady:**
-```javascript
-duration: "5"         // Kling — STRING
-duration: 5           // ostatní — INTEGER
-start_image_url: url  // Kling — ne image_url
-generate_audio: !!f   // VŽDY explicitně — omission = audio ON
-```
+**Rozhodnutí:** Přidány jako regulérní image modely (`proxy_freepik_edit`) do hlavního selectu.
+
+**Architektura:**
+- Ref[0] = source image (required pro všechny 3)
+- Ref[1] = style/lighting reference (optional u Relight, required u Style Transfer)
+- Prompt = lighting description (pouze Relight)
+- `editModel: true` → speciální ref label v UI
 
 ---
 
-## v174en — fal.ai queue + error cards
+## switchView display:flex (opakovaná regrese)
 
-### fal.ai image → queue.fal.run (v174)
-**Problém:** `fal.run` (sync) vrací 503 "Deadline expired" při přetížení.
-**Rozhodnutí:** Všechny fal.ai image modely přešly na `queue.fal.run` async pattern přes `_falQueue()` helper.
-**Důvod:** Queue endpoint odolný vůči timeoutům. Retry zdarma.
+**Bug:** `model-select.js` `switchView()` nastavoval `setupView.style.display = 'block'` místo `'flex'`. Způsobovalo zmizení copyright karty v Setup (flex layout se neuplatnil).
 
-### Error karty místo odstraněných placeholderů (v174)
-**Rozhodnutí:** Při chybě se placeholder transformuje na statickou error kartu s `↺ Reuse` tlačítkem.
-**Důvod:** Uživatel neztratí parametry. Může opravit prompt a zkusit znovu jedním klikem.
+**Původ:** Stale modul z `/mnt/project/` cache obsahoval starší verzi před opravou.
 
-### Ref komprese na JPEG před odesláním (v174)
-**Rozhodnutí:** `_compressRefToJpeg()` — canvas re-encode všech refů na JPEG 100% před API call.
-**Důvod:** PNG z NB2 (5K+) překračuje Kling API limit 10MB. JPEG drasticky zmenší velikost.
-**Kling specificky:** cap na UHD (3840px) + JPEG.
+**Fix:** `'flex'` + přidán do session-start check listu.
+
+**Poznámka:** Tento bug byl opravován vícekrát. Přidán do regrese watch-listu v STAV.md.
 
 ---
 
-## v175en — Branding, UX polish, Describe restore (4. 4. 2026)
+## Dynamický params systém — odloženo
 
-### Generative Image Studio — nový název (v175)
-Přejmenování z "Google Image Studio". Zkratka GIS zachována. Integrity checks přidány do 5 modulů pro deterenci triviálního odstranění copyrightu.
+**Analýza (4. 4. 2026):** 665 řádků statického HTML pro params, 20× opakující se radio patterns.
 
-### Copyright karta v Setup — plovoucí layout (v175)
-Setup je flex row. Karta floatuje uprostřed pravé černé části — vždy viditelná bez scrollování, responzivní.
-
-### Folder/favorite — meta-only operace (v175)
-`dbPatchMeta` a `dbPatchVideoMeta` — folder a favorite nikdy nenačítají imageData/videoData. Výkon: 10–15s → < 0.5s pro smazání složky. Bezpečné: `images` store se pro metadata operace nedotýká.
-
-### Folder delete bez confirm (v175)
-Uživatel záměrně kliká na × vedle názvu složky. Data se nemažou — jen přesun do All. Confirm je zbytečný friction. Vizuální feedback (červení) dostatečný.
-
-### dbPatchMeta — proč ne dbPut('images') (v175)
-`images` store = meta + imageData (2–5MB). Pro změnu `folder` nebo `favorite` není důvod načítat binární data. `images_meta` store má stejná metadata bez imageData (~300B). Architektura v102+ toto umožňuje.
-
-### AI Prompt per-tab output (v175)
-Původní sdílený `aiBufferOutput` byl matoucí — jeden textarea pro všechny taby. Nová architektura: každý tab má vlastní zelený input + červený output. Přepnutí tabu vymaže output → uživatel vždy vidí výsledek aktuálního tabu.
-
-### Chat — context bublina vs systémový kontext (v175)
-Varianta 2 (viditelná bublina) zvolena nad variantou 1 (skrytý systémový kontext) — transparentnost > estetika. Uživatel musí vědět s čím chat pracuje.
-
-### Describe modal — AbortController (v175)
-Tab přepnutí bez abort způsoboval race condition: starší generování (Description) dokončilo po novějším (AI Prompt) a přepsalo výsledek. AbortController garantuje že se zobrazí vždy výsledek aktuálně aktivního tabu.
-
-### Describe funkce — umístění v refs.js (v175)
-Funkce patří do refs.js (za PROMPT PREPROCESSING sekci). Video.js volá _runDescribe a setDescribeTab jako sdílené funkce — nevlastní je. Pokud se refs.js kopíruje ze stale projektu, funkce zmizí. Version check v SKILL.md to zachytí.
+**Rozhodnutí:** Neimplementovat globální refaktor — příliš velké riziko regresí. Místo toho hybridní přístup: nové modely používají `params[]` array kde to dává smysl, staré ponechat.
 
 ---
 
-## v177–v179en — Unified selection + drag-to-folder (5. 4. 2026)
+## Tauri distribuce — odloženo
 
-### Rubber band selekce — shared helper (v177)
-**Kontext:** Gallery, assets i video potřebovaly rubber band. Tři separátní implementace = chaos.
-**Rozhodnutí:** Sdílený `_startRubberBand(e, rbId, mode, onRect)` v gallery.js. Shift+drag = výběr, Alt+drag = deselect.
-**Alternativa:** Každý pohled vlastní implementace — zamítnuto (duplicita kódu, rozbitelnost).
+**Důvod odkládání:** Řeší CORS proxy problém, ale GIS není feature-complete.
 
-### Drag-to-folder místo Move dialogu (v177)
-**Kontext:** Move dialog (`prompt()`) byl primitivní a native dialogy jsou stylisticky nekonzistentní.
-**Rozhodnutí:** HTML5 drag na kartě + drop zóna na folder divech. Native feel, bez extra kliku.
-**Zachováno:** Move overlay dialog pro video (komplexnější UX, víc složek).
+**Odhad:** ~3-4 sessions implementace. Dokumentováno v TAURI_DISTRIBUTION.md.
 
-### dbPatchAssetMeta — meta-only pro assets (v177)
-Stejný pattern jako dbPatchMeta pro galerii. Assets mají vlastní `assets_meta` store oddělený od binárních dat.
-
-### Video in-folder pruh — fialová (v177)
-Červená barva pruhu splývala s error stavy. Fialová `#9b59b6` je vizuálně neutrální a konzistentní s Precision color scheme.
+**Spustit kdy:** GIS je stabilní a feature-complete.
 
 ---
 
-## v180en — Camera active, Favorites live, Branding (5. 4. 2026)
+## Proxy architektura (Cloudflare Workers)
 
-### Favorites live update — renderFolders po toggle (v180)
-**Kontext:** Unlike ve Favorites složce nezpůsoboval okamžité zmizení karty — refresh byl nutný.
-**Rozhodnutí:** `toggleFavorite` / `videoToggleLike` / `toggleAssetFavorite` volají renderFolders() po změně.
-**Alternativa:** Full re-render celé gallery — zamítnuto (výkon). DOM removal bez re-renderu byl složitý.
-**Pattern:** Toggle → DB patch → renderFolders → pokud aktivní složka = Favorites a unlike, karta zmizí.
+**Důvod existence:** CORS blokuje přímé volání z `file://` pro: xAI, Luma, Freepik/Magnific, Topaz, Replicate.
 
-### build.js výstup — gis_vXXen.html (v180)
-**Kontext:** Původní jméno `google-image-studio_vXXen.html` bylo zbytečně dlouhé a obsahovalo "google".
-**Rozhodnutí:** Přejmenovat na `gis_vXXen.html` — zkráceno, consistent se zkratkou projektu.
+**Verze:** 2026-08 (5. 4. 2026)
 
-### Copyright 2026 (v180)
-Tři výskyty `© 2025` → `© 2026` + `GIS_COPYRIGHT` konstanta. Žádný funkční dopad.
+**Nové routes v 2026-08:**
+- `POST /magnific/mystic` — Mystic generation
+- `POST /magnific/skin-enhancer` — Skin Enhancer
+- `POST /magnific/relight` — Relight
+- `POST /magnific/style-transfer` — Style Transfer
+- `POST /magnific/video-upscale` — Video Upscaler (Creative + Precision)
 
----
+**Status handler** rozšířen na 9 typů: creative, precision-v1, precision-v2, mystic, skin_enhancer, relight, style_transfer, video_upscale, video_upscale_prec.
 
-## v181en — Magnific Precision + Select fix (5. 4. 2026)
-
-### Magnific Precision — dvě oddělená API (V1 + V2)
-**Kontext:** Freepik/Magnific má tři různé upscale endpointy: Creative, Precision V1, Precision V2.
-**Rozhodnutí:** Jeden GIS toggle "Creative / Precision". Precision panel pokrývá V1 i V2 — výběr přes "Version" radio.
-**V1 vs V2:** V2 přidává `flavor` (sublime/photo/photo_denoiser) a `scale_factor`. V1 = "high HDR" algoritmus bez flavoru.
-**Alternativa:** Tři separátní radio pro všechny tři endpointy — zamítnuto (UI příliš složité).
-
-### Magnific status — sdílený endpoint s upscaler_type routing (v181)
-**Kontext:** Tři endpointy mají tři různé poll URLs. Tři separátní status routy by zduplikovaly kód.
-**Rozhodnutí:** Jeden `/magnific/status` přijme `upscaler_type` v těle a interně routuje na správnou URL.
-**Backward compatibility:** `upscaler_type` je optional — bez něj (nebo `'creative'`) → původní chování.
-
-### Optimized for — select → radio buttons (v181)
-**Problém:** `<select>` v dark mode UI — text optionů světlý na světlém systémovém pozadí. Zcela nečitelné.
-**Rozhodnutí:** Nahradit custom radio label buttons (stejný vzor jako Engine / Scale Factor).
-**Proč ne CSS fix:** `<option>` elementy v nativním dropdown jsou renderované OS, CSS color je ignorováno ve většině prohlížečů.
