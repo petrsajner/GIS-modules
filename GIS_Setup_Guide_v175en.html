@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generative Image Studio — Setup Guide</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    color: #1a1a2e;
+    background: #f7f8fc;
+    padding: 40px 20px 80px;
+  }
+
+  .page { max-width: 860px; margin: 0 auto; }
+
+  /* ── Cover ── */
+  .cover {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+    border-radius: 16px;
+    padding: 48px 48px 44px;
+    margin-bottom: 40px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::after {
+    content: '◈';
+    position: absolute;
+    right: 48px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 120px;
+    opacity: .06;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .cover h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .cover .byline { font-size: 13px; color: #d4a017; letter-spacing: .05em; margin-bottom: 18px; font-weight: 500; }
+  .cover .sub { font-size: 14px; color: #a0aec0; margin-bottom: 20px; }
+  .cover .intro { font-size: 14px; color: #cbd5e0; max-width: 600px; line-height: 1.7; }
+
+  /* ── Section titles ── */
+  h2 {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: #718096;
+    margin: 44px 0 16px; padding-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  /* ── Provider cards ── */
+  .provider {
+    background: #fff; border-radius: 12px;
+    border: 1px solid #e2e8f0; margin-bottom: 32px;
+    overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.05);
+  }
+  .provider-header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 22px 28px 18px; border-bottom: 1px solid #f0f2f5;
+  }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    letter-spacing: .5px; padding: 3px 10px;
+    border-radius: 20px; white-space: nowrap;
+  }
+  .badge-free   { background: #c6f6d5; color: #22543d; }
+  .badge-paid   { background: #fed7d7; color: #822727; }
+  .badge-opt    { background: #fefcbf; color: #744210; }
+
+  .provider-header h3 { font-size: 19px; font-weight: 700; color: #1a202c; flex: 1; }
+  .provider-header .price-note { font-size: 12px; color: #718096; }
+  .provider-body { padding: 22px 28px 26px; }
+
+  /* ── Model tags ── */
+  .model-list { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+  .model-tag {
+    font-size: 12px; font-weight: 600; padding: 4px 11px;
+    border-radius: 6px; border: 1px solid #e2e8f0;
+    background: #f7fafc; color: #2d3748;
+  }
+  .model-tag.video  { border-color: #bee3f8; background: #ebf8ff; color: #2c5282; }
+  .model-tag.upscale{ border-color: #e9d8fd; background: #faf5ff; color: #553c9a; }
+  .model-tag.tool   { border-color: #fbd38d; background: #fffbeb; color: #744210; }
+
+  .model-section-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: #a0aec0;
+    margin-bottom: 8px; margin-top: 18px;
+  }
+  .model-section-label:first-child { margin-top: 0; }
+
+  /* ── Steps ── */
+  .steps { counter-reset: step; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+  .steps li { display: flex; gap: 14px; align-items: flex-start; }
+  .steps li::before {
+    counter-increment: step; content: counter(step);
+    display: flex; align-items: center; justify-content: center;
+    min-width: 26px; height: 26px; border-radius: 50%;
+    background: #1a1a2e; color: #fff;
+    font-size: 12px; font-weight: 700; margin-top: 1px;
+  }
+  .steps li .text { flex: 1; font-size: 14px; color: #2d3748; line-height: 1.6; }
+
+  .url-box {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #edf2f7; border: 1px solid #e2e8f0;
+    border-radius: 7px; padding: 7px 14px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 13px; color: #1a202c;
+    margin: 4px 0 2px; word-break: break-all;
+  }
+  .url-box a { color: #3182ce; text-decoration: none; }
+  .url-box a:hover { text-decoration: underline; }
+
+  /* ── How to enter ── */
+  .how-to-enter {
+    background: #f0fff4; border: 1px solid #c6f6d5;
+    border-radius: 10px; padding: 18px 22px; margin-top: 18px;
+  }
+  .how-to-enter .ht-title {
+    font-size: 12px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: #276749; margin-bottom: 10px;
+  }
+  .how-to-enter ol { list-style: none; counter-reset: ht; display: flex; flex-direction: column; gap: 8px; }
+  .how-to-enter ol li { display: flex; gap: 10px; font-size: 13.5px; color: #22543d; }
+  .how-to-enter ol li::before {
+    counter-increment: ht; content: counter(ht);
+    min-width: 20px; height: 20px; border-radius: 50%;
+    background: #276749; color: #fff;
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+
+  /* ── Summary table ── */
+  .summary-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13.5px; }
+  .summary-table th {
+    text-align: left; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; color: #718096;
+    padding: 8px 14px; background: #f7fafc; border-bottom: 2px solid #e2e8f0;
+  }
+  .summary-table td { padding: 10px 14px; border-bottom: 1px solid #f0f2f5; vertical-align: top; }
+  .summary-table tr:last-child td { border-bottom: none; }
+  .summary-table tr:hover td { background: #f7fafc; }
+
+  .dot-req { color: #e53e3e; font-weight: 700; }
+  .dot-opt { color: #d69e2e; font-weight: 700; }
+
+  /* ── Note / warning boxes ── */
+  .note {
+    background: #fffbeb; border: 1px solid #f6e05e;
+    border-radius: 8px; padding: 13px 18px;
+    font-size: 13px; color: #744210; margin-top: 10px;
+  }
+  .note strong { color: #5f370e; }
+
+  .info-box {
+    background: #ebf8ff; border: 1px solid #bee3f8;
+    border-radius: 8px; padding: 13px 18px;
+    font-size: 13px; color: #2c5282; margin-top: 10px;
+  }
+
+  kbd {
+    display: inline-block; background: #e2e8f0;
+    border: 1px solid #cbd5e0; border-radius: 4px;
+    padding: 1px 7px; font-size: 12px;
+    font-family: inherit; color: #2d3748; font-weight: 600;
+  }
+
+  .separator { height: 1px; background: #e2e8f0; margin: 8px 0 4px; }
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    .provider { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Cover -->
+  <div class="cover">
+    <h1>Generative Image Studio</h1>
+    <div class="byline">© 2026 Petr Sajner · info.genimagestudio@gmail.com</div>
+    <div class="sub">API Setup Guide · v175</div>
+    <div class="intro">
+      This guide shows you how to get each API key and where to enter it.
+      You only need the APIs for the models you want to use — start with Google (free) and add others as needed.
+    </div>
+  </div>
+
+  <!-- Quick overview table -->
+  <h2>At a Glance — Which API unlocks which models</h2>
+
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>API / Provider</th>
+        <th>Models &amp; features unlocked</th>
+        <th>Cost</th>
+        <th>Required?</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Google AI</strong></td>
+        <td>
+          NB2 · NB Pro · Imagen 4 · Imagen 4 Fast · Imagen 4 Ultra · Veo 3.1 · Veo 3.1 Fast<br>
+          <span style="font-size:12px;color:#718096;">Also: AI Prompt Tool · Describe Image · Annotate</span>
+        </td>
+        <td>Free tier available</td>
+        <td><span class="dot-req">● Required</span></td>
+      </tr>
+      <tr>
+        <td><strong>fal.ai</strong></td>
+        <td>
+          FLUX.2 Pro/Flex/Max/Dev · SeeDream 4.5/5.0 Lite · Kling Image V3/O3<br>
+          Qwen Image 2 · Pro · Edit · Pro Edit · Z-Image Base/Turbo<br>
+          <span style="font-size:12px;color:#2c5282;">▶ All Kling Video (18 models) · Seedance 1.5 Pro · Vidu Q3 · Wan 2.7 I2V · Wan 2.6</span><br>
+          <span style="font-size:12px;color:#553c9a;">▲ Upscale: Recraft Crisp · SeedVR2 · Clarity 2×/4×</span>
+        </td>
+        <td>Pay per use<br><span style="font-size:12px;color:#718096;">~$0.003–$0.10/image<br>~$0.25–$2.00/video</span></td>
+        <td><span class="dot-opt">● Optional</span></td>
+      </tr>
+      <tr>
+      <tr>
+        <td><strong>Replicate</strong></td>
+        <td>WAN 2.7 · WAN 2.7 Pro · WAN 2.7 Edit · WAN 2.7 Pro Edit<br><span style="font-size:12px;color:#718096;">Requires Proxy URL in Setup</span></td>
+        <td>Pay per use<br><span style="font-size:12px;color:#718096;">~$0.03/image</span></td>
+        <td><span class="dot-opt">● Optional</span></td>
+      </tr>
+      <tr>
+        <td><strong>xAI</strong></td>
+        <td>Grok Imagine</td>
+        <td>Pay per use</td>
+        <td><span class="dot-opt">● Optional</span></td>
+      </tr>
+      <tr>
+        <td><strong>Luma AI</strong></td>
+        <td>Photon · Photon Flash<br><span style="font-size:12px;color:#2c5282;">▶ Ray2 · Ray2 Flash · Ray3 · Ray3 HDR · Ray3.14 · Ray3.14 HDR</span></td>
+        <td>Pay per use</td>
+        <td><span class="dot-opt">● Optional</span></td>
+      </tr>
+      <tr>
+        <td><strong>Freepik</strong></td>
+        <td>Magnific Upscale 2× · 4× · 8× · 16×</td>
+        <td>~€0.10–0.50/image</td>
+        <td><span class="dot-opt">● Optional</span></td>
+      </tr>
+      <tr>
+        <td><strong>Topaz Labs</strong></td>
+        <td>
+          <span style="font-size:12px;color:#553c9a;">▲ Image: Gigapixel · Bloom · Wonder2</span><br>
+          <span style="font-size:12px;color:#2c5282;">▶ Video: Precise 2.5 · Precise 2 · Astra 1</span>
+        </td>
+        <td>Credits-based<br><span style="font-size:12px;color:#718096;">1 credit ≈ $0.005–$0.02</span></td>
+        <td><span class="dot-opt">● Optional</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note" style="margin-top:16px;">
+    <strong>Tip:</strong> Start with just the <strong>Google AI key</strong> — you get NB2, NB Pro, Imagen 4, Veo video and all AI tools for free.
+    Add fal.ai when you want FLUX, SeeDream, Kling or video generation.
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 1. GOOGLE -->
+  <!-- ══════════════════════════════════ -->
+  <h2>API Setup Instructions</h2>
+
+  <div class="provider">
+    <div class="provider-header">
+      <h3>1 · Google AI</h3>
+      <span class="badge badge-free">Free tier</span>
+      <span class="price-note">Required for core features</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Image generation</div>
+      <div class="model-list">
+        <span class="model-tag">NB2</span>
+        <span class="model-tag">NB Pro</span>
+        <span class="model-tag">Imagen 4</span>
+        <span class="model-tag">Imagen 4 Fast</span>
+        <span class="model-tag">Imagen 4 Ultra</span>
+      </div>
+
+      <div class="model-section-label">Video generation</div>
+      <div class="model-list">
+        <span class="model-tag video">Veo 3.1</span>
+        <span class="model-tag video">Veo 3.1 Fast</span>
+      </div>
+
+      <div class="model-section-label">AI tools (also use this key)</div>
+      <div class="model-list">
+        <span class="model-tag tool">✦ AI Prompt Tool</span>
+        <span class="model-tag tool">✦ Describe Image</span>
+        <span class="model-tag tool">✦ Annotate</span>
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Open your browser and go to:<br>
+            <span class="url-box"><a href="https://aistudio.google.com/apikey" target="_blank">https://aistudio.google.com/apikey</a></span>
+          </div>
+        </li>
+        <li><div class="text">Sign in with your Google account if asked.</div></li>
+        <li><div class="text">Click the blue button <strong>"Create API key"</strong>.</div></li>
+        <li>
+          <div class="text">
+            A long string of letters and numbers appears — that is your key.
+            Click the <strong>copy icon</strong> next to it (or select all and press <kbd>Ctrl</kbd>+<kbd>C</kbd>).
+          </div>
+        </li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Open GIS in Chrome.</li>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"Google API Key"</strong>.</li>
+          <li>Click inside it and paste your key (<kbd>Ctrl</kbd>+<kbd>V</kbd>).</li>
+          <li>The dot next to the field turns <strong>green</strong> — you're done.</li>
+        </ol>
+      </div>
+
+      <div class="info-box" style="margin-top:14px;">
+        The same key also appears in the top-right header bar for quick access during generation.
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 2. FAL.AI -->
+  <!-- ══════════════════════════════════ -->
+  <div class="provider">
+    <div class="provider-header">
+      <h3>2 · fal.ai</h3>
+      <span class="badge badge-paid">Pay per use</span>
+      <span class="price-note">Unlocks FLUX · SeeDream · Kling · Qwen · WAN · video</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Image generation</div>
+      <div class="model-list">
+        <span class="model-tag">FLUX.2 Pro</span>
+        <span class="model-tag">FLUX.2 Flex</span>
+        <span class="model-tag">FLUX.2 Max</span>
+        <span class="model-tag">FLUX.2 Dev</span>
+        <span class="model-tag">SeeDream 4.5</span>
+        <span class="model-tag">SeeDream 5.0 Lite</span>
+        <span class="model-tag">Kling Image V3</span>
+        <span class="model-tag">Kling Image O3</span>
+        <span class="model-tag">Z-Image Base</span>
+        <span class="model-tag">Z-Image Turbo</span>
+        <span class="model-tag">Qwen Image 2</span>
+        <span class="model-tag">Qwen Image 2 Pro</span>
+        <span class="model-tag">Qwen Image 2 Edit</span>
+        <span class="model-tag">Qwen Image 2 Pro Edit</span>
+      </div>
+
+      <div class="model-section-label">Video generation</div>
+      <div class="model-list">
+        <span class="model-tag video">Kling V3 Standard T2V</span>
+        <span class="model-tag video">Kling V3 Pro T2V</span>
+        <span class="model-tag video">Kling V3 Standard I2V</span>
+        <span class="model-tag video">Kling V3 Pro I2V</span>
+        <span class="model-tag video">Kling O3 Standard T2V</span>
+        <span class="model-tag video">Kling O3 Pro T2V</span>
+        <span class="model-tag video">Kling O3 Standard I2V</span>
+        <span class="model-tag video">Kling O3 Pro I2V</span>
+        <span class="model-tag video">Kling O1 Dual Keyframe</span>
+        <span class="model-tag video">Kling 2.6 Pro I2V</span>
+        <span class="model-tag video">Kling 2.1 Master T2V</span>
+        <span class="model-tag video">Kling 2.1 Master I2V</span>
+        <span class="model-tag video">Kling 2.1 Standard T2V</span>
+        <span class="model-tag video">Kling 2.1 Standard I2V</span>
+        <span class="model-tag video">Kling 1.6 T2V</span>
+        <span class="model-tag video">Kling 1.6 I2V</span>
+        <span class="model-tag video">Kling V3 Std · Motion Control</span>
+        <span class="model-tag video">Kling V3 Pro · Motion Control</span>
+        <span class="model-tag video">Kling 2.6 Pro · Motion Control</span>
+        <span class="model-tag video">Seedance 1.5 Pro T2V</span>
+        <span class="model-tag video">Seedance 1.5 Pro I2V</span>
+        <span class="model-tag video">Vidu Q3 T2V</span>
+        <span class="model-tag video">Vidu Q3 I2V</span>
+        <span class="model-tag video">Vidu Q3 Dual Keyframe</span>
+        <span class="model-tag video">Wan 2.7 I2V</span>
+        <span class="model-tag video">Wan 2.6 T2V · I2V · R2V Flash</span>
+      </div>
+
+      <div class="model-section-label">Upscale</div>
+      <div class="model-list">
+        <span class="model-tag upscale">Recraft Crisp</span>
+        <span class="model-tag upscale">SeedVR2</span>
+        <span class="model-tag upscale">Clarity 2×</span>
+        <span class="model-tag upscale">Clarity 4×</span>
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Go to:<br>
+            <span class="url-box"><a href="https://fal.ai/dashboard/keys" target="_blank">https://fal.ai/dashboard/keys</a></span>
+          </div>
+        </li>
+        <li><div class="text">Create a free account or sign in (Google sign-in available).</div></li>
+        <li>
+          <div class="text">
+            Add a payment method first — fal.ai requires it before generating keys.<br>
+            Click <strong>Billing</strong> in the left sidebar → <strong>"Add payment method"</strong>. You are only charged for what you use.
+          </div>
+        </li>
+        <li>
+          <div class="text">
+            Go back to <strong>Keys</strong> in the sidebar. Click <strong>"Add key"</strong>, give it any name (e.g. "GIS"), then click <strong>"Create"</strong>.
+          </div>
+        </li>
+        <li>
+          <div class="text">
+            Your key appears once — copy it immediately (<kbd>Ctrl</kbd>+<kbd>C</kbd>). It won't be shown again.
+          </div>
+        </li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"fal.ai API Key"</strong>.</li>
+          <li>Click inside it and paste your key (<kbd>Ctrl</kbd>+<kbd>V</kbd>).</li>
+          <li>The dot next to the field turns <strong>green</strong> — you're done.</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 3. REPLICATE -->
+  <!-- ══════════════════════════════════ -->
+  <div class="provider">
+    <div class="provider-header">
+      <h3>3 · Replicate — WAN 2.7 Image</h3>
+      <span class="badge badge-opt">Optional</span>
+      <span class="price-note">~$0.03/image · requires Proxy</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Image generation &amp; editing</div>
+      <div class="model-list">
+        <span class="model-tag">WAN 2.7</span>
+        <span class="model-tag">WAN 2.7 Pro</span>
+        <span class="model-tag">WAN 2.7 Edit</span>
+        <span class="model-tag">WAN 2.7 Pro Edit</span>
+      </div>
+      <div class="note" style="margin-top:0;">
+        <strong>Requires Proxy:</strong> WAN 2.7 image models run via the GIS proxy worker due to Replicate CORS restrictions.
+        The Proxy URL must be configured in Setup before these models become available.
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Go to:<br>
+            <span class="url-box"><a href="https://replicate.com/account/api-tokens" target="_blank">https://replicate.com/account/api-tokens</a></span>
+          </div>
+        </li>
+        <li><div class="text">Create a free Replicate account or sign in.</div></li>
+        <li>
+          <div class="text">
+            Add a payment method first — Replicate requires it before using paid models.<br>
+            Go to <strong>Billing</strong> in the sidebar and add a payment method.
+          </div>
+        </li>
+        <li><div class="text">Click <strong>"Create token"</strong>, give it a name, and copy the key. It starts with <code>r8_</code>.</div></li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"Replicate API Key"</strong>.</li>
+          <li>Paste your key and the dot turns green.</li>
+          <li>Also ensure the <strong>Proxy URL</strong> field is set.</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 4. xAI -->
+  <!-- ══════════════════════════════════ -->
+  <div class="provider">
+    <div class="provider-header">
+      <h3>4 · xAI — Grok Imagine</h3>
+      <span class="badge badge-opt">Optional</span>
+      <span class="price-note">Pay per use</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Image generation</div>
+      <div class="model-list">
+        <span class="model-tag">Grok Imagine</span>
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Go to:<br>
+            <span class="url-box"><a href="https://console.x.ai" target="_blank">https://console.x.ai</a></span>
+          </div>
+        </li>
+        <li><div class="text">Sign in with your X (Twitter) account or create a new xAI account.</div></li>
+        <li><div class="text">Click <strong>"API Keys"</strong> in the left sidebar, then <strong>"Create API Key"</strong>.</div></li>
+        <li><div class="text">Name it anything, then click <strong>"Create"</strong>. Copy the key that appears.</div></li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"xAI API Key"</strong>.</li>
+          <li>Paste your key and the dot turns green.</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 4. LUMA -->
+  <!-- ══════════════════════════════════ -->
+  <div class="provider">
+    <div class="provider-header">
+      <h3>5 · Luma AI</h3>
+      <span class="badge badge-opt">Optional</span>
+      <span class="price-note">~$0.002–$0.015/image · ~$0.50–$2.00/video</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Image generation</div>
+      <div class="model-list">
+        <span class="model-tag">Photon</span>
+        <span class="model-tag">Photon Flash</span>
+      </div>
+
+      <div class="model-section-label">Video generation</div>
+      <div class="model-list">
+        <span class="model-tag video">Ray2</span>
+        <span class="model-tag video">Ray2 Flash</span>
+        <span class="model-tag video">Ray3</span>
+        <span class="model-tag video">Ray3 HDR</span>
+        <span class="model-tag video">Ray3.14</span>
+        <span class="model-tag video">Ray3.14 HDR</span>
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Go to:<br>
+            <span class="url-box"><a href="https://lumalabs.ai/dream-machine/api/keys" target="_blank">https://lumalabs.ai/dream-machine/api/keys</a></span>
+          </div>
+        </li>
+        <li><div class="text">Sign in or create a free Luma account.</div></li>
+        <li><div class="text">Click <strong>"New API Key"</strong>, name it, and click <strong>"Create"</strong>.</div></li>
+        <li><div class="text">Copy the key that appears.</div></li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"Luma API Key"</strong>.</li>
+          <li>Paste your key and the dot turns green.</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 5. FREEPIK / MAGNIFIC -->
+  <!-- ══════════════════════════════════ -->
+  <div class="provider">
+    <div class="provider-header">
+      <h3>6 · Freepik — Magnific Upscale</h3>
+      <span class="badge badge-opt">Optional</span>
+      <span class="price-note">~€0.10–0.50 per upscale</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Upscale</div>
+      <div class="model-list">
+        <span class="model-tag upscale">Magnific 2×</span>
+        <span class="model-tag upscale">Magnific 4×</span>
+        <span class="model-tag upscale">Magnific 8×</span>
+        <span class="model-tag upscale">Magnific 16×</span>
+      </div>
+      <div class="note" style="margin-bottom:0; margin-top:0;">
+        Highest-quality upscaling for complex textures and faces. Slower than other upscalers (1–3 min/image).
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Go to:<br>
+            <span class="url-box"><a href="https://www.freepik.com/api" target="_blank">https://www.freepik.com/api</a></span>
+          </div>
+        </li>
+        <li><div class="text">Create a free Freepik account or sign in.</div></li>
+        <li>
+          <div class="text">
+            Choose a plan that includes <strong>Magnific API access</strong> (check the Magnific tier — not all plans include it).
+          </div>
+        </li>
+        <li><div class="text">Go to <strong>API Keys</strong> in your account dashboard and copy your key.</div></li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"Freepik API Key"</strong>.</li>
+          <li>Paste your key and the dot turns green.</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════ -->
+  <!-- 6. TOPAZ LABS -->
+  <!-- ══════════════════════════════════ -->
+  <div class="provider">
+    <div class="provider-header">
+      <h3>7 · Topaz Labs</h3>
+      <span class="badge badge-opt">Optional</span>
+      <span class="price-note">Credits-based · ~1 credit = $0.005–0.02</span>
+    </div>
+    <div class="provider-body">
+
+      <div class="model-section-label">Image upscale</div>
+      <div class="model-list">
+        <span class="model-tag upscale">✦ Gigapixel</span>
+        <span class="model-tag upscale">✦ Bloom</span>
+        <span class="model-tag upscale">✦ Wonder2</span>
+      </div>
+
+      <div class="model-section-label">Video upscale</div>
+      <div class="model-list">
+        <span class="model-tag video">✦ Precise 2.5</span>
+        <span class="model-tag video">✦ Precise 2</span>
+        <span class="model-tag video">✦ Astra 1</span>
+      </div>
+
+      <div class="note" style="margin-top:8px;">
+        <strong>✦ Requires Proxy:</strong> Topaz runs via the GIS proxy worker. The Proxy URL must be configured in Setup before Topaz features become available.
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="model-section-label" style="margin-top:20px;">How to get your API key</div>
+      <ol class="steps">
+        <li>
+          <div class="text">
+            Go to:<br>
+            <span class="url-box"><a href="https://www.topazlabs.com/account" target="_blank">https://www.topazlabs.com/account</a></span>
+          </div>
+        </li>
+        <li><div class="text">Sign in or create a Topaz Labs account.</div></li>
+        <li>
+          <div class="text">
+            Navigate to <strong>API</strong> or <strong>Developer</strong> section in your account dashboard.
+            Click <strong>"Generate API Key"</strong>.
+          </div>
+        </li>
+        <li><div class="text">Copy the key that appears.</div></li>
+      </ol>
+
+      <div class="how-to-enter">
+        <div class="ht-title">→ Enter this key in Generative Image Studio</div>
+        <ol>
+          <li>Click <strong>⚙ Setup</strong> in the top menu.</li>
+          <li>Find the field labelled <strong>"Topaz API Key"</strong>.</li>
+          <li>Paste your key and the dot turns green.</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- Final note -->
+  <div class="note" style="margin-top:8px; font-size:14px; padding:18px 22px;">
+    <strong>All keys are saved automatically.</strong><br>
+    You only need to enter them once. They are stored locally in your browser and will be there every time you open the program.
+    They are never sent anywhere except directly to the API service you chose.
+    Use <strong>⚙ Setup → API Keys Backup</strong> to export all keys at once for safe transfer to another computer.
+  </div>
+
+</div>
+</body>
+</html>

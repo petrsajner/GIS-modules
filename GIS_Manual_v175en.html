@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generative Image Studio — User Manual v175</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.7; color: #1a202c; background: #f7f8fc; padding: 40px 20px 100px; }
+  .page { max-width: 860px; margin: 0 auto; }
+
+  /* Cover */
+  .cover { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 55%, #0f3460 100%); border-radius: 16px; padding: 52px 52px 46px; margin-bottom: 48px; color: #fff; position: relative; overflow: hidden; }
+  .cover::after { content: '◈'; position: absolute; right: 52px; top: 50%; transform: translateY(-50%); font-size: 140px; opacity: .05; line-height: 1; pointer-events: none; }
+  .cover h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .cover .byline { font-size: 13px; color: #d4a017; letter-spacing: .05em; margin-bottom: 4px; font-weight: 500; }
+  .cover .ver { font-size: 13px; color: #718096; margin-bottom: 18px; letter-spacing: 1px; text-transform: uppercase; }
+  .cover .tagline { font-size: 15px; color: #a0c4ff; margin-bottom: 22px; }
+  .cover .intro { font-size: 14px; color: #cbd5e0; max-width: 640px; line-height: 1.75; }
+
+  /* TOC */
+  .toc { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px 28px; margin-bottom: 48px; }
+  .toc h2 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #718096; margin-bottom: 14px; }
+  .toc ol { list-style: decimal; padding-left: 18px; columns: 2; column-gap: 40px; }
+  .toc li { margin-bottom: 5px; font-size: 13.5px; break-inside: avoid; }
+  .toc a { color: #3182ce; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* Section headers */
+  h2.sec { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #718096; margin: 52px 0 18px; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; }
+  h3 { font-size: 17px; font-weight: 700; color: #1a202c; margin: 28px 0 10px; }
+  h4 { font-size: 13.5px; font-weight: 700; color: #2d3748; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 10px 0 18px; }
+  th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #718096; padding: 7px 12px; background: #f7fafc; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 9px 12px; border-bottom: 1px solid #f0f2f5; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafbfd; }
+
+  /* Cards */
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px 28px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  .card h3 { margin-top: 0; }
+
+  /* Chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+  .chip { font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 6px; border: 1px solid #e2e8f0; background: #f7fafc; color: #2d3748; }
+  .chip.video  { border-color: #bee3f8; background: #ebf8ff; color: #2c5282; }
+  .chip.upscale{ border-color: #e9d8fd; background: #faf5ff; color: #553c9a; }
+  .chip.tool   { border-color: #c6f6d5; background: #f0fff4; color: #276749; }
+
+  /* Notes */
+  .note { background: #fffbeb; border: 1px solid #f6e05e; border-radius: 8px; padding: 13px 18px; font-size: 13.5px; color: #744210; margin: 12px 0; }
+  .note strong { color: #5f370e; }
+  .tip { background: #ebf8ff; border: 1px solid #bee3f8; border-radius: 8px; padding: 13px 18px; font-size: 13.5px; color: #2c5282; margin: 12px 0; }
+  .tip strong { color: #1a365d; }
+
+  /* Steps */
+  .steps { list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+  .steps li { display: flex; gap: 13px; align-items: flex-start; }
+  .steps li::before { counter-increment: s; content: counter(s); min-width: 24px; height: 24px; border-radius: 50%; background: #1a1a2e; color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 2px; flex-shrink: 0; }
+  .steps li .t { flex: 1; font-size: 14px; color: #2d3748; line-height: 1.65; }
+
+  kbd { display: inline-block; background: #e2e8f0; border: 1px solid #cbd5e0; border-radius: 4px; padding: 1px 7px; font-size: 12px; font-family: inherit; color: #2d3748; font-weight: 600; }
+  code { background: #edf2f7; border-radius: 4px; padding: 1px 6px; font-family: 'SF Mono', Consolas, monospace; font-size: 12.5px; color: #1a202c; }
+  ul.bl { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  ul.bl li { padding-left: 16px; position: relative; font-size: 14px; color: #2d3748; }
+  ul.bl li::before { content: '·'; position: absolute; left: 0; color: #718096; font-weight: 700; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media(max-width:600px){ .two-col { grid-template-columns: 1fr; } .toc ol { columns: 1; } }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 2px 8px; border-radius: 20px; margin-left: 6px; vertical-align: middle; }
+  .badge-g  { background: #c6f6d5; color: #22543d; }
+  .badge-f  { background: #bee3f8; color: #1a365d; }
+  .badge-x  { background: #fed7d7; color: #822727; }
+  .badge-l  { background: #fefcbf; color: #744210; }
+  .badge-fp { background: #e9d8fd; color: #553c9a; }
+  .badge-tp { background: #fbd38d; color: #7b341e; }
+  .badge-r  { background: #d9f7be; color: #135200; }
+  @media print { body { background: #fff; padding: 0; } .card { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- COVER -->
+<div class="cover">
+  <h1>Generative Image Studio</h1>
+  <div class="byline">© 2026 Petr Sajner · info.genimagestudio@gmail.com</div>
+  <div class="ver">User Manual · v175 · April 2026</div>
+  <div class="tagline">AI image &amp; video generation · fully local · no installation</div>
+  <div class="intro">Open the HTML file in Chrome and start generating. Everything is saved locally in your browser. No server, no account, no cloud upload — paste your API keys and go.</div>
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#start">Quick Start</a></li>
+    <li><a href="#interface">Interface Overview</a></li>
+    <li><a href="#models">Image Models</a></li>
+    <li><a href="#video">Video Generation</a></li>
+    <li><a href="#prompt">Prompt &amp; AI Tools</a></li>
+    <li><a href="#styles">Style Library</a></li>
+    <li><a href="#refs">Reference Images</a></li>
+    <li><a href="#params">Parameters</a></li>
+    <li><a href="#results">Result Cards</a></li>
+    <li><a href="#upscale">Upscale</a></li>
+    <li><a href="#gallery">Gallery</a></li>
+    <li><a href="#assets">Assets Library</a></li>
+    <li><a href="#paint">Paint &amp; Annotate</a></li>
+    <li><a href="#setup">Setup</a></li>
+    <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+    <li><a href="#tips">Tips &amp; Workflows</a></li>
+  </ol>
+</div>
+
+
+<!-- 1. QUICK START -->
+<h2 class="sec" id="start">1 · Quick Start</h2>
+<div class="card">
+  <ol class="steps">
+    <li><div class="t">Open <code>google-image-studio_v175en.html</code> in <strong>Chrome</strong>.</div></li>
+    <li><div class="t">Click <strong>⚙ Setup</strong> in the top menu. Paste your <strong>Google AI key</strong> (required) and <strong>fal.ai key</strong> (for FLUX, Kling, video, upscale). See the separate <em>API Setup Guide</em> for where to get keys.</div></li>
+    <li><div class="t">Go back to <strong>⚡ Generate</strong>. Select a model, write a prompt, and click <strong>▶ Generate</strong> or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>.</div></li>
+    <li><div class="t">Your image appears in the center area. Hover over it for download, upscale, reuse, and other options.</div></li>
+  </ol>
+</div>
+
+
+<!-- 2. INTERFACE -->
+<h2 class="sec" id="interface">2 · Interface Overview</h2>
+
+<table>
+  <thead><tr><th>Tab</th><th>What's there</th></tr></thead>
+  <tbody>
+    <tr><td><strong>⚡ Generate</strong></td><td>Main panel — model, prompt, styles, references, parameters, generate button</td></tr>
+    <tr><td><strong>🎬 Video</strong></td><td>Video generation — model selector, video-specific controls, video queue and gallery</td></tr>
+    <tr><td><strong>◫ Gallery</strong></td><td>All generated images — search, filter, folders, batch actions</td></tr>
+    <tr><td><strong>📎 Assets</strong></td><td>Reference image library — persistent across sessions</td></tr>
+    <tr><td><strong>✏ Paint</strong></td><td>Drawing canvas + Annotate tool</td></tr>
+    <tr><td><strong>⚙ Setup</strong></td><td>API keys, Proxy URL, backup. Copyright &amp; contact info on the right.</td></tr>
+  </tbody>
+</table>
+
+<div class="note">The <strong>Generate</strong> and <strong>Video</strong> tabs share the same left panel — a toggle at the top switches between image and video mode.</div>
+
+
+<!-- 3. IMAGE MODELS -->
+<h2 class="sec" id="models">3 · Image Models</h2>
+
+<h3>Google — NB2, NB Pro, Imagen 4 <span class="badge badge-g">Google key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Best for</th><th>References</th><th>Resolution</th></tr></thead>
+  <tbody>
+    <tr><td><strong>NB2</strong></td><td>Fast iteration, thinking mode, multi-image</td><td>Up to 14</td><td>512 / 1K / 2K / 4K</td></tr>
+    <tr><td><strong>NB Pro</strong></td><td>Highest Gemini quality, grounding</td><td>Up to 14</td><td>1K / 2K / 4K</td></tr>
+    <tr><td><strong>Imagen 4</strong></td><td>Best balance of quality and speed</td><td>—</td><td>1K / 2K</td></tr>
+    <tr><td><strong>Imagen 4 Fast</strong></td><td>Faster, lower cost</td><td>—</td><td>1K</td></tr>
+    <tr><td><strong>Imagen 4 Ultra</strong></td><td>Maximum quality, single image</td><td>—</td><td>1K</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li><strong>Thinking (NB2 only):</strong> Minimal = faster · High = better for complex scenes</li>
+  <li><strong>Grounding (NB2, NB Pro):</strong> enables Google Search before generating — useful for current events or named references</li>
+  <li><strong>Count:</strong> Generate 1–4 images in parallel — all 4 start simultaneously</li>
+</ul>
+
+<h3>FLUX.2 <span class="badge badge-f">fal.ai key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>References</th><th>Steps / Guidance</th><th>Approx. cost</th></tr></thead>
+  <tbody>
+    <tr><td><strong>FLUX.2 Pro</strong></td><td>Up to 8</td><td>—</td><td>~$0.03/MP</td></tr>
+    <tr><td><strong>FLUX.2 Flex</strong></td><td>Up to 10</td><td>✓ both</td><td>~$0.06/MP</td></tr>
+    <tr><td><strong>FLUX.2 Max</strong></td><td>Up to 8</td><td>—</td><td>~$0.07/MP</td></tr>
+    <tr><td><strong>FLUX.2 Dev</strong></td><td>Up to 6</td><td>✓ both</td><td>~$0.012/MP</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Resolution: 512 / 1K / 2K / 4MP — live label shows exact pixel dimensions</li>
+  <li>Reference images: use <code>@Name</code> in prompt to address specific refs — processed as <code>@Image1</code>, <code>@Image2</code></li>
+</ul>
+
+<h3>SeeDream <span class="badge badge-f">fal.ai key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Resolution</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td><strong>SeeDream 4.5</strong></td><td>2K / 4K</td><td>$0.04/img</td></tr>
+    <tr><td><strong>SeeDream 5.0 Lite</strong></td><td>2K / 3K</td><td>$0.04/img</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Up to 10 reference images — addressed as <code>Figure 1</code>, <code>Figure 2</code> in prompt</li>
+  <li>Enhance mode: Standard / Enhanced</li>
+</ul>
+
+<h3>Kling Image <span class="badge badge-f">fal.ai key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Resolution</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Kling Image V3</strong></td><td>1K / 2K</td><td>Stable, proven</td></tr>
+    <tr><td><strong>Kling Image O3</strong></td><td>1K / 2K / 4K</td><td>Best character consistency</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Up to 10 references — use <code>@Image1</code>, <code>@Image2</code> in prompt</li>
+  <li>Aspect ratios: 16:9 · 9:16 · 1:1 · 4:3 · 3:4 · 3:2 · 2:3 · 21:9</li>
+</ul>
+
+<h3>WAN 2.7 <span class="badge badge-r">Replicate key + Proxy</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Function</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><strong>WAN 2.7</strong></td><td>Text-to-image</td><td>Standard quality</td></tr>
+    <tr><td><strong>WAN 2.7 Pro</strong></td><td>Text-to-image</td><td>Higher quality</td></tr>
+    <tr><td><strong>WAN 2.7 Edit</strong></td><td>Image editing</td><td>Upload ref + write instruction</td></tr>
+    <tr><td><strong>WAN 2.7 Pro Edit</strong></td><td>Image editing</td><td>Higher quality edit</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Resolution: 720p / 1080p selector (pixel dimensions shown in label)</li>
+  <li>Edit models: upload a reference image, write editing instruction as prompt</li>
+  <li><strong>Requires:</strong> Replicate API key + Proxy URL configured in Setup. Runs via GIS proxy worker.</li>
+</ul>
+
+<h3>Z-Image <span class="badge badge-f">fal.ai key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Description</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Z-Image Base</strong></td><td>Full control — 28 steps, CFG guidance, negative prompt</td><td>$0.005/MP</td></tr>
+    <tr><td><strong>Z-Image Turbo</strong></td><td>Ultra-fast — 1–16 steps, image-to-image input</td><td>$0.005/MP</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Resolution: 1MP / 2MP / 4MP (capped at 2048px per side)</li>
+  <li><strong>Z-Image Turbo I2I:</strong> upload a reference — model edits it according to prompt</li>
+</ul>
+
+<h3>Qwen Image 2 <span class="badge badge-f">fal.ai key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Function</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Qwen Image 2</strong></td><td>Text-to-image — great for typography, infographics</td><td>$0.035/img</td></tr>
+    <tr><td><strong>Qwen Image 2 Pro</strong></td><td>Text-to-image — highest quality</td><td>$0.075/img</td></tr>
+    <tr><td><strong>Qwen Image 2 Edit</strong></td><td>Instruction-based editing of an uploaded image</td><td>$0.035/img</td></tr>
+    <tr><td><strong>Qwen Image 2 Pro Edit</strong></td><td>Instruction-based editing — highest quality</td><td>$0.075/img</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Edit models: upload image as reference, write instruction as prompt</li>
+  <li>Example: "Remove the person on the left" · "Change background to sunset" · "Add text SALE in red"</li>
+</ul>
+
+<h3>Grok Imagine <span class="badge badge-x">xAI key</span></h3>
+<ul class="bl">
+  <li>Resolution: 1K or 2K · Aspect ratio from the global selector · Up to 4 images per generation</li>
+  <li>I2I mode: add a reference image — model modifies it according to prompt</li>
+</ul>
+
+<h3>Luma Photon <span class="badge badge-l">Luma key</span></h3>
+<table>
+  <thead><tr><th>Model</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Photon Flash</strong></td><td>$0.002/img — fastest</td></tr>
+    <tr><td><strong>Photon</strong></td><td>$0.015/img — highest quality</td></tr>
+  </tbody>
+</table>
+<p style="margin:8px 0 4px;font-size:14px;color:#2d3748;">Up to 14 references. Tag your reference images in the label field to control how they're used:</p>
+<table>
+  <thead><tr><th>Label tag</th><th>Effect</th><th>Max</th></tr></thead>
+  <tbody>
+    <tr><td><em>(no tag)</em></td><td>Composition reference</td><td>4 images</td></tr>
+    <tr><td><code>[style]</code></td><td>Transfer visual style</td><td>unlimited</td></tr>
+    <tr><td><code>[character]</code></td><td>Consistent person/character identity</td><td>4 images of same person</td></tr>
+    <tr><td><code>[modify]</code> or <code>[edit]</code></td><td>Image-to-image edit</td><td>1 image</td></tr>
+  </tbody>
+</table>
+
+
+<!-- 4. VIDEO -->
+<h2 class="sec" id="video">4 · Video Generation</h2>
+
+<div class="note">Switch to Video mode using the toggle at the top of the left panel. Most models require a <strong>fal.ai key</strong>; Veo requires a <strong>Google key</strong>; Luma Ray requires a <strong>Luma key</strong>.</div>
+
+<h3>Kling models <span class="badge badge-f">fal.ai key</span></h3>
+<div class="two-col" style="margin:12px 0;">
+  <div class="card" style="margin:0;"><h4>Kling V3 · T2V &amp; I2V</h4><ul class="bl"><li>Duration: 3–15 seconds (slider)</li><li>Native audio generation</li><li>I2V: start frame + optional end frame</li><li>Pro = 1080p · Standard = 720p</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Kling O3 · T2V &amp; I2V</h4><ul class="bl"><li>Duration: 3–15 seconds (slider)</li><li>Native audio + voice clone</li><li>I2V: up to 7 element refs (<code>@Element1</code>…)</li><li>Pro = 1080p · Standard = 720p</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Kling O1 · Dual Keyframe</h4><ul class="bl"><li>Duration: 5s or 10s</li><li>Interpolates between start + end frame</li><li>Both frames required</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Kling 2.6 Pro · I2V &amp; Motion Control</h4><ul class="bl"><li>Duration: 5s or 10s</li><li>Native audio · economy pricing</li><li>Motion Control: upload reference video for movement</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Kling 2.1 Master · T2V &amp; I2V</h4><ul class="bl"><li>Duration: 5s or 10s</li><li>Native audio</li><li>Highest quality in the 2.1 line</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Kling 2.1 Standard · T2V &amp; I2V</h4><ul class="bl"><li>Duration: 5s or 10s</li><li>Native audio · best value</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Kling 1.6 · T2V &amp; I2V</h4><ul class="bl"><li>Duration: 5s or 10s</li><li>Economy option</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Motion Control · V3 &amp; 2.6</h4><ul class="bl"><li>Upload a reference video for motion</li><li>Optional: character image reference</li><li>Character's movements follow the reference video</li></ul></div>
+</div>
+
+<h3>Veo 3.1 <span class="badge badge-g">Google key</span></h3>
+<div class="two-col" style="margin:12px 0;">
+  <div class="card" style="margin:0;"><h4>Veo 3.1 · ~$0.40/s</h4><ul class="bl"><li>Google DeepMind highest quality</li><li>Resolution: 720p / 1080p</li><li>Duration: 5–8 seconds</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Veo 3.1 Fast · ~$0.15/s</h4><ul class="bl"><li>Faster, more economical</li><li>Resolution: 720p / 1080p</li><li>Duration: 5–8 seconds</li></ul></div>
+</div>
+<p style="margin:0 0 8px;font-size:14px;color:#2d3748;"><strong>Veo mode selector:</strong></p>
+<table>
+  <thead><tr><th>Mode</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>T2V</strong></td><td>Text-to-video — prompt only</td></tr>
+    <tr><td><strong>I2V</strong></td><td>Image-to-video — single start frame</td></tr>
+    <tr><td><strong>Frames</strong></td><td>Start frame + end frame interpolation</td></tr>
+    <tr><td><strong>Ingredients</strong></td><td>Up to 3 reference images as visual ingredients</td></tr>
+  </tbody>
+</table>
+
+<h3>Luma Ray <span class="badge badge-l">Luma key</span></h3>
+<div class="two-col" style="margin:12px 0;">
+  <div class="card" style="margin:0;"><h4>Ray2 &amp; Ray2 Flash</h4><ul class="bl"><li>T2V + I2V (start + end keyframes)</li><li>Flash = faster, lower cost</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Ray3 &amp; Ray3 HDR</h4><ul class="bl"><li>T2V + I2V + character ref support</li><li>HDR = extended dynamic range</li><li>Loop mode available</li></ul></div>
+  <div class="card" style="margin:0;"><h4>Ray3.14 &amp; Ray3.14 HDR</h4><ul class="bl"><li>Latest Luma model · highest quality</li><li>T2V + I2V + character ref</li><li>HDR + loop mode available</li></ul></div>
+</div>
+
+<h3>Seedance 1.5 Pro <span class="badge badge-f">fal.ai key</span></h3>
+<ul class="bl">
+  <li>ByteDance model — strong motion quality and realism</li>
+  <li><strong>T2V</strong> — text-to-video · <strong>I2V</strong> — start + optional end frame</li>
+  <li>Resolution: 720p (fixed) · Duration: 5s · ~$0.26/5s</li>
+</ul>
+
+<h3>Vidu Q3 <span class="badge badge-f">fal.ai key</span></h3>
+<ul class="bl">
+  <li>Strong character consistency, good for creative scenes</li>
+  <li><strong>T2V</strong> · <strong>I2V</strong> (single start frame) · <strong>Start + End frame</strong> interpolation</li>
+  <li>Resolution: 720p (fixed) · Duration: 4s or 8s · ~$0.154/s</li>
+</ul>
+
+<h3>Wan 2.7 I2V <span class="badge badge-f">fal.ai key</span></h3>
+<ul class="bl">
+  <li>Image-to-video — single start frame reference</li>
+  <li>Resolution: 720p / 1080p · Duration: 5s</li>
+</ul>
+
+<h3>Wan 2.6 <span class="badge badge-f">fal.ai key</span></h3>
+<div class="two-col" style="margin:12px 0;">
+  <div class="card" style="margin:0;"><h4>T2V Multi-shot</h4><ul class="bl"><li>Multi-shot cinematic generation</li><li>Audio: always on</li></ul></div>
+  <div class="card" style="margin:0;"><h4>T2V Single shot</h4><ul class="bl"><li>Single continuous shot</li><li>Audio: always on</li></ul></div>
+  <div class="card" style="margin:0;"><h4>I2V</h4><ul class="bl"><li>Image-to-video with start frame</li><li>Audio: always on</li></ul></div>
+  <div class="card" style="margin:0;"><h4>R2V Flash</h4><ul class="bl"><li>Up to 5 character images + optional video refs</li><li>Characters: <code>Character1</code>, <code>Character2</code></li><li>Audio toggle: works</li></ul></div>
+</div>
+<ul class="bl">
+  <li>Resolution: 720p / 1080p · Duration: 5s, 10s, or 15s depending on variant</li>
+</ul>
+
+<h3>Video controls</h3>
+<table>
+  <thead><tr><th>Control</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Model selector</strong></td><td>Grouped by provider — Kling, Veo, Luma, Seedance, Vidu, Wan. Description appears below.</td></tr>
+    <tr><td><strong>Duration</strong></td><td>Slider (3–15s for V3/O3) or radio buttons depending on model</td></tr>
+    <tr><td><strong>Resolution</strong></td><td>720p / 1080p for Veo and Wan models</td></tr>
+    <tr><td><strong>Aspect ratio</strong></td><td>16:9 · 9:16 · 1:1 (T2V only — I2V infers from start image)</td></tr>
+    <tr><td><strong>🔊 Audio toggle</strong></td><td>Large button — yellow = ON · grey = OFF. Hidden where audio cannot be controlled.</td></tr>
+    <tr><td><strong>CFG scale</strong></td><td>How strictly the model follows the prompt (Kling models, default 0.5)</td></tr>
+    <tr><td><strong>Count</strong></td><td>Generate 1, 2, or 4 videos simultaneously</td></tr>
+    <tr><td><strong>Ref panel</strong></td><td>Appears for I2V models — upload start/end frames from file or Assets</td></tr>
+  </tbody>
+</table>
+
+<h3>Special ref modes by model</h3>
+<table>
+  <thead><tr><th>Model</th><th>Ref panel behaviour</th></tr></thead>
+  <tbody>
+    <tr><td>Kling O3 I2V</td><td>Up to 7 element refs — address as <code>@Element1</code>, <code>@Element2</code> in prompt</td></tr>
+    <tr><td>Kling O1 Keyframe</td><td>Start frame + end frame (both required)</td></tr>
+    <tr><td>Veo 3.1 I2V</td><td>Single start frame</td></tr>
+    <tr><td>Veo 3.1 Frames</td><td>Start frame + end frame</td></tr>
+    <tr><td>Veo 3.1 Ingredients</td><td>Up to 3 reference images as visual ingredients</td></tr>
+    <tr><td>Luma Ray I2V</td><td>Start frame + optional end keyframe</td></tr>
+    <tr><td>Luma Ray3 character ref</td><td>Character consistency via dedicated char ref slot</td></tr>
+    <tr><td>Seedance 1.5 I2V</td><td>Start frame + optional end frame</td></tr>
+    <tr><td>Vidu Q3 I2V</td><td>Single start frame or start + end frame</td></tr>
+    <tr><td>Wan 2.7 I2V</td><td>Single start frame</td></tr>
+    <tr><td>Wan 2.6 R2V Flash</td><td>Up to 5 character images + optional video refs</td></tr>
+  </tbody>
+</table>
+
+<h3>Video queue &amp; gallery</h3>
+<ul class="bl">
+  <li>Videos generate in the background — queue is visible on the right while you work</li>
+  <li>Completed videos appear as cards with thumbnail, playback, and download options</li>
+  <li>The video gallery (below output area) stores all videos with folders and search</li>
+  <li><strong>↺ Reuse</strong> on any video card — reloads model, prompt, duration, and all reference images</li>
+  <li><strong>✦ Describe</strong> on any video ref — Gemini generates a prompt from the reference image</li>
+</ul>
+
+
+<!-- 5. PROMPT & AI TOOLS -->
+<h2 class="sec" id="prompt">5 · Prompt &amp; AI Tools</h2>
+
+<h3>Writing prompts</h3>
+<ul class="bl">
+  <li>Write what you want to generate. Character counter shows length.</li>
+  <li>You can generate with an empty prompt if styles are selected — the style becomes the instruction.</li>
+  <li>Use <code>@Name</code> to reference a specific asset or reference image inline.</li>
+</ul>
+
+<h3>@mention — reference images in the prompt</h3>
+<p style="margin:8px 0 10px;font-size:14px;color:#2d3748;">Type <code>@</code> followed by a name — a dropdown shows active reference images. Select one to insert it.</p>
+<table>
+  <thead><tr><th>Model</th><th>How @Name is processed</th></tr></thead>
+  <tbody>
+    <tr><td>FLUX.2, Kling Image</td><td><code>@Name</code> → <code>@Image1</code>, <code>@Image2</code></td></tr>
+    <tr><td>SeeDream</td><td><code>@Name</code> → <code>Figure 1</code>, <code>Figure 2</code></td></tr>
+    <tr><td>Gemini (NB2/Pro)</td><td>Adds a text context prefix before the prompt</td></tr>
+    <tr><td>Qwen2, others</td><td>Passed through unchanged</td></tr>
+  </tbody>
+</table>
+
+<h3>✦ AI Prompt Tool</h3>
+<p style="margin:8px 0 12px;font-size:14px;color:#2d3748;">Button next to the prompt field. Opens an 820px panel — badge shows <strong>[IMAGE]</strong> or <strong>[VIDEO]</strong> depending on current mode. Five tabs:</p>
+
+<table>
+  <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><strong>✦ Enhance</strong></td><td>Gemini expands a rough idea into a detailed cinematic prompt</td></tr>
+    <tr><td><strong>◈ Variants</strong></td><td>Generates 2–6 alternative versions — displayed as clickable gold-bordered cards. Click any card to send it to the result field.</td></tr>
+    <tr><td><strong>⇄ Translate</strong></td><td>Translates any language to English without changing style or content</td></tr>
+    <tr><td><strong>🎲 Random</strong></td><td>Select genre chips (or none = anything) and generate a surprising photographic/cinematic prompt</td></tr>
+    <tr><td><strong>💬 Chat</strong></td><td>Multi-turn conversation for iterative prompt development</td></tr>
+  </tbody>
+</table>
+
+<h4>Input / Output layout (all tabs except Random and Chat)</h4>
+<ul class="bl">
+  <li><strong>Green field (top)</strong> — Input prompt. Pre-filled from the current buffer when opening or switching tabs.</li>
+  <li><strong>"↓ Use as result"</strong> button (top right) — copies input directly to the result field without running AI. Use this if no variant satisfies you.</li>
+  <li><strong>Red field (bottom)</strong> — Result. Empty on open, populated after running. Editable.</li>
+  <li>Switching tabs clears the result field — you always see the result of the current tab only.</li>
+  <li><strong>↗ Use as Prompt</strong> (footer) — writes the current result to the main prompt field and closes the panel.</li>
+</ul>
+
+<h4>Chat tab details</h4>
+<ul class="bl">
+  <li>On open: a grey <em>"Working with prompt:"</em> context bubble shows the current prompt at the top. The input field is empty — just type your editing instruction (e.g. "add fog and make the mood darker").</li>
+  <li>Each AI reply becomes the new working version of the prompt. The chat preserves all prior content — it only changes what you ask for.</li>
+  <li><strong>↺ New chat</strong> — resets conversation and shows a fresh context bubble with the current buffer</li>
+  <li><strong>🎲 Random start</strong> — generates a random concept and places it in the input field</li>
+  <li>The last AI reply is automatically placed in the buffer for <strong>↗ Use as Prompt</strong></li>
+</ul>
+
+<h4>Random genre chips</h4>
+<div class="chips" style="margin-bottom:6px;">
+  <span class="chip">Street</span><span class="chip">Portrait</span><span class="chip">Travel</span><span class="chip">Documentary</span><span class="chip">Wildlife</span><span class="chip">Architecture</span><span class="chip">Cinematic</span><span class="chip">Sci-Fi</span><span class="chip">Fantasy</span><span class="chip">Historical</span><span class="chip">Horror</span><span class="chip">Surreal</span>
+</div>
+<p style="margin:0;font-size:13px;color:#718096;">Select one or more to bias the genre — or leave all unselected for full variety. Output is always photographic or cinematic (no illustration, no sculpture).</p>
+
+<h3>✦ Describe Image (from Reference panel)</h3>
+<p style="margin:8px 0 8px;font-size:14px;color:#2d3748;">Hover over any reference thumbnail → click <strong>✦ Describe</strong>. A modal opens with the image and two tabs:</p>
+<table>
+  <thead><tr><th>Tab</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td><strong>✦ AI Prompt</strong></td><td>Gemini writes a detailed generation prompt based on the image. Starts generating immediately on open.</td></tr>
+    <tr><td><strong>📋 Description</strong></td><td>Plain language 2–4 sentence description of the image content.</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Red blinking <em>⟳ Generating…</em> indicator shows while generation is running</li>
+  <li>Switching tabs immediately cancels the current generation and starts the new one — result shown is always from the active tab</li>
+  <li><strong>↳ Use as prompt</strong> — sets result as main prompt</li>
+  <li><strong>＋ Append to prompt</strong> — appends result to existing prompt text</li>
+</ul>
+
+
+<!-- 6. STYLE LIBRARY -->
+<h2 class="sec" id="styles">6 · Style Library</h2>
+
+<p style="margin:0 0 12px;font-size:14px;color:#2d3748;">Button below the prompt field. Opens a panel on the right side.</p>
+<ul class="bl">
+  <li>Click any style to activate — it appears as a tag below the prompt (click × to remove)</li>
+  <li>Multiple styles can be combined — they merge into a single instruction</li>
+  <li>Search field filters styles in real time by name or description</li>
+</ul>
+
+<h4>Application type</h4>
+<ul class="bl">
+  <li><strong>Visual effect</strong> — affects only look (colour, light, texture, medium)</li>
+  <li><strong>Full style + composition</strong> — also affects mood, atmosphere, and composition</li>
+</ul>
+
+<h4>Categories (8)</h4>
+<div class="chips">
+  <span class="chip">🎬 Film Colours</span><span class="chip">💡 Light</span><span class="chip">🎨 Art Styles</span><span class="chip">🌸 Animation &amp; Illustration</span><span class="chip">🌙 Mood</span><span class="chip">🎥 Directors</span><span class="chip">🎞 Film References</span><span class="chip">📷 Film Stocks</span>
+</div>
+
+<h3>📷 Camera picks</h3>
+<p style="margin:8px 0 10px;font-size:14px;color:#2d3748;">Blue camera tags visible when styles are open. Four parameter categories added to the prompt:</p>
+<div class="chips"><span class="chip">Camera position</span><span class="chip">Camera type &amp; lens</span><span class="chip">Camera movement</span><span class="chip">Shot type</span></div>
+
+
+<!-- 7. REFERENCE IMAGES -->
+<h2 class="sec" id="refs">7 · Reference Images</h2>
+
+<p style="margin:0 0 10px;font-size:14px;color:#2d3748;">The reference panel appears below the prompt field when the selected model supports references. <strong>References are links to assets in the Asset Library</strong> — original image data is stored once there, never duplicated.</p>
+
+<h4>Adding references</h4>
+<div class="chips" style="margin-bottom:10px;">
+  <span class="chip">＋ tile → upload from file</span>
+  <span class="chip">☰ Assets → pick from library</span>
+  <span class="chip">⊕ button on result card</span>
+  <span class="chip">Drag from Assets</span>
+</div>
+<ul class="bl">
+  <li>Uploading saves to Assets automatically — no duplicate storage</li>
+  <li>Max references per model varies (6–14 for image, 1–7 for video)</li>
+</ul>
+
+<h4>Renaming references</h4>
+<ul class="bl">
+  <li><strong>Double-click</strong> label under thumbnail → inline text input → Enter to confirm, Escape to cancel</li>
+  <li>Renaming updates the Asset Library and all active refs sharing the same asset</li>
+</ul>
+
+<h4>Other actions</h4>
+<ul class="bl">
+  <li><strong>Drag to reorder</strong> — changes which ref is sent first</li>
+  <li><strong>✦ Describe</strong> (hover) — Gemini analysis: AI Prompt or brief description (see section 5)</li>
+  <li><strong>×</strong> (hover) — removes from active panel (does not delete from Assets)</li>
+  <li><strong>Click thumbnail</strong> — opens full-size preview lightbox</li>
+</ul>
+
+<h4>Max 2048px on send</h4>
+<p style="margin:6px 0;font-size:14px;color:#2d3748;">Checkbox in the ref panel (default: off). When on, images are resized to max 2048px before the API call. Originals stay at full resolution in Assets.</p>
+
+<h4>Special ref modes</h4>
+<table>
+  <thead><tr><th>Model</th><th>Ref panel behaviour</th></tr></thead>
+  <tbody>
+    <tr><td>Z-Image Turbo</td><td>Single input image for I2I (optional)</td></tr>
+    <tr><td>Qwen2 Edit / Pro Edit</td><td>Single image to edit — required; write instruction as prompt</td></tr>
+    <tr><td>WAN 2.7 Edit / Pro Edit</td><td>Single image to edit — required; write instruction as prompt</td></tr>
+    <tr><td>Kling Video I2V</td><td>Start frame (+ optional end/tail depending on model)</td></tr>
+    <tr><td>Kling O3 I2V</td><td>Up to 7 element refs — address as <code>@Element1</code>, <code>@Element2</code></td></tr>
+  </tbody>
+</table>
+
+
+<!-- 8. PARAMETERS -->
+<h2 class="sec" id="params">8 · Parameters</h2>
+
+<table>
+  <thead><tr><th>Parameter</th><th>Models</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Aspect ratio</strong></td><td>All</td><td>1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 21:9 · 2:3 · 3:2 · 4:5 · 1:4 · 4:1</td></tr>
+    <tr><td><strong>Resolution / quality</strong></td><td>All</td><td>Per-model options. FLUX shows exact pixel dimensions in a live label.</td></tr>
+    <tr><td><strong>Count</strong></td><td>Most models</td><td>1–4 images generated in parallel. NB2: all 4 start simultaneously.</td></tr>
+    <tr><td><strong>Seed</strong></td><td>FLUX, SeeDream, Z-Image, Qwen2, Imagen</td><td>Empty = random. Fixed = reproducible. Multi-image: seed, seed+1, seed+2…</td></tr>
+    <tr><td><strong>Steps</strong></td><td>FLUX Flex/Dev, Z-Image, Qwen2</td><td>More steps = more detail, slower</td></tr>
+    <tr><td><strong>Guidance scale (CFG)</strong></td><td>FLUX Flex/Dev, Z-Image Base, Qwen2</td><td>Higher = closer to prompt, less creative</td></tr>
+    <tr><td><strong>Negative prompt</strong></td><td>Z-Image Base</td><td>Describe what you don't want</td></tr>
+    <tr><td><strong>Thinking</strong></td><td>NB2 only</td><td>Minimal / High — High for complex multi-element scenes</td></tr>
+    <tr><td><strong>Grounding</strong></td><td>NB2, NB Pro</td><td>Google Search lookup before generating</td></tr>
+    <tr><td><strong>Prompt upsampling</strong></td><td>FLUX.2</td><td>Model elaborates on your prompt internally</td></tr>
+    <tr><td><strong>Acceleration</strong></td><td>Z-Image, Qwen2</td><td>None / Regular / High — trades quality for speed</td></tr>
+    <tr><td><strong>Safety tolerance</strong></td><td>FLUX.2</td><td>0–6 (higher = more permissive)</td></tr>
+    <tr><td><strong>Enhance mode</strong></td><td>SeeDream</td><td>Standard / Enhanced</td></tr>
+  </tbody>
+</table>
+
+
+<!-- 9. RESULT CARDS -->
+<h2 class="sec" id="results">9 · Result Cards</h2>
+
+<p style="margin:0 0 10px;font-size:14px;color:#2d3748;">Hover over any generated image to show the action overlay:</p>
+<table>
+  <thead><tr><th>Button</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><strong>↓ PNG</strong></td><td>Download as PNG file</td></tr>
+    <tr><td><strong>⊕ Ref &amp; Assets</strong></td><td>Add to active references and save to Asset Library. In video mode — adds to video references.</td></tr>
+    <tr><td><strong>✎ Annotate</strong></td><td>Open Annotate drawing tool over this image</td></tr>
+    <tr><td><strong>↺ Reuse</strong></td><td>Reload prompt, model, parameters, seed, and all reference images from this job</td></tr>
+    <tr><td><strong>♡ Like / ♥ Liked</strong></td><td>Add / remove from favourites. Status syncs with Gallery instantly in both directions.</td></tr>
+    <tr><td><strong>⬆ Upscale</strong></td><td>Open the upscale dialog for this image</td></tr>
+  </tbody>
+</table>
+
+<h3>Error cards</h3>
+<ul class="bl">
+  <li>If generation fails, the placeholder card turns into an error card with a friendly message</li>
+  <li><strong>↺ Reuse</strong> on error card — loads parameters back into the form so you can review and try again</li>
+  <li>Errors 503 / 429 are automatically retried 3× with a 3s pause before showing error card</li>
+</ul>
+
+<h3>Queue</h3>
+<ul class="bl">
+  <li>Each Generate click adds a job — a blank placeholder card appears immediately</li>
+  <li>Multiple jobs run in parallel — fal.ai models use async queue with live status (In queue → Generating → Downloading)</li>
+  <li>Click <strong>✕</strong> on a pending placeholder to cancel it</li>
+</ul>
+
+
+<!-- 10. UPSCALE -->
+<h2 class="sec" id="upscale">10 · Upscale</h2>
+
+<h3>Image upscale</h3>
+<div class="note">Click <strong>⬆ Upscale</strong> on any result card or gallery image.</div>
+
+<table>
+  <thead><tr><th>Mode</th><th>Best for</th><th>Cost</th><th>Key</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Recraft Crisp</strong></td><td>Photos, portraits, text — faithful, no hallucinations</td><td>$0.004/img</td><td>fal.ai</td></tr>
+    <tr><td><strong>SeedVR2</strong></td><td>Top-quality portraits and textures</td><td>$0.001/MP</td><td>fal.ai</td></tr>
+    <tr><td><strong>Clarity Upscaler</strong></td><td>AI art, illustrations — with prompt control</td><td>compute</td><td>fal.ai</td></tr>
+    <tr><td><strong>Magnific</strong></td><td>Highest quality, 2×–16×, advanced controls</td><td>€0.10–0.50</td><td>Freepik</td></tr>
+    <tr><td><strong>✦ Gigapixel</strong></td><td>Precision upscaling — photos, faces, AI art</td><td>1 credit/24MP</td><td>Topaz + Proxy</td></tr>
+    <tr><td><strong>✦ Bloom</strong></td><td>Creative enhancement — adds light and atmosphere</td><td>credits</td><td>Topaz + Proxy</td></tr>
+    <tr><td><strong>✦ Wonder2</strong></td><td>Creative detail generation — hallucination-friendly</td><td>credits</td><td>Topaz + Proxy</td></tr>
+  </tbody>
+</table>
+
+<h4>SeedVR2 options</h4>
+<ul class="bl">
+  <li>Target resolution: 720p / 1080p / 1440p / 2160p (4K)</li>
+  <li>Noise scale: 0–0.5 (0 = maximum faithfulness)</li>
+</ul>
+
+<h4>Clarity options</h4>
+<ul class="bl">
+  <li>Factor: 2× or 4× · Optional prompt for added detail</li>
+  <li>Creativity 0–1 · Resemblance 0–1 · Steps 10–50</li>
+</ul>
+
+<h4>Magnific options <span class="badge badge-fp">Freepik key</span></h4>
+<ul class="bl">
+  <li>Factor: 2× · 4× · 8× · 16× · Engine: Sparkle / Sharpy / Illusio</li>
+  <li>Optimised for: Standard / Portrait / 3D Render / …</li>
+  <li>Creativity, HDR, Resemblance, Fractality sliders (−3 to +3)</li>
+  <li>Note: 8× and 16× can take 1–3 minutes</li>
+</ul>
+
+<h4>Topaz options <span class="badge badge-tp">Topaz key + Proxy</span></h4>
+<ul class="bl">
+  <li><strong>Gigapixel:</strong> Factor 2×–6× · Model: Standard / High Fidelity / Low Res / CGI / Recovery</li>
+  <li><strong>Bloom / Wonder2:</strong> Output width up to 4K · Creativity: Subtle / Medium / Bold</li>
+  <li>Requires Proxy URL configured in Setup</li>
+</ul>
+
+<h3>Video upscale <span class="badge badge-tp">Topaz key + Proxy</span></h3>
+<p style="margin:8px 0 8px;font-size:14px;color:#2d3748;">Available from any completed video card via the ✦ Topaz button. Runs as a non-blocking panel — other jobs continue while Topaz processes.</p>
+<table>
+  <thead><tr><th>Model</th><th>Best for</th><th>Max resolution</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Precise 2.5</strong></td><td>Faithful detail, any source video</td><td>1080p / 4K</td></tr>
+    <tr><td><strong>Precise 2</strong></td><td>Scale control (1×–4×)</td><td>1080p / 4K</td></tr>
+    <tr><td><strong>Astra 1</strong></td><td>Creative enhancement with creativity control</td><td>1080p / 4K</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>FPS options: 24 / 25 / 30 / 60 / 90 / 120</li>
+  <li>Slow motion: None / 2× / 4× / 8× (Astra max 8×, Precise models up to 16×)</li>
+</ul>
+
+<h4>Batch image upscale from gallery</h4>
+<p style="font-size:14px;color:#2d3748;margin:6px 0;">Select multiple images in Gallery → <strong>⬆ Upscale</strong> — dialog appears once for all. All jobs run in parallel.</p>
+
+
+<!-- 11. GALLERY -->
+<h2 class="sec" id="gallery">11 · Gallery</h2>
+
+<h3>Folders</h3>
+<ul class="bl">
+  <li>Left panel — create a folder with the ＋ button</li>
+  <li>Assign images to a folder via: drag onto folder name · right-click → Move to folder · image detail modal → folder selector · bulk Move action</li>
+  <li>Generated images go to the folder selected in the <strong>Target folder</strong> dropdown at time of generation</li>
+  <li>Delete folder: click <strong>×</strong> next to folder name — no confirmation dialog. The row turns red immediately; images move to All when done.</li>
+</ul>
+
+<h3>Search &amp; filter</h3>
+<ul class="bl">
+  <li><strong>Search bar</strong> — searches all metadata: prompt, model, resolution, date, parameters</li>
+  <li><strong>⚙ Filter</strong> opens advanced filters:</li>
+</ul>
+<table style="margin-top:8px;">
+  <thead><tr><th>Filter</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Model</strong></td><td>Chips for each model used — click to toggle, multi-select</td></tr>
+    <tr><td><strong>Width (px)</strong></td><td>From / to — filter by image width</td></tr>
+    <tr><td><strong>Date</strong></td><td>From / to date range</td></tr>
+    <tr><td><strong>✕ Reset filters</strong></td><td>Clears all active filters</td></tr>
+  </tbody>
+</table>
+
+<h3>Sorting &amp; selection</h3>
+<ul class="bl">
+  <li>Sort: Newest · Oldest · By model · By folder · ♥ Favourites</li>
+  <li>Click = open detail modal · Shift+click or Ctrl+click = add to selection · Drag = rubber band select</li>
+  <li><strong>☑ Select all</strong> — selects all currently visible images</li>
+</ul>
+
+<h3>Bulk actions</h3>
+<table>
+  <thead><tr><th>Action</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>▷ Move</strong></td><td>Move selected to a folder</td></tr>
+    <tr><td><strong>⬆ Upscale</strong></td><td>Batch upscale all selected</td></tr>
+    <tr><td><strong>↓ Export</strong></td><td>Download selected as PNG files</td></tr>
+    <tr><td><strong>✕ Delete</strong></td><td>Delete selected permanently</td></tr>
+  </tbody>
+</table>
+
+<h3>Image detail modal</h3>
+<ul class="bl">
+  <li>Click any image to open full size with prompt, model, parameters, and thinking log (Gemini)</li>
+  <li>Navigate with ← → keys or on-screen buttons</li>
+  <li>All result card actions available here (download, upscale, reuse, annotate, etc.)</li>
+</ul>
+
+<h3>Upload &amp; Archive</h3>
+<ul class="bl">
+  <li><strong>↑ Upload</strong> — import images from your computer into the gallery</li>
+  <li><strong>↓ Archive</strong> — exports full gallery (images + folders + metadata) as JSON</li>
+  <li><strong>↑ Load archive</strong> — imports JSON archive back. Duplicates are skipped. Works for archives hundreds of MB in size (streamed).</li>
+</ul>
+
+
+<!-- 12. ASSETS -->
+<h2 class="sec" id="assets">12 · Assets Library</h2>
+
+<p style="margin:0 0 10px;font-size:14px;color:#2d3748;">Persistent library of reference images, independent from the gallery.</p>
+
+<h4>Adding assets</h4>
+<div class="chips">
+  <span class="chip">↑ Upload asset — from file</span>
+  <span class="chip">⊕ button on any result card</span>
+  <span class="chip">Automatically on ref upload</span>
+</div>
+<ul class="bl" style="margin-top:8px;">
+  <li>Duplicate detection — same image never stored twice</li>
+  <li>Resolution shown on each asset card and in the lightbox</li>
+</ul>
+
+<h4>Managing assets</h4>
+<ul class="bl">
+  <li><strong>Double-click</strong> → rename inline. Rename syncs to all active refs using this asset.</li>
+  <li>Folders in the left panel — drag cards to organise</li>
+  <li>Hover overlay: ⤢ Preview · ⊕ Add as ref · ✎ Annotate · ↓ Download · ✕ Delete</li>
+  <li>Favourites: ♥ on the card</li>
+</ul>
+
+<h4>Bulk actions</h4>
+<ul class="bl">
+  <li>Select multiple assets (click / Shift+click / rubber band drag)</li>
+  <li><strong>⊕ Use as refs</strong> — adds all selected to active reference panel</li>
+  <li><strong>▷ Move</strong> · <strong>↓ Download</strong> · <strong>✕ Delete</strong></li>
+</ul>
+
+
+<!-- 13. PAINT & ANNOTATE -->
+<h2 class="sec" id="paint">13 · Paint &amp; Annotate</h2>
+
+<h3>Paint tab</h3>
+<p style="margin:0 0 8px;font-size:14px;color:#2d3748;">Drawing canvas for creating sketches or layout guides.</p>
+<table>
+  <thead><tr><th>Key</th><th>Tool</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>P</kbd></td><td>Pen</td></tr>
+    <tr><td><kbd>E</kbd></td><td>Eraser</td></tr>
+    <tr><td><kbd>L</kbd></td><td>Line</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Rectangle</td></tr>
+    <tr><td><kbd>O</kbd></td><td>Ellipse</td></tr>
+    <tr><td><kbd>T</kbd></td><td>Text</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
+  </tbody>
+</table>
+<div class="chips" style="margin-top:10px;">
+  <span class="chip tool">⊕ As ref — send canvas to Generate panel</span>
+  <span class="chip tool">◫ Gallery — save to gallery</span>
+  <span class="chip tool">↓ PNG — download</span>
+</div>
+
+<h3>Annotate</h3>
+<p style="margin:8px 0 10px;font-size:14px;color:#2d3748;">Click ✎ Annotate on any result card to draw directly over a generated image.</p>
+<table>
+  <thead><tr><th>Export mode</th><th>Output</th><th>Best for</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Mode A (composite)</strong></td><td>Original + drawing merged</td><td>Spatial edits, inpainting guides</td></tr>
+    <tr><td><strong>Mode B (layers)</strong></td><td>Two separate refs: clean original + drawing on white</td><td>Inpainting masks, ControlNet</td></tr>
+  </tbody>
+</table>
+
+
+<!-- 14. SETUP -->
+<h2 class="sec" id="setup">14 · Setup</h2>
+
+<table>
+  <thead><tr><th>Field</th><th>Key format</th><th>Unlocks</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Google API Key</strong></td><td><code>AIza…</code></td><td>NB2, NB Pro, Imagen 4, Veo 3.1, AI Prompt Tool, Describe</td></tr>
+    <tr><td><strong>fal.ai API Key</strong></td><td><code>fal_…</code></td><td>FLUX.2, SeeDream, Kling Image/Video, Z-Image, Qwen2, Seedance, Vidu, Wan 2.7 I2V (video), Wan 2.6, Upscalers</td></tr>
+    <tr><td><strong>Replicate API Key</strong></td><td><code>r8_…</code></td><td>WAN 2.7 image (T2I, Edit) — via Proxy</td></tr>
+    <tr><td><strong>xAI API Key</strong></td><td><code>xai-…</code></td><td>Grok Imagine</td></tr>
+    <tr><td><strong>Luma API Key</strong></td><td><code>luma-…</code></td><td>Photon, Photon Flash, Luma Ray2/Ray3 video</td></tr>
+    <tr><td><strong>Freepik API Key</strong></td><td><code>fp-…</code></td><td>Magnific Upscale</td></tr>
+    <tr><td><strong>Topaz API Key</strong></td><td>long hash</td><td>Topaz image upscale (Gigapixel, Bloom, Wonder2) + video upscale (Precise, Astra)</td></tr>
+    <tr><td><strong>Proxy URL</strong></td><td><code>https://…</code></td><td>Required for: xAI · Luma · Magnific · Topaz · Replicate WAN 2.7 image</td></tr>
+  </tbody>
+</table>
+<ul class="bl">
+  <li>Keys are saved locally in the browser and loaded automatically on next open</li>
+  <li>A green dot next to each field confirms the key has been entered</li>
+  <li><strong>API Keys Backup</strong> — export all keys at once as a JSON file for transfer to another computer</li>
+  <li>Copyright and contact info is shown on the right side of the Setup screen</li>
+</ul>
+
+
+<!-- 15. KEYBOARD SHORTCUTS -->
+<h2 class="sec" id="shortcuts">15 · Keyboard Shortcuts</h2>
+
+<table>
+  <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Generate</td></tr>
+    <tr><td><kbd>Escape</kbd></td><td>Close modal / lightbox / AI Prompt / Styles panel / Describe modal / @mention dropdown</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Navigate images in gallery detail modal</td></tr>
+    <tr><td><kbd>P</kbd> <kbd>E</kbd> <kbd>L</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>T</kbd></td><td>Paint and Annotate tools</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo in Paint / Annotate</td></tr>
+    <tr><td><kbd>Enter</kbd> (Chat input)</td><td>Send message (Shift+Enter = new line)</td></tr>
+  </tbody>
+</table>
+
+
+<!-- 16. TIPS & WORKFLOWS -->
+<h2 class="sec" id="tips">16 · Tips &amp; Workflows</h2>
+
+<div class="card">
+  <h4>Combining styles</h4>
+  <p style="font-size:14px;color:#2d3748;">Select multiple styles at once — they merge into a single combined instruction. "Golden Hour" + "Wes Anderson" + "Oil Painting" all work together. Select a Camera position for consistent framing.</p>
+</div>
+
+<div class="card">
+  <h4>Reuse workflow</h4>
+  <p style="font-size:14px;color:#2d3748;">Generate → click ↺ Reuse → adjust prompt or one parameter → generate again. Reference images are also restored. Use a fixed seed for reproducible variations (seed, seed+1, seed+2…).</p>
+</div>
+
+<div class="card">
+  <h4>Describe → Prompt</h4>
+  <p style="font-size:14px;color:#2d3748;">Upload a reference → hover → ✦ Describe → select <strong>AI Prompt</strong> tab → click <strong>↳ Use as prompt</strong>. Edit as needed and generate. Great for recreating the style of an existing image.</p>
+</div>
+
+<div class="card">
+  <h4>Chat — iterative prompt development</h4>
+  <p style="font-size:14px;color:#2d3748;">Generate → ↺ Reuse → open AI Prompt → Chat tab. The current prompt is shown in the grey context bubble. Type only your instruction: <em>"add fog and make the mood darker"</em> — Gemini builds on the existing prompt. Keep refining until satisfied, then click <strong>↗ Use as Prompt</strong> and generate.</p>
+</div>
+
+<div class="card">
+  <h4>Upscale workflow</h4>
+  <p style="font-size:14px;color:#2d3748;">Generate at 1K or 512 to quickly check composition. Once satisfied → ⬆ Upscale. Recraft Crisp for photos, Clarity or Topaz Gigapixel for AI art, SeedVR2 for faces and textures.</p>
+</div>
+
+<div class="card">
+  <h4>Parallel variants — fixed seed</h4>
+  <p style="font-size:14px;color:#2d3748;">Set count to 4 and a fixed seed. FLUX and Z-Image use seed, seed+1, seed+2, seed+3 — four reproducible variations side by side. Compare and pick the best.</p>
+</div>
+
+<div class="card">
+  <h4>Qwen / WAN Edit instructions</h4>
+  <p style="font-size:14px;color:#2d3748;">Write naturally: <em>"Remove the person on the left"</em> · <em>"Change background to sunset over ocean, keep subject sharp"</em> · <em>"Add text SALE in bold red at the top"</em>. Upload the image to edit as a reference.</p>
+</div>
+
+<div class="card">
+  <h4>Folder workflow</h4>
+  <p style="font-size:14px;color:#2d3748;">Set the <strong>Target folder</strong> dropdown (above the generate button) before generating — all results from that session go directly into the folder. No manual moving needed. The folder marker (blue bar) is visible in the Gallery for items assigned to a folder.</p>
+</div>
+
+<div class="card">
+  <h4>Upload for upscale</h4>
+  <p style="font-size:14px;color:#2d3748;">Have an image from another tool? Use ↑ Upload in the Gallery, then ⬆ Upscale. Works for any external image.</p>
+</div>
+
+<div class="card">
+  <h4>Video from gallery image</h4>
+  <p style="font-size:14px;color:#2d3748;">In the gallery, hover over an image → ⊕ Ref &amp; Assets — in Video mode the image is added directly as a video reference (start frame). Switch to the Video tab and generate.</p>
+</div>
+
+<div class="card">
+  <h4>Wan R2V Flash — consistent characters</h4>
+  <p style="font-size:14px;color:#2d3748;">Upload up to 5 character photos as video refs. Reference them by name in the prompt: <em>"Character1 walks through a market while Character2 watches from a balcony."</em></p>
+</div>
+
+<div class="card">
+  <h4>Batch processing</h4>
+  <p style="font-size:14px;color:#2d3748;">Submit 4–8 generate jobs quickly one after another — they run in parallel via the async queue. Results appear as they complete, no need to wait between submissions.</p>
+</div>
+
+</div><!-- .page -->
+</body>
+</html>

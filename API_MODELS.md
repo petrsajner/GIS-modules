@@ -1,0 +1,332 @@
+# GIS — API MODELS
+*Aktualizace po v171en · 2. 4. 2026*
+
+---
+
+## AKTUALIZACE v164–v171en (2. 4. 2026)
+
+---
+
+### Z-Image Base I2I — ODSTRANĚN (v164)
+
+`fal-ai/z-image/base` nemá `image_url` pole v OpenAPI schema. Endpoint vrací 404 s auth tokenem.
+Z-Image I2I = výhradně Turbo: `fal-ai/z-image/turbo/image-to-image`.
+
+---
+
+### WAN 2.7 Image — Replicate API (v165–v168)
+
+**Endpoint:** `wan-video/wan-2.7-image` na Replicate (`api.replicate.com`)
+
+**CORS:** Blokováno → přes GIS proxy Worker
+
+**Auth:** `Authorization: Bearer {replicateKey}`
+
+**Pattern:** Async polling
+```
+POST https://api.replicate.com/v1/models/wan-video/wan-2.7-image/predictions
+→ { id, status }
+GET  https://api.replicate.com/v1/predictions/{id}
+→ { status, output[] }   ← output je ARRAY URL stringů
+```
+
+**Parametry (potvrzeno):**
+```javascript
+{
+  input: {
+    prompt:        string,           // required
+    images:        string[],         // optional — data URI pro edit mode (max 4)
+    size:          string,           // "1280*720" | "2048*1152" | ... (hvězdička!)
+    num_outputs:   number,           // 1 (vždy 1 — paralelismus v GIS)
+    thinking_mode: boolean,          // optional, jen T2I Pro
+    seed:          number,           // optional
+  }
+}
+// output: array of URL strings
+```
+
+**Dostupné size hodnoty:**
+```
+1280*720   (16:9 HD)     720*1280  (9:16 Portrait)
+2048*1152  (16:9 2K)     1152*2048 (9:16 2K)
+1024*1024  (1:1 Square)  2048*2048 (1:1 2K)
+1024*768   (4:3)         2048*1536 (4:3 2K)
+768*1024   (3:4)         1536*2048 (3:4 2K)
+```
+
+**Cena:** $0.030/image
+
+**GIS typ:** `wan27r`, provider: `replicate`
+
+**Modely:**
+```
+wan27_std      — T2I Standard
+wan27_pro      — T2I Pro (thinking_mode: true)
+wan27_edit     — Edit (images[] required, max 4 refs)
+wan27_pro_edit — Edit Pro
+```
+
+**Pozor:**
+- `size` používá hvězdičku (`2048*1152`), ne `×`
+- `num_outputs: 1` vždy — paralelismus = N samostatných predictions
+- `negative_prompt` NEexistuje na Replicate WAN 2.7 image
+
+---
+
+### WAN 2.7 I2V — Replicate API (v171)
+
+**Endpoint:** `wan-video/wan-2.7-i2v` na Replicate
+
+**CORS:** Blokováno → přes GIS proxy Worker
+
+**Auth:** `Authorization: Bearer {replicateKey}`
+
+**Pattern:** Async polling
+```
+POST https://api.replicate.com/v1/models/wan-video/wan-2.7-i2v/predictions
+→ { id, status }
+GET  https://api.replicate.com/v1/predictions/{id}
+→ { status, output }   ← output je SINGLE URL STRING (ne array!)
+```
+
+**Parametry (potvrzeno z Replicate schema):**
+```javascript
+{
+  input: {
+    first_frame:              string,   // URI jpg/png/bmp/webp ≤20MB — required pro I2V
+    last_frame:               string,   // URI optional — FLF2V mode (requires first_frame)
+    first_clip:               string,   // URI mp4/mov 2-10s ≤100MB — clip continuation
+    prompt:                   string,   // default ""
+    negative_prompt:          string,   // default ""
+    resolution:               string,   // "720p" | "1080p" (default "1080p")
+    duration:                 number,   // integer 2-15 (default 5)
+    enable_prompt_expansion:  boolean,  // default true
+    audio:                    string,   // URI wav/mp3 3-30s ≤15MB — auto-generated pokud chybí
+    seed:                     number,   // optional
+  }
+}
+// output: single URL string (MP4)
+```
+
+**Cena:**
+- 720p: $0.10/sekunda
+- 1080p: $0.15/sekunda
+
+**GIS typ:** `wan27_video`
+
+**refMode:** `single_end` — ref[0]=first_frame (povinný), ref[1]=last_frame (optional FLF2V)
+
+**Výjimečné funkce (nové v WAN 2.7):**
+- `last_frame` — FLF2V: model interpoluje trajektorii mezi dvěma snímky
+- `first_clip` — clip continuation: prodlouží existující video klip
+- `audio` — vlastní audio synchronizace; bez tohoto pole model audio auto-generuje
+
+---
+
+### WAN 2.6 (fal.ai) — aktuální stav
+
+Modely na fal.ai (CORS OK — přímé volání):
+```
+wan/v2.6/text-to-video          T2V, multi-shot, duration 5/10/15s
+wan/v2.6/image-to-video         I2V, single start frame
+wan/v2.6/reference-to-video/flash  R2V, image + video refs
+```
+
+**Audio:** Enable_audio parametr nefunguje přes fal.ai → skryté UI.
+
+---
+
+### Spending — přehled cen (aktuální)
+
+**Google:**
+```
+gemini-2.0-flash:              ~$0.001/img (estimate)
+imagen-4:                       $0.040/img
+imagen-4-fast:                  $0.020/img
+imagen-4-ultra:                 $0.080/img
+```
+
+**fal.ai (image):**
+```
+fal-ai/flux-2-pro:              $0.050/img
+fal-ai/flux-2-max:              $0.060/img
+fal-ai/flux-2-flex:             $0.040/img
+fal-ai/bytedance/seedream/v4.5: $0.040/img
+fal-ai/bytedance/seedream/v5/lite: $0.030/img
+fal-ai/kling-image/v3:          $0.014/img
+fal-ai/kling-image/o3:          $0.025/img
+fal-ai/z-image/base:            $0.030/img
+fal-ai/z-image/turbo:           $0.025/img
+fal-ai/qwen-image-2/*:          $0.020–$0.035/img
+```
+
+**fal.ai (video, per second):**
+```
+_fal_video (generic):           $0.040/s
+```
+
+**xAI:**
+```
+grok-imagine-image:             $0.070/img
+```
+
+**Luma (image):**
+```
+photon-1:                       $0.032/img
+photon-flash-1:                 $0.016/img
+```
+
+**Luma (video, per second):**
+```
+ray-2, ray-3:                   $0.071/s
+ray-2-flash, ray-3-flash:       $0.036/s
+```
+
+**Topaz (video, per second):**
+```
+_topaz_slp25:                   $0.012/s
+_topaz_slhq:                    $0.012/s
+_topaz_slm:                     $0.008/s
+_topaz_slp1:                    $0.030/s
+_topaz_img:                     $0.005/img
+```
+
+**Replicate (image):**
+```
+wan-video/wan-2.7-image:        $0.030/img
+```
+
+**Replicate (video, per second):**
+```
+_replicate_wan27v_720p:         $0.10/s
+_replicate_wan27v_1080p:        $0.15/s
+```
+
+---
+
+## AKTUALIZACE v81 (26. 3. 2026) — historické
+
+### Kling Image O3
+```
+T2I: fal-ai/kling-image/o3/text-to-image
+I2I: fal-ai/kling-image/o3/image-to-image
+```
+Rozlišení: 1K / 2K / 4K. I2I s refs: `aspect_ratio: "auto"`.
+
+### Clarity Upscaler — upscale_factor limit
+```javascript
+upscale_factor: 2 | 4   // ✓
+upscale_factor: 8 | 16  // ✗ 422 — schema enum limit
+```
+Pro faktory 8×/16× nutné clarityai.co přímé API (CORS blok → proxy, neimplementováno).
+
+### Fronta — paralelismus (v81)
+```javascript
+// Map s limitem per provider
+runningModelCounts = new Map();  // Map<modelId, count>
+// fal.ai: max 4 concurrent
+// Gemini, Imagen, Replicate: 1 concurrent
+```
+
+---
+
+## AKTUALIZACE v174en (3. 4. 2026)
+
+### fal.ai image modely — queue endpoint (v174)
+
+Všechny image modely přešly z synchronního na asynchronní queue endpoint.
+
+```
+Sync (starý):  POST https://fal.run/{model}         → wait → response
+Queue (nový):  POST https://queue.fal.run/{model}   → request_id → poll → result
+```
+
+**Polling:** 200× 3s = max 10 min
+**Status hodnoty:** `IN_QUEUE` → `IN_PROGRESS` → `COMPLETED` / `FAILED`
+**Result format:** stejný jako sync response (`images[]`, `seed`, atd.)
+
+### Kling image — ref size limit (v174)
+
+**Limit:** Max 10.0MB per reference image (`image_url`, `image_urls[]`, `reference_image_urls[]`)
+**Příčina 422:** 5K PNG z NB2 jako JPEG 100% = 15–30MB → nad limitem
+**Fix:** `_refAsJpeg(r, 3840)` — resize na max UHD (3840×2160) + JPEG 100% = ~2–5MB
+
+```javascript
+// Kling V3 + O3 image-to-image
+getRefDataForApi(r, 3840)     // resize na UHD
+→ _compressRefToJpeg(apiRef)  // JPEG 100%, ~2–5MB raw
+```
+
+### fal.ai modely — JPEG komprese refs (v174)
+
+Standard pro všechny fal.ai image modely: refs se re-enkódují jako JPEG 100% před odesláním.
+Plné rozlišení zachováno (pouze změna formátu PNG→JPEG).
+
+```
+PNG ref 5504×3072 = 30–50MB raw → JPEG 100% = 3–6MB → base64 ~4–8MB
+fal.ai 10MB limit: bezpečně splněn
+```
+
+---
+
+## AKTUALIZACE v181en (5. 4. 2026)
+
+---
+
+### Magnific Precision — Freepik API (v181)
+
+Freepik/Magnific má tři image upscale endpointy:
+
+#### Upscaler Creative (původní, v160+)
+```
+POST /v1/ai/image-upscaler
+Auth: x-freepik-api-key: {key}
+Params: image (b64/URL), scale_factor (2x/4x/8x/16x), engine, optimized_for,
+        creativity, hdr, resemblance, fractality, prompt
+```
+
+#### Upscaler Precision V1 (v181+)
+```
+POST /v1/ai/image-upscaler-precision
+Auth: x-freepik-api-key: {key}
+Params: image (base64 only), sharpen (0-100, def 50), smart_grain (0-100, def 7),
+        ultra_detail (0-100, def 30), filter_nsfw
+Poll: GET /v1/ai/image-upscaler-precision/{task_id}
+CORS: blokováno → přes proxy (/magnific/precision s prec_version: 'v1')
+```
+
+#### Upscaler Precision V2 (v181+)
+```
+POST /v1/ai/image-upscaler-precision-v2
+Auth: x-freepik-api-key: {key}
+Params: image (b64/URL), scale_factor (int 2-16), flavor (sublime|photo|photo_denoiser),
+        sharpen (0-100, def 7), smart_grain (0-100, def 7), ultra_detail (0-100, def 30),
+        filter_nsfw
+Poll: GET /v1/ai/image-upscaler-precision-v2/{task_id}
+CORS: blokováno → přes proxy (/magnific/precision s prec_version: 'v2')
+```
+
+**Async pattern (stejný jako Creative):**
+```
+POST → { data: { task_id } }
+GET  → { data: { status: CREATED|IN_PROGRESS|COMPLETED|FAILED, generated: [url] } }
+```
+
+**GIS UI mapping:**
+```javascript
+'v2_sublime'        → V2 endpoint, flavor: 'sublime'
+'v2_photo'          → V2 endpoint, flavor: 'photo'
+'v2_photo_denoiser' → V2 endpoint, flavor: 'photo_denoiser'
+'v1_hdr'            → V1 endpoint (bez flavor, bez scale_factor)
+```
+
+**Proxy route:**
+```
+POST /magnific/precision    → handleMagnificPrecision (magnific.js)
+  Body: { freepik_key, image_b64, prec_version, scale_factor, flavor,
+          sharpen, smart_grain, ultra_detail }
+POST /magnific/status       → handleMagnificStatus s upscaler_type
+  upscaler_type: 'precision-v1' → /image-upscaler-precision/{id}
+  upscaler_type: 'precision-v2' → /image-upscaler-precision-v2/{id}
+  upscaler_type: 'creative'     → /image-upscaler/{id}  (původní)
+```
