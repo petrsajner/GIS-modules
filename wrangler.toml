@@ -1,0 +1,13 @@
+name = "gis-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Free tier: 100 000 req/day, 10ms CPU/req (network I/O se nepočítá)
+# Luma polling (fetch volání) = network I/O → v pořádku na free tieru
+
+# R2 bucket pro dočasné uložení videí pro Magnific video upscale
+# Před prvním deployem vytvoř bucket: wrangler r2 bucket create gis-magnific-videos
+[[r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "gis-magnific-videos"

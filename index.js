@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════
 // GIS Proxy — Cloudflare Worker
-// Verze: 2026-07 (přidán /magnific/precision — Precision V1/V2)
+// Verze: 2026-09 (R2 bucket: Magnific video + generický /r2/upload pro Kling V2V a další)
 //
 // Slouží jako CORS proxy pro providery, kteří blokují přímé
 // browser requesty z file:// origin.
@@ -20,7 +20,12 @@
 //   POST /luma/video/status      → Luma Ray3/3.14 video status
 //   POST /magnific/upscale       → Magnific Creative upscale submit
 //   POST /magnific/precision     → Magnific Precision V1/V2 upscale submit
-//   POST /magnific/status        → Magnific upscale status (creative + precision)
+//   POST /magnific/status        → Magnific status (all types)
+//   POST /magnific/mystic        → Mystic image generation
+//   POST /magnific/relight       → Image Relight
+//   POST /magnific/style-transfer → Style Transfer
+//   POST /magnific/skin-enhancer → Skin Enhancer
+//   POST /magnific/video-upscale → Video Upscaler (Creative + Precision)
 //   POST /fal/submit             → fal.ai queue submit (CORS bypass pro Kling 2.5-turbo)
 //   POST /fal/status             → fal.ai queue status
 //   POST /fal/result             → fal.ai queue result
@@ -42,7 +47,16 @@ import { handleLuma, handleLumaStatus,
          handleLumaVideoSubmit,
          handleLumaVideoStatus }                  from './handlers/luma.js';
 import { handleMagnific, handleMagnificStatus,
-         handleMagnificPrecision }                  from './handlers/magnific.js';
+         handleMagnificPrecision,
+         handleMagnificMystic,
+         handleMagnificRelight,
+         handleMagnificStyleTransfer,
+         handleMagnificSkinEnhancer,
+         handleMagnificVideoUpscale,
+         handleMagnificVideoFile,
+         handleMagnificVideoCleanup,
+         handleR2Upload,
+         handleR2Serve }                       from './handlers/magnific.js';
 import { handleFalSubmit, handleFalStatus,
          handleFalResult }                        from './handlers/fal.js';
 import { handleTopazVideoSubmit,
@@ -92,7 +106,7 @@ export default {
     if (path === '/health' || path === '/') {
       return corsResponse(JSON.stringify({
         status: 'ok',
-        version: '2026-06',
+        version: '2026-08',
         routes: [
           'POST /xai/generate',
           'POST /luma/generate',
@@ -102,6 +116,15 @@ export default {
           'POST /magnific/upscale',
           'POST /magnific/precision',
           'POST /magnific/status',
+          'POST /magnific/mystic',
+          'POST /magnific/relight',
+          'POST /magnific/style-transfer',
+          'POST /magnific/skin-enhancer',
+          'POST /magnific/video-upscale',
+          'GET  /magnific/video-file/{key}  (R2 video serve)',
+          'POST /magnific/video-cleanup       (R2 cleanup)',
+          'POST /r2/upload                    (generic R2 binary upload)',
+          'GET  /r2/serve/{key}              (serve R2 file)',
           'POST /fal/submit',
           'POST /fal/status',
           'POST /fal/result',
@@ -133,6 +156,14 @@ export default {
       const fileId = path.split('/')[3];
       return handleReplicateVideoServe(request, fileId);
     }
+    // Magnific video file — serves R2 video as public HTTPS for Freepik
+    if (request.method === 'GET' && path.startsWith('/magnific/video-file/')) {
+      return withCors(await handleMagnificVideoFile(request, env));
+    }
+    // Generic R2 file serving — Kling V2V motion video + any future binary
+    if (request.method === 'GET' && path.startsWith('/r2/serve/')) {
+      return withCors(await handleR2Serve(request, env));
+    }
 
     // ── Require POST for all action routes ──────────────
     if (request.method !== 'POST') {
@@ -155,6 +186,13 @@ export default {
       if (path === '/magnific/upscale')         return withCors(await handleMagnific(request));
       if (path === '/magnific/precision')       return withCors(await handleMagnificPrecision(request));
       if (path === '/magnific/status')          return withCors(await handleMagnificStatus(request));
+      if (path === '/magnific/mystic')          return withCors(await handleMagnificMystic(request));
+      if (path === '/magnific/relight')         return withCors(await handleMagnificRelight(request));
+      if (path === '/magnific/style-transfer')  return withCors(await handleMagnificStyleTransfer(request));
+      if (path === '/magnific/skin-enhancer')   return withCors(await handleMagnificSkinEnhancer(request));
+      if (path === '/magnific/video-upscale')   return withCors(await handleMagnificVideoUpscale(request, env));
+      if (path === '/magnific/video-cleanup')   return withCors(await handleMagnificVideoCleanup(request, env));
+      if (path === '/r2/upload')                return withCors(await handleR2Upload(request, env));
 
       // ── fal.ai queue (CORS bypass pro Kling 2.5-turbo) ─
       if (path === '/fal/submit')               return withCors(await handleFalSubmit(request));
