@@ -76,10 +76,15 @@ const SPEND_PRICES = {
 
   // ── Replicate (per image) ────────────────────────────
   'wan-video/wan-2.7-image': 0.030,  // WAN 2.7 image
-  '_replicate_wan27v_720p':  0.10,   // WAN 2.7 I2V 720p ($0.10/s)
-  '_replicate_wan27v_1080p': 0.15,   // WAN 2.7 I2V 1080p ($0.15/s)
-  '_replicate_wan27e_720p':  0.10,   // WAN 2.7 Video Edit 720p ($0.10/s)
-  '_replicate_wan27e_1080p': 0.15,   // WAN 2.7 Video Edit 1080p ($0.15/s)
+  '_replicate_wan27v_720p':  0.10,   // WAN 2.7 I2V 720p via Replicate (legacy)
+  '_replicate_wan27v_1080p': 0.15,   // WAN 2.7 I2V 1080p via Replicate (legacy)
+  '_replicate_wan27e_720p':  0.10,   // WAN 2.7 Edit 720p via Replicate (legacy)
+  '_replicate_wan27e_1080p': 0.15,   // WAN 2.7 Edit 1080p via Replicate (legacy)
+  // WAN 2.7 via fal.ai (current) — pricing TBD, estimated ~same as WAN 2.6
+  '_wan27_720p':   0.10,   // WAN 2.7 I2V/T2V 720p via fal.ai (estimate)
+  '_wan27_1080p':  0.15,   // WAN 2.7 I2V/T2V 1080p via fal.ai (estimate)
+  '_wan27e_720p':  0.10,   // WAN 2.7 Video Edit 720p via fal.ai (estimate)
+  '_wan27e_1080p': 0.15,   // WAN 2.7 Video Edit 1080p via fal.ai (estimate)
 };
 
 const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'replicate'];

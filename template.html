@@ -2136,56 +2136,6 @@ input[type=range].prange::-webkit-slider-thumb {
         </div>
 
         <!-- ═══ WAN 2.7 I2V params (video) ═══ -->
-        <div id="wan27vParams" style="display:none">
-
-          <!-- Resolution -->
-          <div class="ctrl">
-            <div class="ctrl-label">Resolution</div>
-            <select id="wan27vResolution"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-              <option value="1080p" selected>1080p — $0.15/s</option>
-              <option value="720p">720p — $0.10/s</option>
-            </select>
-          </div>
-
-          <!-- Duration -->
-          <div class="ctrl">
-            <div class="ctrl-label">Duration</div>
-            <div class="toggle-row">
-              <input type="radio" name="wan27vDuration" id="w27vd5"  value="5"  checked><label for="w27vd5">5s</label>
-              <input type="radio" name="wan27vDuration" id="w27vd10" value="10"><label for="w27vd10">10s</label>
-              <input type="radio" name="wan27vDuration" id="w27vd15" value="15"><label for="w27vd15">15s</label>
-            </div>
-          </div>
-
-          <!-- Negative prompt -->
-          <div class="ctrl">
-            <div class="ctrl-label">Negative prompt</div>
-            <textarea id="wan27vNegPrompt" rows="2" placeholder="blurry, distorted, low quality…"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;resize:vertical;"></textarea>
-          </div>
-
-          <!-- Prompt expansion -->
-          <div class="ctrl">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-              <input type="checkbox" id="wan27vPromptExpand" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Prompt expansion <span style="color:var(--dim2)">(better quality, slower)</span></span>
-            </label>
-          </div>
-
-          <!-- Seed -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-            <input type="number" id="wan27vSeed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <div style="font-size:10px;color:var(--dim2);margin-top:4px;line-height:1.5;">
-            Start frame ref required · End frame ref optional (FLF2V) · Audio auto-generated
-          </div>
-
-        </div>
-
         <!-- ═══ Qwen Image 2 params ═══ -->
         <div id="qwen2Params" style="display:none">
 
@@ -2453,10 +2403,26 @@ input[type=range].prange::-webkit-slider-thumb {
                 style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
               <div style="font-size:10px;color:var(--dim2);margin-top:3px;">Applies only when ref[1] lighting reference is provided</div>
             </div>
+            <!-- Style -->
+            <div class="ctrl">
+              <div class="ctrl-label">Style</div>
+              <div style="display:flex;gap:6px;margin-top:4px;">
+                <label style="flex:1;text-align:center;padding:5px 2px;border:1px solid var(--purple);cursor:pointer;font-size:11px;color:var(--purple);" id="fepRelightStyle_smooth">
+                  <input type="radio" name="fepRelightStyle" value="smooth" checked style="display:none" onchange="document.querySelectorAll('[id^=fepRelightStyle_]').forEach(function(el){el.style.borderColor='var(--border)';el.style.color='var(--dim)'});this.parentElement.style.borderColor='var(--purple)';this.parentElement.style.color='var(--purple)'">Smooth</label>
+                <label style="flex:1;text-align:center;padding:5px 2px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="fepRelightStyle_detailed">
+                  <input type="radio" name="fepRelightStyle" value="detailed" style="display:none" onchange="document.querySelectorAll('[id^=fepRelightStyle_]').forEach(function(el){el.style.borderColor='var(--border)';el.style.color='var(--dim)'});this.parentElement.style.borderColor='var(--purple)';this.parentElement.style.color='var(--purple)'">Detailed</label>
+              </div>
+            </div>
             <div class="ctrl">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                 <input type="checkbox" id="fepRelightChangeBg" style="accent-color:var(--purple);">
                 <span style="font-size:11px;color:var(--dim);">Change background (portraits &amp; products)</span>
+              </label>
+            </div>
+            <div class="ctrl">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <input type="checkbox" id="fepRelightInterpolate" style="accent-color:var(--purple);">
+                <span style="font-size:11px;color:var(--dim);">Interpolate from original (blend with source)</span>
               </label>
             </div>
           </div>
@@ -2556,7 +2522,7 @@ input[type=range].prange::-webkit-slider-thumb {
             <option value="vidu_q3">Vidu Q3 · Shengshu</option>
           </optgroup>
           <optgroup label="── Wan ──">
-            <option value="wan27">Wan 2.7 · Replicate</option>
+            <option value="wan27">Wan 2.7 · fal.ai</option>
             <option value="wan26">Wan 2.6 · Alibaba</option>
           </optgroup>
           <optgroup label="── Google Veo ──">
@@ -2693,15 +2659,23 @@ input[type=range].prange::-webkit-slider-thumb {
 
       </div><!-- /lumaVideoParams -->
 
-      <!-- V2V / Motion Control: video upload section -->
+      <!-- V2V / Motion Control: video input — unified panel -->
       <div class="psec" id="videoV2VSection" style="display:none;">
-        <div class="plabel">Motion Video <span style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;" id="v2vFileLabel">No video selected</span></div>
-        <div style="font-size:10px;color:var(--dim2);margin-bottom:7px;line-height:1.5;">Upload a reference video whose motion will be applied to the generated video.</div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <button class="ibtn" onclick="document.getElementById('v2vVideoInput').click()" style="font-size:10px;padding:3px 9px;">↑ Upload video</button>
+        <div class="plabel">Motion Video
+          <span id="v2vSrcInfo" style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">No video selected</span>
+        </div>
+        <div id="v2vSrcThumb" style="display:none;margin-bottom:6px;">
+          <img id="v2vSrcImg" src="" style="width:100%;max-height:140px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+          <div id="v2vSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:5px 0 2px;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.6;"></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <button class="ibtn" onclick="document.getElementById('v2vVideoInput').click()" style="font-size:10px;padding:3px 9px;">↑ Upload</button>
+          <button class="ibtn" onclick="v2vPickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
+          <button class="ibtn" id="v2vDescribeBtn" onclick="v2vDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
           <button class="ibtn" id="v2vClearBtn" onclick="clearV2VVideo()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
         </div>
         <input type="file" id="v2vVideoInput" accept="video/*" style="display:none" onchange="v2vVideoSelected(this.files)">
+        <div style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;">Motion will be transferred to the character image in Refs below.</div>
       </div>
 
       <!-- Topaz: Source Video — appears when Topaz model is selected -->
@@ -2715,9 +2689,181 @@ input[type=range].prange::-webkit-slider-thumb {
         </div>
         <div style="display:flex;gap:6px;align-items:center;">
           <button class="ibtn" onclick="topazPickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Pick from gallery</button>
+          <button class="ibtn" id="topazSrcDescribeBtn" onclick="topazDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
           <button class="ibtn" id="topazSrcClearBtn" onclick="topazClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
         </div>
-        <div style="font-size:11px;color:var(--dim2);margin-top:5px;line-height:1.5;">Click <b>✦ Topaz</b> on any video in the gallery to set it here.</div>
+        <div style="font-size:11px;color:var(--dim2);margin-top:5px;line-height:1.5;">Click <b>✦ Upscale</b> on any video in the gallery to set it here.</div>
+      </div>
+
+      <!-- WAN 2.7 Video Edit: source video — unified panel -->
+
+      <!-- WAN 2.7 I2V/T2V/R2V params — shown for wan27_video type -->
+        <div id="wan27vParams" style="display:none">
+
+          <!-- Resolution -->
+          <div class="ctrl">
+            <div class="ctrl-label">Resolution</div>
+            <select id="wan27vResolution"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+              <option value="1080p" selected>1080p</option>
+              <option value="720p">720p</option>
+            </select>
+          </div>
+
+          <!-- Duration -->
+          <div class="ctrl">
+            <div class="ctrl-label">Duration</div>
+            <select id="wan27vDuration"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+              <option value="2">2s</option><option value="3">3s</option><option value="4">4s</option>
+              <option value="5" selected>5s</option><option value="6">6s</option><option value="7">7s</option>
+              <option value="8">8s</option><option value="9">9s</option><option value="10">10s</option>
+              <option value="11">11s</option><option value="12">12s</option><option value="13">13s</option>
+              <option value="14">14s</option><option value="15">15s</option>
+            </select>
+          </div>
+
+          <!-- Negative prompt -->
+          <div class="ctrl">
+            <div class="ctrl-label">Negative prompt <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+            <textarea id="wan27vNegPrompt" rows="2" placeholder="blurry, distorted, low quality…"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;resize:vertical;"></textarea>
+          </div>
+
+          <!-- Prompt expansion -->
+          <div class="ctrl">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input type="checkbox" id="wan27vPromptExpand" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+              <span style="font-size:11px;color:var(--dim);">Prompt expansion <span style="color:var(--dim2)">(better quality, slower)</span></span>
+            </label>
+          </div>
+
+          <!-- Safety checker -->
+          <div class="ctrl">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input type="checkbox" id="wan27vSafety" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
+            </label>
+          </div>
+
+          <!-- Seed -->
+          <div class="ctrl">
+            <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+            <input type="number" id="wan27vSeed" placeholder="42" min="0" max="2147483647"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+          </div>
+
+          <!-- Audio URL — optional background audio for T2V / I2V -->
+          <div class="ctrl">
+            <div class="ctrl-label">Audio URL <span style="color:var(--dim2);font-weight:400;">(optional · MP3/WAV)</span></div>
+            <input type="url" id="wan27vAudioUrl" placeholder="https://…/audio.mp3"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+          </div>
+
+          <!-- Extend Video — I2V only: source video for continuation -->
+          <div id="wan27vExtendRow" style="display:none;">
+            <div style="font-size:10px;color:var(--dim2);margin-bottom:5px;line-height:1.5;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+              <b style="color:var(--dim);">Extend video</b> — optional source video to continue
+            </div>
+            <div style="font-size:10px;color:var(--dim);margin-bottom:5px;" id="wan27vSrcInfo">None selected</div>
+            <div id="wan27vSrcThumb" style="display:none;margin-bottom:6px;">
+              <img id="wan27vSrcImg" src="" style="width:100%;max-height:120px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+              <div id="wan27vSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 0;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;"></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <button class="ibtn" onclick="wan27vPickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
+              <button class="ibtn" id="wan27vSrcDescribeBtn" onclick="wan27vDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
+              <button class="ibtn" id="wan27vSrcClearBtn" onclick="wan27vClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
+            </div>
+          </div>
+
+        </div>
+
+
+      <div class="psec" id="wan27eSrcRow" style="display:none;">
+        <div class="plabel">Source Video
+          <span id="wan27eSrcInfo" style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">None selected</span>
+        </div>
+        <div id="wan27eSrcThumb" style="display:none;margin-bottom:6px;">
+          <img id="wan27eSrcImg" src="" style="width:100%;max-height:140px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+          <div id="wan27eSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:5px 0 2px;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.6;"></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <button class="ibtn" onclick="wan27ePickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
+          <button class="ibtn" id="wan27eSrcDescribeBtn" onclick="wan27eDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
+          <button class="ibtn" id="wan27eSrcClearBtn" onclick="wan27eClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
+        </div>
+        <div style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;">Click <b>▷ Use</b> on any video in the gallery, or use <b>☰ Gallery</b> to pick one.</div>
+      </div>
+
+      <!-- WAN 2.7 Video Edit: params -->
+      <div class="psec" id="wan27eParams" style="display:none;">
+
+        <!-- Resolution -->
+        <div class="ctrl">
+          <div class="ctrl-label">Resolution</div>
+          <select id="wan27eResolution"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+            <option value="1080p" selected>1080p — $0.15/s</option>
+            <option value="720p">720p — $0.10/s</option>
+          </select>
+        </div>
+
+        <!-- Duration -->
+        <div class="ctrl">
+          <div class="ctrl-label">Duration <span style="color:var(--dim2);font-weight:400;">(0 = match source)</span></div>
+          <select id="wan27eDuration"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+            <option value="0" selected>Auto (match source)</option>
+            <option value="2">2s</option><option value="3">3s</option><option value="4">4s</option>
+            <option value="5">5s</option><option value="6">6s</option><option value="7">7s</option>
+            <option value="8">8s</option><option value="9">9s</option><option value="10">10s</option>
+          </select>
+        </div>
+
+        <!-- Aspect ratio -->
+        <div class="ctrl">
+          <div class="ctrl-label">Aspect ratio</div>
+          <select id="wan27eAspect"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+            <option value="auto" selected>Auto (match source)</option>
+            <option value="16:9">16:9 Landscape</option>
+            <option value="9:16">9:16 Portrait</option>
+            <option value="1:1">1:1 Square</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4</option>
+          </select>
+        </div>
+
+        <!-- Audio -->
+        <div class="ctrl">
+          <div class="ctrl-label">Audio</div>
+          <select id="wan27eAudio"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+            <option value="auto" selected>Auto (model decides)</option>
+            <option value="origin">Origin (keep original audio)</option>
+          </select>
+        </div>
+
+        <!-- Seed -->
+        <div class="ctrl">
+          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+          <input type="number" id="wan27eSeed" placeholder="42" min="0" max="2147483647"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+        </div>
+
+        <!-- Safety checker -->
+        <div class="ctrl">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="wan27eSafety" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+            <span style="font-size:11px;color:var(--dim);">Safety checker</span>
+          </label>
+        </div>
+
+        <div style="font-size:10px;color:var(--dim2);margin-top:4px;line-height:1.5;">
+          Source video required · Must be &lt;10s · Optional ref image below for style guidance
+        </div>
+
       </div>
 
       <!-- Unified ref panel — adapts to model refMode -->
@@ -2885,6 +3031,11 @@ input[type=range].prange::-webkit-slider-thumb {
           <!-- Creative mode options -->
           <div id="magnificVidCreativeOpts">
             <div class="ctrl">
+              <div class="ctrl-label">Prompt <span style="color:var(--dim2);text-transform:none;letter-spacing:0;">(optional)</span></div>
+              <input type="text" id="magnificVidPrompt" placeholder="e.g. cinematic detail, sharp textures"
+                style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;margin-top:4px;box-sizing:border-box;">
+            </div>
+            <div class="ctrl">
               <div class="ctrl-label">Creativity <span class="cv" id="magnificVidCreativityVal">50</span></div>
               <input type="range" id="magnificVidCreativity" min="0" max="100" value="50" step="1"
                 oninput="document.getElementById('magnificVidCreativityVal').textContent=this.value"
@@ -2915,7 +3066,7 @@ input[type=range].prange::-webkit-slider-thumb {
           </div>
 
           <div style="padding:6px 0 4px;font-size:10px;color:var(--dim2);line-height:1.5;">
-            Select source video using <strong style="color:var(--dim);">✦ Topaz</strong> button on any video card, or the selector above.
+            Select source video using <strong style="color:var(--dim);">✦ Upscale</strong> button on any video card, or the selector above.
           </div>
         </div>
 
@@ -3029,7 +3180,7 @@ input[type=range].prange::-webkit-slider-thumb {
       <!-- Copyright watermark — bottom-right corner -->
       <div id="gisWatermark" style="position:absolute;bottom:14px;right:18px;pointer-events:none;z-index:1;text-align:right;line-height:1.55;">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.60);letter-spacing:.04em;">Generative Image Studio</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2025 Petr Sajner · info.genimagestudio@gmail.com</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2026 Petr Sajner · info.genimagestudio@gmail.com</div>
       </div>
     </div>
 
@@ -3045,7 +3196,7 @@ input[type=range].prange::-webkit-slider-thumb {
       <!-- Copyright watermark — bottom-right corner -->
       <div style="position:absolute;bottom:14px;right:18px;pointer-events:none;z-index:1;text-align:right;line-height:1.55;">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.60);letter-spacing:.04em;">Generative Image Studio</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2025 Petr Sajner · info.genimagestudio@gmail.com</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2026 Petr Sajner · info.genimagestudio@gmail.com</div>
       </div>
     </div>
 
@@ -3458,7 +3609,7 @@ input[type=range].prange::-webkit-slider-thumb {
             </a>
           </div>
           <div style="margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.1);font-size:11px;color:rgba(255,255,255,.45);font-family:'IBM Plex Mono',monospace;letter-spacing:.03em;">
-            © 2025 Petr Sajner · All rights reserved
+            © 2026 Petr Sajner · All rights reserved
           </div>
         </div>
       </div>
@@ -3974,7 +4125,7 @@ input[type=range].prange::-webkit-slider-thumb {
       <button class="vlb-btn" onclick="videoLbToggleLike()" id="videoLbLikeBtn">♡ Like</button>
       <button class="vlb-btn" onclick="reuseVideoJob(videoLbCurrentId)">↺ Reuse setup</button>
       <button class="vlb-btn" onclick="videoLbUse()">▷ Use</button>
-      <button class="vlb-btn" id="videoLbTopazBtn" onclick="videoLbTopaz()">✦ Topaz</button>
+      <button class="vlb-btn" id="videoLbTopazBtn" onclick="videoLbTopaz()">✦ Upscale</button>
       <button class="vlb-btn" onclick="closeVideoLightbox()">Close</button>
     </div>
   </div>

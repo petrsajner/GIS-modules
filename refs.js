@@ -113,22 +113,11 @@ async function addRefFromBase64(b64data, name) {
   const assetMsg = alreadyExists ? `Already in Assets (${asset.autoName})` : `→ Assets (${asset.autoName})`;
 
   if (window.aiPromptContext === 'video') {
-    // ── Video mód: přidat do videoRefs[] ──
-    const videoModelKey = getActiveVideoModelKey();
-    const videoM = VIDEO_MODELS?.[videoModelKey];
-    const maxV = videoM?.maxRefs || 0;
-    const alreadyInVideoRefs = videoRefs.some(r => r.assetId === asset.id);
-    if (alreadyInVideoRefs) {
-      toast(`${asset.autoName} is already a video reference`, 'ok');
-    } else if (maxV > 0 && videoRefs.length < maxV) {
-      videoRefs.push(refEntry);
-      renderVideoRefPanel?.();
-      toast(`Saved ${assetMsg} + added as video ref [${videoRefs.length}/${maxV}]`, 'ok');
-    } else {
-      toast(`Saved ${assetMsg} · video ref limit reached (${maxV})`, 'ok');
-    }
-  } else {
-    // ── Image mód: přidat do refs[] ──
+    // ── Video mód: přidat do refs[] (image gen) — Ref+Assets vždy cílí na image gen
+    // Video refs se přidávají přes useVideoFromGallery nebo assets panel
+  }
+  // ── Image mód: přidat do refs[] ──
+  {
     const m = MODELS[currentModel];
     const max = getRefMax();
     const alreadyInRefs = refs.some(r => r.assetId === asset.id);
@@ -152,6 +141,8 @@ async function addRefFromBase64(b64data, name) {
     renderAssetFolders();
   }
 
+  // Vždy přepnout na image gen panel (Ref+Assets vždy cílí na image generaci)
+  if (typeof setGenMode === 'function') setGenMode('image');
   switchView('gen');
 }
 

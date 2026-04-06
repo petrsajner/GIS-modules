@@ -385,256 +385,376 @@ async function batchUpscaleSelected() {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:400;display:flex;align-items:center;justify-content:center;';
     overlay.innerHTML = `
-      <div style="background:var(--s1);border:1px solid var(--border);padding:20px;width:340px;max-height:90vh;overflow-y:auto;">
-        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:15px;margin-bottom:4px;">⬆ Batch Upscale</div>
-        <div style="font-size:11px;color:var(--dim);margin-bottom:16px;">Selected images: <b style="color:var(--accent);">${ids.length}</b> — same settings for all</div>
+      <div style="background:var(--s1);border:1px solid var(--border);padding:22px;min-width:360px;max-width:440px;max-height:90vh;overflow-y:auto;">
+        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:15px;margin-bottom:14px;color:var(--purple)">⬆ Batch Upscale</div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:16px;">
+          Selected: <b style="color:var(--accent);">${ids.length} images</b> — same settings for all
+        </div>
+
+        <!-- Mode selector -->
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:8px;">Mode</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--purple);cursor:pointer;font-size:11px;color:var(--purple);" id="bupMode_crisp_lbl">
-            <input type="radio" name="bupMode" value="crisp" checked style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;">Recraft Crisp <span style="color:var(--dim2);font-weight:400;">— $0.004/img</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">Fast, faithful — ideal for photos</div></div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);transition:border-color .15s;" id="upMode_crisp_lbl">
+            <input type="radio" name="upMode" value="crisp" checked style="margin-top:2px;accent-color:var(--purple);">
+            <div>
+              <div style="font-weight:600;color:var(--text);margin-bottom:2px;">Recraft Crisp <span style="color:var(--dim2);font-weight:400;">— $0.004 / obrázek</span></div>
+              <div style="color:var(--dim2);">Faithful upscale without hallucinations. Photos, portraits, products, text.</div>
+            </div>
           </label>
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="bupMode_seedvr_lbl">
-            <input type="radio" name="bupMode" value="seedvr" style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;color:var(--text);">SeedVR2 <span style="color:var(--dim2);font-weight:400;">— $0.001/MP</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">Target output resolution</div></div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);transition:border-color .15s;" id="upMode_seedvr_lbl">
+            <input type="radio" name="upMode" value="seedvr" style="margin-top:2px;accent-color:var(--purple);">
+            <div>
+              <div style="font-weight:600;color:var(--text);margin-bottom:2px;">SeedVR2 <span style="color:var(--dim2);font-weight:400;">— $0.001 / MP</span></div>
+              <div style="color:var(--dim2);">Diffusion-enhanced, top-quality portraits and textures. Target resolution selector.</div>
+            </div>
           </label>
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="bupMode_clarity_lbl">
-            <input type="radio" name="bupMode" value="clarity" style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;color:var(--text);">Clarity Upscaler <span style="color:var(--dim2);font-weight:400;">— compute</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">AI detail enhancement</div></div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);transition:border-color .15s;" id="upMode_clarity_lbl">
+            <input type="radio" name="upMode" value="clarity" style="margin-top:2px;accent-color:var(--purple);">
+            <div>
+              <div style="font-weight:600;color:var(--text);margin-bottom:2px;">Clarity Upscaler <span style="color:var(--dim2);font-weight:400;">— compute</span></div>
+              <div style="color:var(--dim2);">Creative, adds detail. AI art, illustrations. Prompt control.</div>
+            </div>
           </label>
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="bupMode_magnific_lbl">
-            <input type="radio" name="bupMode" value="magnific" style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;color:var(--text);">Magnific Creative <span style="color:var(--dim2);font-weight:400;">— €0.10–0.50/img · proxy ✦</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">Prompt-guided, 3 engines, creative detail</div></div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);transition:border-color .15s;" id="upMode_magnific_lbl">
+            <input type="radio" name="upMode" value="magnific" style="margin-top:2px;accent-color:var(--purple);">
+            <div>
+              <div style="font-weight:600;color:var(--text);margin-bottom:2px;">Magnific <span style="color:var(--dim2);font-weight:400;">— €0.10–0.50 / img · proxy ✦</span></div>
+              <div style="color:var(--dim2);">Industry-leading quality. 3 engines: Sparkle, Sharpy, Illusio. Up to 16×.</div>
+            </div>
           </label>
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="bupMode_magnific_prec_lbl">
-            <input type="radio" name="bupMode" value="magnific_prec" style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;color:var(--text);">Magnific Precision <span style="color:var(--dim2);font-weight:400;">— proxy ✦</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">Faithful upscaling — no hallucinations, faithful to original</div></div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);transition:border-color .15s;" id="upMode_tgigapixel_lbl">
+            <input type="radio" name="upMode" value="topaz_gigapixel" style="margin-top:2px;accent-color:var(--purple);">
+            <div>
+              <div style="font-weight:600;color:var(--text);margin-bottom:2px;">✦ Topaz Gigapixel <span style="color:var(--dim2);font-weight:400;">— 1 credit / 24MP · proxy</span></div>
+              <div style="color:var(--dim2);">Precision upscaling. Photos, AI art, faces. Very low cost. Same Topaz key.</div>
+            </div>
           </label>
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="bupMode_topaz_gigapixel_lbl">
-            <input type="radio" name="bupMode" value="topaz_gigapixel" style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;color:var(--text);">Topaz Gigapixel <span style="color:var(--dim2);font-weight:400;">— $0.005/img · proxy ✦</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">Best for photography, max fidelity</div></div>
-          </label>
-          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="bupMode_topaz_bloom_lbl">
-            <input type="radio" name="bupMode" value="topaz_bloom" style="margin-top:2px;accent-color:var(--purple);">
-            <div><div style="font-weight:600;color:var(--text);">Topaz Bloom / Wonder 2 <span style="color:var(--dim2);font-weight:400;">— $0.005/img · proxy ✦</span></div>
-            <div style="color:var(--dim2);margin-top:2px;">Creative generative upscaling, AI-generated detail</div></div>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);transition:border-color .15s;" id="upMode_tbloom_lbl">
+            <input type="radio" name="upMode" value="topaz_bloom" style="margin-top:2px;accent-color:var(--purple);">
+            <div>
+              <div style="font-weight:600;color:var(--text);margin-bottom:2px;">✦ Topaz Bloom <span style="color:var(--dim2);font-weight:400;">— 1 credit / 2MP · proxy</span></div>
+              <div style="color:var(--dim2);">Creative upscaling for AI art. Up to 8×. Adds texture and detail. Optional prompt.</div>
+            </div>
           </label>
         </div>
-        <!-- SeedVR options -->
-        <div id="bupSeedvrOpts" style="display:none;margin-bottom:16px;">
+
+        <!-- SeedVR2 options -->
+        <div id="upSeedvrOpts" style="display:none;margin-bottom:16px;">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Target resolution</div>
-          <div style="display:flex;gap:6px;">
-            ${['720p','1080p','1440p','2160p'].map(v=>`<label id="bupSvRes_${v}" style="flex:1;text-align:center;padding:5px 0;border:1px solid ${v==='1080p'?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${v==='1080p'?'var(--purple)':'var(--dim)'};">
-              <input type="radio" name="bupSvRes" value="${v}" ${v==='1080p'?'checked':''} style="display:none;">${v}
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            ${[['720p','HD'],['1080p','FHD'],['1440p','2K'],['2160p','4K']].map(([v,l],i) => `<label style="flex:1;text-align:center;padding:5px 2px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);" id="upSvRes_${v}">
+              <input type="radio" name="upSvRes" value="${v}" ${i===1?'checked':''} style="display:none;">
+              <span style="pointer-events:none;display:block;font-weight:600;">${l}</span><span style="pointer-events:none;font-size:9px;color:var(--dim2);">${v}</span>
             </label>`).join('')}
           </div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Noise scale <span id="upNoiseVal" style="color:var(--accent);">0.10</span></div>
+          <input type="range" id="upNoise" min="0" max="0.5" step="0.05" value="0.1" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upNoiseVal').textContent=parseFloat(this.value).toFixed(2)">
         </div>
+
         <!-- Clarity options -->
-        <div id="bupClarityOpts" style="display:none;margin-bottom:16px;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Factor <span style="color:var(--dim2);text-transform:none;letter-spacing:0;font-weight:400;">(max 4× — fal.ai limit)</span></div>
+        <div id="upClarityOpts" style="display:none;margin-bottom:16px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Upscale faktor <span style="color:var(--dim2);text-transform:none;letter-spacing:0;font-weight:400;">(max 4×)</span></div>
           <div style="display:flex;gap:6px;margin-bottom:10px;">
-            ${['2','4'].map(f=>`<label style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
-              <input type="radio" name="bupFactor" value="${f}" ${f==='2'?'checked':''} style="display:none;">${f}×
+            ${['2','4'].map(f => `<label style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
+              <input type="radio" name="upFactor" value="${f}" ${f==='2'?'checked':''} style="display:none;"><span style="pointer-events:none;">${f}×</span>
             </label>`).join('')}
           </div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Prompt <span style="color:var(--dim2);text-transform:none;letter-spacing:0;">(optional)</span></div>
+          <input type="text" id="upClarityPrompt" placeholder="masterpiece, best quality, highres" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;margin-bottom:10px;">
           <div style="display:flex;gap:12px;">
-            <div style="flex:1;"><div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Creativity <span id="bupCreativityVal" style="color:var(--accent);">0.35</span></div>
-              <input type="range" id="bupCreativity" min="0" max="1" step="0.05" value="0.35" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupCreativityVal').textContent=parseFloat(this.value).toFixed(2)"></div>
-            <div style="flex:1;"><div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Resemblance <span id="bupResemblanceVal" style="color:var(--accent);">0.6</span></div>
-              <input type="range" id="bupResemblance" min="0" max="1" step="0.05" value="0.6" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupResemblanceVal').textContent=parseFloat(this.value).toFixed(2)"></div>
-          </div>
-          <div style="margin-top:10px;"><div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Steps <span id="bupStepsVal" style="color:var(--accent);">18</span></div>
-            <input type="range" id="bupSteps" min="10" max="50" step="1" value="18" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupStepsVal').textContent=this.value"></div>
-        </div>
-        <!-- Magnific options -->
-        <div id="bupMagnificOpts" style="display:none;margin-bottom:16px;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Scale factor</div>
-          <div style="display:flex;gap:6px;margin-bottom:10px;">
-            ${['2x','4x','8x','16x'].map((f,i)=>`<label id="bupMagFactor_${f}" style="flex:1;text-align:center;padding:5px 0;border:1px solid ${i===1?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===1?'var(--purple)':'var(--dim)'};">
-              <input type="radio" name="bupMagFactor" value="${f}" ${i===1?'checked':''} style="display:none;">${f}
-            </label>`).join('')}
-          </div>
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Engine</div>
-          <div style="display:flex;gap:6px;margin-bottom:10px;">
-            ${[['magnific_sparkle','Sparkle'],['magnific_sharpy','Sharpy'],['magnific_illusio','Illusio']].map(([v,l],i)=>`<label id="bupMagEngine_${i}" style="flex:1;text-align:center;padding:5px 2px;border:1px solid ${i===0?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===0?'var(--purple)':'var(--dim)'};">
-              <input type="radio" name="bupMagEngine" value="${v}" ${i===0?'checked':''} style="display:none;">${l}
-            </label>`).join('')}
-          </div>
-          <select id="bupMagOptFor" style="width:100%;background:var(--bg2);color:var(--fg);border:1px solid var(--border);padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;outline:none;margin-bottom:8px;">
-            <option value="standard" selected>Standard</option>
-            <option value="portrait">Portrait</option>
-            <option value="3d">3D</option>
-            <option value="game-assets">Game Assets</option>
-            <option value="illustration">Illustration</option>
-          </select>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Creativity <span id="bupMagCreativityVal" style="color:var(--accent);">2</span></div>
-              <input type="range" id="bupMagCreativity" min="-3" max="3" step="1" value="2" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagCreativityVal').textContent=this.value"></div>
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">HDR <span id="bupMagHdrVal" style="color:var(--accent);">0</span></div>
-              <input type="range" id="bupMagHdr" min="-3" max="3" step="1" value="0" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagHdrVal').textContent=this.value"></div>
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Resemblance <span id="bupMagResemblanceVal" style="color:var(--accent);">0</span></div>
-              <input type="range" id="bupMagResemblance" min="-3" max="3" step="1" value="0" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagResemblanceVal').textContent=this.value"></div>
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Fractality <span id="bupMagFractalityVal" style="color:var(--accent);">-1</span></div>
-              <input type="range" id="bupMagFractality" min="-3" max="3" step="1" value="-1" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagFractalityVal').textContent=this.value"></div>
-          </div>
-        </div>
-        <!-- Magnific Precision options -->
-        <div id="bupMagnificPrecOpts" style="display:none;margin-bottom:16px;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Version</div>
-          <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
-            <label id="bupMagPrecV_v2_sublime" style="flex:1;min-width:70px;text-align:center;padding:5px 2px;border:1px solid var(--purple);cursor:pointer;font-size:10px;color:var(--purple);">
-              <input type="radio" name="bupMagPrecV" value="v2_sublime" checked style="display:none">V2 Sublime</label>
-            <label id="bupMagPrecV_v2_photo" style="flex:1;min-width:70px;text-align:center;padding:5px 2px;border:1px solid var(--border);cursor:pointer;font-size:10px;color:var(--dim);">
-              <input type="radio" name="bupMagPrecV" value="v2_photo" style="display:none">V2 Photo</label>
-            <label id="bupMagPrecV_v2_photo_denoiser" style="flex:1;min-width:70px;text-align:center;padding:5px 2px;border:1px solid var(--border);cursor:pointer;font-size:10px;color:var(--dim);">
-              <input type="radio" name="bupMagPrecV" value="v2_photo_denoiser" style="display:none">V2 Denoise</label>
-            <label id="bupMagPrecV_v1_hdr" style="flex:1;min-width:70px;text-align:center;padding:5px 2px;border:1px solid var(--border);cursor:pointer;font-size:10px;color:var(--dim);">
-              <input type="radio" name="bupMagPrecV" value="v1_hdr" style="display:none">V1 HDR</label>
-          </div>
-          <div id="bupMagPrecScaleWrap" style="margin-bottom:8px;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Scale</div>
-            <div style="display:flex;gap:6px;">
-              <label id="bupMagPrecScale_2" style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--purple);cursor:pointer;font-size:11px;color:var(--purple);">
-                <input type="radio" name="bupMagPrecScale" value="2" checked style="display:none">2×</label>
-              <label id="bupMagPrecScale_4" style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
-                <input type="radio" name="bupMagPrecScale" value="4" style="display:none">4×</label>
-              <label id="bupMagPrecScale_8" style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
-                <input type="radio" name="bupMagPrecScale" value="8" style="display:none">8×</label>
+            <div style="flex:1;">
+              <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Creativity <span id="upCreativityVal" style="color:var(--accent);">0.35</span></div>
+              <input type="range" id="upCreativity" min="0" max="1" step="0.05" value="0.35" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upCreativityVal').textContent=parseFloat(this.value).toFixed(2)">
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Resemblance <span id="upResemblanceVal" style="color:var(--accent);">0.60</span></div>
+              <input type="range" id="upResemblance" min="0" max="1" step="0.05" value="0.6" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upResemblanceVal').textContent=parseFloat(this.value).toFixed(2)">
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Sharpen <span id="bupMagPrecSharpenVal" style="color:var(--accent);">7</span></div>
-              <input type="range" id="bupMagPrecSharpen" min="0" max="100" step="1" value="7" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagPrecSharpenVal').textContent=this.value"></div>
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Grain <span id="bupMagPrecGrainVal" style="color:var(--accent);">7</span></div>
-              <input type="range" id="bupMagPrecGrain" min="0" max="100" step="1" value="7" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagPrecGrainVal').textContent=this.value"></div>
-            <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Detail <span id="bupMagPrecDetailVal" style="color:var(--accent);">30</span></div>
-              <input type="range" id="bupMagPrecDetail" min="0" max="100" step="1" value="30" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupMagPrecDetailVal').textContent=this.value"></div>
+          <div style="margin-top:10px;">
+            <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Steps <span id="upStepsVal" style="color:var(--accent);">18</span></div>
+            <input type="range" id="upSteps" min="10" max="50" step="1" value="18" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upStepsVal').textContent=this.value">
           </div>
         </div>
-        <!-- Topaz options -->
-        <div id="bupTopazOpts" style="display:none;margin-bottom:16px;">
+
+        <!-- Magnific options -->
+        <div id="upMagnificOpts" style="display:none;margin-bottom:16px;">
+          <div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);overflow:hidden;">
+            <button type="button" id="upMagModeCreative" style="flex:1;padding:8px 0;background:var(--purple);color:#fff;border:none;cursor:pointer;font-size:12px;font-family:'IBM Plex Mono',monospace;letter-spacing:.03em;">Creative</button>
+            <button type="button" id="upMagModePrecision" style="flex:1;padding:8px 0;background:var(--s2);color:var(--dim);border:none;border-left:1px solid var(--border);cursor:pointer;font-size:12px;font-family:'IBM Plex Mono',monospace;letter-spacing:.03em;">Precision</button>
+          </div>
+          <input type="hidden" id="upMagMode" value="creative">
+          <div id="upMagCreativePanel">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Scale factor</div>
+            <div style="display:flex;gap:6px;margin-bottom:12px;">
+              ${['2x','4x','8x','16x'].map((f,i) => `<label style="flex:1;text-align:center;padding:5px 0;border:1px solid ${i===1?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===1?'var(--purple)':'var(--dim)'};" id="upMagFactor_${f}">
+                <input type="radio" name="upMagFactor" value="${f}" ${i===1?'checked':''} style="display:none;">${f}
+              </label>`).join('')}
+            </div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Engine</div>
+            <div style="display:flex;gap:6px;margin-bottom:12px;">
+              ${[['magnific_sparkle','Sparkle'],['magnific_sharpy','Sharpy'],['magnific_illusio','Illusio']].map(([v,l],i) => `<label style="flex:1;text-align:center;padding:5px 2px;border:1px solid ${i===0?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===0?'var(--purple)':'var(--dim)'};" id="upMagEngine_${i}">
+                <input type="radio" name="upMagEngine" value="${v}" ${i===0?'checked':''} style="display:none;">${l}
+              </label>`).join('')}
+            </div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Optimized for</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;">
+              ${[['standard','Standard'],['portrait','Portrait'],['3d','3D'],['game-assets','Games'],['illustration','Illust']].map(([v,l],i) => `<label style="padding:5px 8px;border:1px solid ${i===0?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===0?'var(--purple)':'var(--dim)'};" id="upMagOptFor_${i}">
+                <input type="radio" name="upMagOptFor" value="${v}" ${i===0?'checked':''} style="display:none;">${l}
+              </label>`).join('')}
+            </div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Prompt <span style="color:var(--dim2);text-transform:none;letter-spacing:0;">(optional)</span></div>
+            <input type="text" id="upMagPrompt" placeholder="e.g. detailed skin texture, sharp eyes" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;margin-bottom:12px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Creativity <span id="upMagCreativityVal" style="color:var(--accent);">2</span></div>
+                <input type="range" id="upMagCreativity" min="-3" max="3" step="1" value="2" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagCreativityVal').textContent=this.value">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">HDR <span id="upMagHdrVal" style="color:var(--accent);">0</span></div>
+                <input type="range" id="upMagHdr" min="-3" max="3" step="1" value="0" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagHdrVal').textContent=this.value">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Resemblance <span id="upMagResemblanceVal" style="color:var(--accent);">0</span></div>
+                <input type="range" id="upMagResemblance" min="-3" max="3" step="1" value="0" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagResemblanceVal').textContent=this.value">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Fractality <span id="upMagFractalityVal" style="color:var(--accent);">-1</span></div>
+                <input type="range" id="upMagFractality" min="-3" max="3" step="1" value="-1" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagFractalityVal').textContent=this.value">
+              </div>
+            </div>
+          </div>
+          <div id="upMagPrecisionPanel" style="display:none;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Version</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;">
+              ${[['v2_sublime','V2 Sublime'],['v2_photo','V2 Photo'],['v2_photo_denoiser','V2 Denoise'],['v1_hdr','V1 HDR']].map(([v,l],i) => `<label style="flex:1;min-width:70px;text-align:center;padding:5px 2px;border:1px solid ${i===0?'var(--purple)':'var(--border)'};cursor:pointer;font-size:10px;color:${i===0?'var(--purple)':'var(--dim)'};" id="upMagPrecVer_${i}">
+                <input type="radio" name="upMagPrecVersion" value="${v}" ${i===0?'checked':''} style="display:none;">${l}
+              </label>`).join('')}
+            </div>
+            <div id="upMagPrecScaleRow" style="margin-bottom:12px;">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Scale factor</div>
+              <div style="display:flex;gap:6px;">
+                ${['2','4','8','16'].map((f,i) => `<label style="flex:1;text-align:center;padding:5px 0;border:1px solid ${i===0?'var(--purple)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===0?'var(--purple)':'var(--dim)'};" id="upMagPrecFactor_${f}">
+                  <input type="radio" name="upMagPrecFactor" value="${f}" ${i===0?'checked':''} style="display:none;">${f}×
+                </label>`).join('')}
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Sharpen <span id="upMagPrecSharpenVal" style="color:var(--purple);">7</span></div>
+                <input type="range" id="upMagPrecSharpen" min="0" max="100" step="1" value="7" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagPrecSharpenVal').textContent=this.value">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Smart grain <span id="upMagPrecGrainVal" style="color:var(--purple);">7</span></div>
+                <input type="range" id="upMagPrecGrain" min="0" max="100" step="1" value="7" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagPrecGrainVal').textContent=this.value">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Ultra detail <span id="upMagPrecDetailVal" style="color:var(--purple);">30</span></div>
+                <input type="range" id="upMagPrecDetail" min="0" max="100" step="1" value="30" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('upMagPrecDetailVal').textContent=this.value">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Topaz Gigapixel options -->
+        <div id="upTopazGigaOpts" style="display:none;margin-bottom:16px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Model</div>
+          <select id="upTGigaModel" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;margin-bottom:10px;">
+            <option value="Upscale Standard" selected>Standard — photos, balanced</option>
+            <option value="Upscale High Fidelity">High Fidelity — max fidelity</option>
+            <option value="Upscale Low Resolution">Low Resolution — blurry/low-res inputs</option>
+            <option value="Upscale CGI">CGI — AI art, illustrations</option>
+            <option value="Face Recovery Natural">Face Recovery — generative face recovery</option>
+            <option value="Text Recovery">Text &amp; Shapes — text, graphics</option>
+          </select>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Scale factor</div>
           <div style="display:flex;gap:6px;margin-bottom:10px;">
-            <label id="bupTopazFactor_2" style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--purple);cursor:pointer;font-size:11px;color:var(--purple);">
-              <input type="radio" name="bupTopazFactor" value="2" checked style="display:none">2×</label>
-            <label id="bupTopazFactor_4" style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
-              <input type="radio" name="bupTopazFactor" value="4" style="display:none">4×</label>
-            <label id="bupTopazFactor_6" style="flex:1;text-align:center;padding:5px 0;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
-              <input type="radio" name="bupTopazFactor" value="6" style="display:none">6×</label>
+            ${['2','4','6'].map((f,i) => `<label style="flex:1;text-align:center;padding:5px 0;border:1px solid ${i===0?'var(--accent)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===0?'var(--accent)':'var(--dim)'};" id="upTGigaFactor_${f}">
+              <input type="radio" name="upTGigaFactor" value="${f}" ${i===0?'checked':''} style="display:none;">${f}×
+            </label>`).join('')}
           </div>
-          <div><div style="font-size:10px;color:var(--dim);margin-bottom:3px;">Creativity <span id="bupTopazCreativityVal" style="color:var(--accent);">50</span> <span style="color:var(--dim2);">(Bloom/Wonder 2 only)</span></div>
-            <input type="range" id="bupTopazCreativity" min="0" max="100" step="1" value="50" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('bupTopazCreativityVal').textContent=this.value">
+          <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim);cursor:pointer;margin-bottom:6px;">
+            <input type="checkbox" id="upTGigaFace" style="accent-color:var(--accent);">
+            Face enhancement (generative)
+          </label>
+        </div>
+
+        <!-- Topaz Bloom options -->
+        <div id="upTopazBloomOpts" style="display:none;margin-bottom:16px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Model</div>
+          <select id="upTBloomModel" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;margin-bottom:10px;">
+            <option value="Bloom" selected>Bloom — AI art, prompt-guided detail</option>
+            <option value="Bloom Realism">Bloom Realism — realistic faces, skin detail</option>
+            <option value="Wonder 2">Wonder 2 — advanced generative realism</option>
+          </select>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Scale factor</div>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            ${['1','2','4','6','8'].map((f,i) => `<label style="flex:1;text-align:center;padding:5px 0;border:1px solid ${i===1?'var(--accent)':'var(--border)'};cursor:pointer;font-size:11px;color:${i===1?'var(--accent)':'var(--dim)'};" id="upTBloomFactor_${f}">
+              <input type="radio" name="upTBloomFactor" value="${f}" ${i===1?'checked':''} style="display:none;">${f}×
+            </label>`).join('')}
           </div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:6px;">Creativity</div>
+          <select id="upTBloomCreativity" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;margin-bottom:10px;">
+            <option value="2">Subtle (2)</option>
+            <option value="3" selected>Low (3)</option>
+            <option value="5">Medium (5)</option>
+            <option value="7">High (7)</option>
+            <option value="9">Max (9)</option>
+          </select>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);margin-bottom:4px;">Prompt <span style="color:var(--dim2);text-transform:none;letter-spacing:0;">(optional, Bloom only)</span></div>
+          <input type="text" id="upTBloomPrompt" placeholder="e.g. detailed skin texture, sharp eyes" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 9px;outline:none;">
         </div>
-        <div style="display:flex;gap:8px;">
-          <button class="ibtn" id="bupConfirm" style="flex:1;justify-content:center;padding:10px;border-color:var(--purple);color:var(--purple);">▶ Run ${ids.length}× upscale</button>
-          <button class="ibtn" id="bupCancel" style="justify-content:center;padding:10px;">Cancel</button>
+
+        <div style="display:flex;gap:8px;margin-top:16px;">
+          <button class="ibtn" id="confirmUpscale" style="flex:1;justify-content:center;padding:10px;border-color:var(--purple);color:var(--purple);">▶ Run ${ids.length}× upscale</button>
+          <button class="ibtn" id="cancelUpscale" style="justify-content:center;padding:10px;">Cancel</button>
         </div>
-      </div>`;
+      </div>
+    `;
     document.body.appendChild(overlay);
 
-    // Mode toggle
-    overlay.querySelectorAll('input[name="bupMode"]').forEach(r => r.addEventListener('change', () => {
-      const sel = overlay.querySelector('input[name="bupMode"]:checked')?.value;
-      ['crisp','seedvr','clarity','magnific','magnific_prec','topaz_gigapixel','topaz_bloom'].forEach(m => {
-        const lbl = overlay.querySelector(`#bupMode_${m}_lbl`);
-        if (lbl) { lbl.style.borderColor = sel===m ? 'var(--purple)' : 'var(--border)'; lbl.style.color = sel===m ? 'var(--purple)' : 'var(--dim)'; }
-      });
-      overlay.querySelector('#bupSeedvrOpts').style.display       = sel==='seedvr'          ? 'block' : 'none';
-      overlay.querySelector('#bupClarityOpts').style.display      = sel==='clarity'         ? 'block' : 'none';
-      overlay.querySelector('#bupMagnificOpts').style.display     = sel==='magnific'        ? 'block' : 'none';
-      overlay.querySelector('#bupMagnificPrecOpts').style.display = sel==='magnific_prec'   ? 'block' : 'none';
-      overlay.querySelector('#bupTopazOpts').style.display        = (sel==='topaz_gigapixel'||sel==='topaz_bloom') ? 'block' : 'none';
-      // V1 HDR has no scale factor
-      if (sel === 'magnific_prec') {
-        const precV = overlay.querySelector('input[name="bupMagPrecV"]:checked')?.value || 'v2_sublime';
-        const scaleWrap = overlay.querySelector('#bupMagPrecScaleWrap');
-        if (scaleWrap) scaleWrap.style.display = precV === 'v1_hdr' ? 'none' : '';
-      }
-    }));
-    // Precision version toggle — hide scale for V1
-    overlay.querySelectorAll('input[name="bupMagPrecV"]').forEach(r => r.addEventListener('change', () => {
-      ['v2_sublime','v2_photo','v2_photo_denoiser','v1_hdr'].forEach(v => {
-        const lbl = overlay.querySelector(`#bupMagPrecV_${v}`);
-        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
-      });
-      const scaleWrap = overlay.querySelector('#bupMagPrecScaleWrap');
-      const isV1 = overlay.querySelector('input[name="bupMagPrecV"]:checked')?.value === 'v1_hdr';
-      if (scaleWrap) scaleWrap.style.display = isV1 ? 'none' : '';
-    }));
-    overlay.querySelectorAll('input[name="bupMagPrecScale"]').forEach(r => r.addEventListener('change', () => {
-      [2,4,8].forEach(f => {
-        const lbl = overlay.querySelector(`#bupMagPrecScale_${f}`);
-        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
-      });
-    }));
-    overlay.querySelectorAll('input[name="bupTopazFactor"]').forEach(r => r.addEventListener('change', () => {
-      [2,4,6].forEach(f => {
-        const lbl = overlay.querySelector(`#bupTopazFactor_${f}`);
-        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
-      });
-    }));
-    overlay.querySelectorAll('input[name="bupSvRes"]').forEach(r => r.addEventListener('change', () => {
-      ['720p','1080p','1440p','2160p'].forEach(v => {
-        const lbl = overlay.querySelector(`#bupSvRes_${v}`);
-        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
-      });
-    }));
-    overlay.querySelectorAll('input[name="bupMagFactor"]').forEach(r => r.addEventListener('change', () => {
-      ['2x','4x','8x','16x'].forEach(f => {
-        const lbl = overlay.querySelector(`#bupMagFactor_${f}`);
-        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
-      });
-    }));
-    overlay.querySelectorAll('input[name="bupMagEngine"]').forEach(r => r.addEventListener('change', () => {
-      [0,1,2].forEach(i => {
-        const lbl = overlay.querySelector(`#bupMagEngine_${i}`);
-        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
-      });
-    }));
-
-    overlay.querySelector('#bupConfirm').onclick = () => {
-      const mode        = overlay.querySelector('input[name="bupMode"]:checked')?.value || 'crisp';
-      const factor      = parseInt(overlay.querySelector('input[name="bupFactor"]:checked')?.value || '2');
-      const seedvrRes   = overlay.querySelector('input[name="bupSvRes"]:checked')?.value || '1080p';
-      const creativity  = parseFloat(overlay.querySelector('#bupCreativity')?.value || '0.35');
-      const resemblance = parseFloat(overlay.querySelector('#bupResemblance')?.value || '0.6');
-      const claritySteps = parseInt(overlay.querySelector('#bupSteps')?.value || '18');
-      const magFactor   = overlay.querySelector('input[name="bupMagFactor"]:checked')?.value || '2x';
-      const magEngine   = overlay.querySelector('input[name="bupMagEngine"]:checked')?.value || 'magnific_sparkle';
-      const magOptFor   = overlay.querySelector('#bupMagOptFor')?.value || 'standard';
-      const magCreativity  = parseInt(overlay.querySelector('#bupMagCreativity')?.value || '2');
-      const magHdr         = parseInt(overlay.querySelector('#bupMagHdr')?.value || '0');
-      const magResemblance = parseInt(overlay.querySelector('#bupMagResemblance')?.value || '0');
-      const magFractality  = parseInt(overlay.querySelector('#bupMagFractality')?.value || '-1');
-      // Precision
-      const magPrecVersion = overlay.querySelector('input[name="bupMagPrecV"]:checked')?.value || 'v2_sublime';
-      const magPrecScale   = parseInt(overlay.querySelector('input[name="bupMagPrecScale"]:checked')?.value || '2');
-      const magPrecSharpen = parseInt(overlay.querySelector('#bupMagPrecSharpen')?.value || '7');
-      const magPrecGrain   = parseInt(overlay.querySelector('#bupMagPrecGrain')?.value || '7');
-      const magPrecDetail  = parseInt(overlay.querySelector('#bupMagPrecDetail')?.value || '30');
-      // Topaz
-      const topazFactor    = parseInt(overlay.querySelector('input[name="bupTopazFactor"]:checked')?.value || '2');
-      const topazCreativity= parseInt(overlay.querySelector('#bupTopazCreativity')?.value || '50');
-      document.body.removeChild(overlay);
-      resolve({ confirmed: true, mode, factor, seedvrRes, creativity, resemblance, claritySteps,
-        magFactor, magEngine, magOptFor, magCreativity, magHdr, magResemblance, magFractality,
-        magPrecVersion, magPrecScale, magPrecSharpen, magPrecGrain, magPrecDetail,
-        topazFactor, topazCreativity });
+    // Mode radio — toggle options visibility + label borders
+    const modeRadios = overlay.querySelectorAll('input[name="upMode"]');
+    const clarityOpts = overlay.querySelector('#upClarityOpts');
+    const seedvrOpts = overlay.querySelector('#upSeedvrOpts');
+    const magnificOpts = overlay.querySelector('#upMagnificOpts');
+    const topazGigaOpts = overlay.querySelector('#upTopazGigaOpts');
+    const topazBloomOpts = overlay.querySelector('#upTopazBloomOpts');
+    const updateModeBorders = () => {
+      const sel = overlay.querySelector('input[name="upMode"]:checked')?.value;
+      overlay.querySelector('#upMode_crisp_lbl').style.borderColor     = sel === 'crisp'           ? 'var(--purple)' : 'var(--border)';
+      overlay.querySelector('#upMode_seedvr_lbl').style.borderColor    = sel === 'seedvr'          ? 'var(--purple)' : 'var(--border)';
+      overlay.querySelector('#upMode_clarity_lbl').style.borderColor   = sel === 'clarity'         ? 'var(--purple)' : 'var(--border)';
+      overlay.querySelector('#upMode_magnific_lbl').style.borderColor  = sel === 'magnific'        ? 'var(--purple)' : 'var(--border)';
+      overlay.querySelector('#upMode_tgigapixel_lbl').style.borderColor = sel === 'topaz_gigapixel' ? 'var(--purple)' : 'var(--border)';
+      overlay.querySelector('#upMode_tbloom_lbl').style.borderColor    = sel === 'topaz_bloom'     ? 'var(--purple)' : 'var(--border)';
+      seedvrOpts.style.display     = sel === 'seedvr'          ? 'block' : 'none';
+      clarityOpts.style.display    = sel === 'clarity'         ? 'block' : 'none';
+      magnificOpts.style.display   = sel === 'magnific'        ? 'block' : 'none';
+      topazGigaOpts.style.display  = sel === 'topaz_gigapixel' ? 'block' : 'none';
+      topazBloomOpts.style.display = sel === 'topaz_bloom'     ? 'block' : 'none';
     };
-    overlay.querySelector('#bupCancel').onclick = () => { document.body.removeChild(overlay); resolve({ confirmed: false }); };
+    modeRadios.forEach(r => r.addEventListener('change', updateModeBorders));
+    overlay.querySelectorAll('input[name="upFactor"]').forEach(r => r.addEventListener('change', () => {
+      overlay.querySelectorAll('label:has(input[name="upFactor"])').forEach(l => {
+        l.style.borderColor = l.querySelector('input').checked ? 'var(--purple)' : 'var(--border)';
+        l.style.color = l.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)';
+      });
+    }));
+    overlay.querySelectorAll('input[name="upSvRes"]').forEach(r => r.addEventListener('change', () => {
+      ['720p','1080p','1440p','2160p'].forEach(v => {
+        const lbl = overlay.querySelector(`#upSvRes_${v}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
+      });
+    }));
+    overlay.querySelectorAll('input[name="upMagFactor"]').forEach(r => r.addEventListener('change', () => {
+      ['2x','4x','8x','16x'].forEach(f => {
+        const lbl = overlay.querySelector(`#upMagFactor_${f}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
+      });
+    }));
+    overlay.querySelectorAll('input[name="upMagEngine"]').forEach(r => r.addEventListener('change', () => {
+      [0,1,2].forEach(i => {
+        const lbl = overlay.querySelector(`#upMagEngine_${i}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
+      });
+    }));
+    overlay.querySelectorAll('input[name="upMagOptFor"]').forEach(r => r.addEventListener('change', () => {
+      [0,1,2,3,4].forEach(i => {
+        const lbl = overlay.querySelector(`#upMagOptFor_${i}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
+      });
+    }));
+    const magModeInput = overlay.querySelector('#upMagMode');
+    const magCreativePanel = overlay.querySelector('#upMagCreativePanel');
+    const magPrecisionPanel = overlay.querySelector('#upMagPrecisionPanel');
+    const updateMagMode = (mode) => {
+      magModeInput.value = mode;
+      const isCreative = mode === 'creative';
+      overlay.querySelector('#upMagModeCreative').style.background = isCreative ? 'var(--purple)' : 'var(--s2)';
+      overlay.querySelector('#upMagModeCreative').style.color = isCreative ? '#fff' : 'var(--dim)';
+      overlay.querySelector('#upMagModePrecision').style.background = !isCreative ? 'var(--purple)' : 'var(--s2)';
+      overlay.querySelector('#upMagModePrecision').style.color = !isCreative ? '#fff' : 'var(--dim)';
+      magCreativePanel.style.display = isCreative ? 'block' : 'none';
+      magPrecisionPanel.style.display = !isCreative ? 'block' : 'none';
+    };
+    overlay.querySelector('#upMagModeCreative').onclick = () => updateMagMode('creative');
+    overlay.querySelector('#upMagModePrecision').onclick = () => updateMagMode('precision');
+    const updatePrecVersion = () => {
+      const ver = overlay.querySelector('input[name="upMagPrecVersion"]:checked')?.value || 'v2_sublime';
+      const scaleRow = overlay.querySelector('#upMagPrecScaleRow');
+      if (scaleRow) scaleRow.style.display = ver === 'v1_hdr' ? 'none' : 'block';
+      [0,1,2,3].forEach(i => {
+        const lbl = overlay.querySelector(`#upMagPrecVer_${i}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
+      });
+    };
+    overlay.querySelectorAll('input[name="upMagPrecVersion"]').forEach(r => r.addEventListener('change', updatePrecVersion));
+    overlay.querySelectorAll('input[name="upMagPrecFactor"]').forEach(r => r.addEventListener('change', () => {
+      ['2','4','8','16'].forEach(f => {
+        const lbl = overlay.querySelector(`#upMagPrecFactor_${f}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--purple)' : 'var(--dim)'; }
+      });
+    }));
+    overlay.querySelectorAll('input[name="upTGigaFactor"]').forEach(r => r.addEventListener('change', () => {
+      ['2','4','6'].forEach(f => {
+        const lbl = overlay.querySelector(`#upTGigaFactor_${f}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--accent)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--accent)' : 'var(--dim)'; }
+      });
+    }));
+    overlay.querySelectorAll('input[name="upTBloomFactor"]').forEach(r => r.addEventListener('change', () => {
+      ['1','2','4','6','8'].forEach(f => {
+        const lbl = overlay.querySelector(`#upTBloomFactor_${f}`);
+        if (lbl) { lbl.style.borderColor = lbl.querySelector('input').checked ? 'var(--accent)' : 'var(--border)'; lbl.style.color = lbl.querySelector('input').checked ? 'var(--accent)' : 'var(--dim)'; }
+      });
+    }));
+    updateModeBorders();
+    const initSvRes = overlay.querySelector('#upSvRes_1080p');
+    if (initSvRes) initSvRes.style.borderColor = 'var(--purple)';
+
+    overlay.querySelector('#confirmUpscale').onclick = () => {
+      const mode = overlay.querySelector('input[name="upMode"]:checked')?.value || 'crisp';
+      const factor = overlay.querySelector('input[name="upFactor"]:checked')?.value || '2';
+      const clarityPrompt = overlay.querySelector('#upClarityPrompt')?.value?.trim() || '';
+      const creativity = parseFloat(overlay.querySelector('#upCreativity')?.value || '0.35');
+      const resemblance = parseFloat(overlay.querySelector('#upResemblance')?.value || '0.6');
+      const seedvrRes = overlay.querySelector('input[name="upSvRes"]:checked')?.value || '1080p';
+      const noiseScale = parseFloat(overlay.querySelector('#upNoise')?.value || '0.1');
+      const claritySteps = parseInt(overlay.querySelector('#upSteps')?.value || '18');
+      const magMode = overlay.querySelector('#upMagMode')?.value || 'creative';
+      const magFactor = overlay.querySelector('input[name="upMagFactor"]:checked')?.value || '2x';
+      const magEngine = overlay.querySelector('input[name="upMagEngine"]:checked')?.value || 'magnific_sparkle';
+      const magOptFor = overlay.querySelector('input[name="upMagOptFor"]:checked')?.value || 'standard';
+      const magPrompt = overlay.querySelector('#upMagPrompt')?.value?.trim() || '';
+      const magCreativity = parseInt(overlay.querySelector('#upMagCreativity')?.value || '2');
+      const magHdr = parseInt(overlay.querySelector('#upMagHdr')?.value || '0');
+      const magResemblance = parseInt(overlay.querySelector('#upMagResemblance')?.value || '0');
+      const magFractality = parseInt(overlay.querySelector('#upMagFractality')?.value || '-1');
+      const magPrecVersion = overlay.querySelector('input[name="upMagPrecVersion"]:checked')?.value || 'v2_sublime';
+      const magPrecFactor  = parseInt(overlay.querySelector('input[name="upMagPrecFactor"]:checked')?.value || '2');
+      const magPrecSharpen = parseInt(overlay.querySelector('#upMagPrecSharpen')?.value || '7');
+      const magPrecGrain   = parseInt(overlay.querySelector('#upMagPrecGrain')?.value || '7');
+      const magPrecDetail  = parseInt(overlay.querySelector('#upMagPrecDetail')?.value || '30');
+      const tGigaModel  = overlay.querySelector('#upTGigaModel')?.value || 'Upscale Standard';
+      const tGigaFactor = parseInt(overlay.querySelector('input[name="upTGigaFactor"]:checked')?.value || '2');
+      const tGigaFace   = overlay.querySelector('#upTGigaFace')?.checked || false;
+      const tBloomModel      = overlay.querySelector('#upTBloomModel')?.value || 'Bloom';
+      const tBloomFactor     = parseInt(overlay.querySelector('input[name="upTBloomFactor"]:checked')?.value || '2');
+      const tBloomPrompt     = overlay.querySelector('#upTBloomPrompt')?.value?.trim() || '';
+      const tBloomCreativity = parseInt(overlay.querySelector('#upTBloomCreativity')?.value || '3');
+      document.body.removeChild(overlay);
+      resolve({ confirmed: true, mode, factor: parseInt(factor), clarityPrompt, creativity, resemblance, seedvrRes, noiseScale, claritySteps,
+        magMode, magFactor, magEngine, magOptFor, magPrompt, magCreativity, magHdr, magResemblance, magFractality,
+        magPrecVersion, magPrecFactor, magPrecSharpen, magPrecGrain, magPrecDetail,
+        tGigaModel, tGigaFactor, tGigaFace, tBloomModel, tBloomFactor, tBloomPrompt, tBloomCreativity });
+    };
+    overlay.querySelector('#cancelUpscale').onclick = () => { document.body.removeChild(overlay); resolve({ confirmed: false }); };
     overlay.onclick = e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve({ confirmed: false }); } };
   });
 
   if (!result.confirmed) return;
 
-  if (result.mode === 'magnific' || result.mode === 'magnific_prec') {
+  if (result.mode === 'magnific') {
     if (!freepikKey) { toast('Freepik API key missing — enter it in Setup tab', 'err'); return; }
     if (!proxyUrl)   { toast('Proxy URL missing — enter it in Setup tab', 'err'); return; }
   } else if (result.mode === 'topaz_gigapixel' || result.mode === 'topaz_bloom') {
@@ -645,17 +765,16 @@ async function batchUpscaleSelected() {
     if (!falKey) { toast('fal.ai key missing — enter it in the header', 'err'); return; }
   }
 
-  const { mode, factor, seedvrRes, creativity, resemblance, claritySteps,
-    magFactor, magEngine, magOptFor, magCreativity, magHdr, magResemblance, magFractality,
-    magPrecVersion, magPrecScale, magPrecSharpen, magPrecGrain, magPrecDetail,
-    topazFactor, topazCreativity } = result;
+  const { mode, factor, clarityPrompt, creativity, resemblance, seedvrRes, noiseScale, claritySteps,
+    magMode, magFactor, magEngine, magOptFor, magPrompt, magCreativity, magHdr, magResemblance, magFractality,
+    magPrecVersion, magPrecFactor, magPrecSharpen, magPrecGrain, magPrecDetail,
+    tGigaModel, tGigaFactor, tGigaFace, tBloomModel, tBloomFactor, tBloomPrompt, tBloomCreativity } = result;
 
   const modeLabel = mode === 'crisp'           ? 'Recraft Crisp'
     : mode === 'seedvr'                        ? `SeedVR2 ${seedvrRes}`
-    : mode === 'magnific'                      ? `Magnific ${magFactor}`
-    : mode === 'magnific_prec'                 ? `Magnific Prec ${magPrecVersion}`
-    : mode === 'topaz_gigapixel'               ? `Topaz Gigapixel ${topazFactor}×`
-    : mode === 'topaz_bloom'                   ? `Topaz Bloom ${topazFactor}×`
+    : mode === 'magnific'                      ? (magMode === 'precision' ? `Magnific Prec ${magPrecVersion}` : `Magnific ${magFactor}`)
+    : mode === 'topaz_gigapixel'               ? `Topaz Gigapixel ${tGigaFactor}×`
+    : mode === 'topaz_bloom'                   ? `Topaz Bloom ${tBloomFactor}× (${tBloomModel})`
     : `Clarity ${factor}×`;
 
   let queued = 0;
@@ -679,12 +798,12 @@ async function batchUpscaleSelected() {
       upscaleSeedvrRes: seedvrRes,
       upscaleNoiseScale: 0.1,
       upscaleSteps: claritySteps,
-      magFactor, magEngine, magOptFor, magPrompt: '',
+      magFactor, magEngine, magOptFor, magPrompt,
       magCreativity, magHdr, magResemblance, magFractality,
-      magMode: mode === 'magnific_prec' ? 'precision' : 'creative',
-      magPrecVersion, magPrecScale, magPrecSharpen, magPrecGrain, magPrecDetail,
-      tGigaFactor: topazFactor, tBloomFactor: topazFactor,
-      tGigaCreativity: topazCreativity, tBloomCreativity: topazCreativity,
+      magMode,
+      magPrecVersion, magPrecFactor, magPrecSharpen, magPrecGrain, magPrecDetail,
+      tGigaModel, tGigaFactor, tGigaFace,
+      tBloomModel, tBloomFactor, tBloomPrompt, tBloomCreativity,
       freepikKey, proxyUrl,
       b64data: item.imageData,
       currentDims: dims,

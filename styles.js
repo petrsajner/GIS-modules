@@ -689,14 +689,17 @@ function toggleCameraOverlay() {
   const ov = document.getElementById('cameraOverlay');
   const showing = ov.style.display === 'flex';
   ov.style.display = showing ? 'none' : 'flex';
-  // Toggle active on all camera buttons (same pattern as styles)
-  document.querySelectorAll('.btn-camera').forEach(btn => btn.classList.toggle('active', !showing));
+  // Mark all camera buttons active when overlay is open, restore selectedCameras state when closed
   if (!showing) {
-    renderCameraItems(); updateCameraBtn();
+    document.querySelectorAll('.btn-camera').forEach(btn => btn.classList.add('active'));
+    renderCameraItems();
     // Bring camera to front, push styles back
     ov.style.zIndex = '201';
     const sov = document.getElementById('stylesOverlay');
     if (sov) sov.style.zIndex = '120';
+  } else {
+    // Overlay closing — restore button state based on actual camera selections
+    updateCameraBtn();
   }
 }
 

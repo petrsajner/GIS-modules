@@ -97,6 +97,12 @@ window.onload = () => {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && typeof renderVideoQueue === 'function') renderVideoQueue();
   });
+
+  // Clean up R2 temp video files from previous sessions — fire and forget
+  const _cleanProxy = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
+  if (_cleanProxy) {
+    fetch(`${_cleanProxy}/magnific/video-cleanup`, { method: 'POST' }).catch(() => {});
+  }
 };
 
 function updateApiDot(ok) {

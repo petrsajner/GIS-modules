@@ -185,26 +185,26 @@ const VIDEO_MODELS = {
   // Optional: character image ref (1st image ref)
   kling_v3_v2v_std: {
     name: 'Kling V3 Std · Motion Control', type: 'kling_video',
-    endpoint: 'fal-ai/kling-video/v3/standard/video-to-video',
-    desc: 'V2V · Upload action video for motion + optional character image · Motion Control',
+    endpoint: 'fal-ai/kling-video/v3/standard/motion-control',
+    desc: 'V2V · Upload action video for motion + character image (both required)',
     refMode: 'video_ref', maxRefs: 1,
-    refLabel: 'Character image (optional)',
+    refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
   },
   kling_v3_v2v_pro: {
     name: 'Kling V3 Pro · Motion Control', type: 'kling_video',
-    endpoint: 'fal-ai/kling-video/v3/pro/video-to-video',
-    desc: 'V2V · Upload action video for motion + optional character image · Pro quality',
+    endpoint: 'fal-ai/kling-video/v3/pro/motion-control',
+    desc: 'V2V · Upload action video for motion + character image (both required) · Pro quality',
     refMode: 'video_ref', maxRefs: 1,
-    refLabel: 'Character image (optional)',
+    refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
   },
   kling_26_v2v_pro: {
     name: 'Kling 2.6 Pro · Motion Control', type: 'kling_video',
-    endpoint: 'fal-ai/kling-video/v2.6/pro/video-to-video',
-    desc: 'V2V · Upload action video for motion + optional character image',
+    endpoint: 'fal-ai/kling-video/v2.6/pro/motion-control',
+    desc: 'V2V · Upload action video for motion + character image (both required)',
     refMode: 'video_ref', maxRefs: 1,
-    refLabel: 'Character image (optional)',
+    refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
   },
 
@@ -322,21 +322,34 @@ const VIDEO_MODELS = {
   // first_frame = start (required), last_frame = end (optional, FLF2V mode)
   // Output: single URL string (not array)
   // Audio: auto-generated if no audio URI provided
+  // ── WAN 2.7 — fal.ai (direct queue, no proxy) ────────────
+  wan27_t2v: {
+    name: 'Wan 2.7', type: 'wan27_video',
+    falEndpoint: 'fal-ai/wan/v2.7/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, hasAudio: false,
+    desc: 'T2V · Enhanced motion + coherence · Up to 15s · Audio URL · Alibaba via fal.ai',
+  },
   wan27_i2v: {
-    name: 'Wan 2.7 I2V', type: 'wan27_video',
-    replicateModel: 'wan-video/wan-2.7-i2v',
+    name: 'Wan 2.7', type: 'wan27_video',
+    falEndpoint: 'fal-ai/wan/v2.7/image-to-video',
     refMode: 'single_end', maxRefs: 2, maxDur: 15, hasAudio: false,
-    durOptions: [5, 10, 15],
     refLabel: 'Start frame',
     refLabelEnd: 'End frame (optional · FLF2V)',
-    desc: 'I2V · Start frame · Optional end frame (FLF2V) · Auto audio · 720p–1080p · Up to 15s · Alibaba via Replicate',
+    desc: 'I2V · Start + optional end frame (FLF2V) · Extend video · Up to 15s · Alibaba via fal.ai',
+  },
+  wan27_r2v: {
+    name: 'Wan 2.7 R2V', type: 'wan27_video',
+    falEndpoint: 'fal-ai/wan/v2.7/reference-to-video',
+    refMode: 'wan_r2v', maxRefs: 5, maxDur: 10, hasAudio: false,
+    refLabel: 'Character refs (image or video)',
+    desc: 'R2V · Character consistency · Image/video refs · Up to 10s · Alibaba via fal.ai',
   },
   wan27e_v2v: {
     name: 'Wan 2.7 Video Edit', type: 'wan27e_video',
-    replicateModel: 'wan-video/wan-2.7-videoedit',
+    falEndpoint: 'fal-ai/wan/v2.7/edit-video',
     refMode: 'single', maxRefs: 1, maxDur: 10, hasAudio: false,
     refLabel: 'Reference image (optional)',
-    desc: 'V2V · Video editing · Style transfer · Optional image ref · 720p/1080p · Up to 10s · Alibaba via Replicate',
+    desc: 'V2V · Instruction edit · Style transfer · Any source video · Optional ref image · Up to 10s · fal.ai',
   },
 
   wan26_t2v: {
@@ -455,8 +468,10 @@ const KLING_GROUPS = {
   wan27: {
     default: 'wan27_i2v',
     variants: [
-      { key: 'wan27_i2v',  label: 'I2V · Start frame · Optional end (FLF2V)' },
-      { key: 'wan27e_v2v', label: 'Video Edit · V2V · Style transfer' },
+      { key: 'wan27_t2v',  label: 'T2V · Text to Video' },
+      { key: 'wan27_i2v',  label: 'I2V · Start frame · Optional end (FLF2V) · Extend' },
+      { key: 'wan27_r2v',  label: 'R2V · Character refs · Image/video' },
+      { key: 'wan27e_v2v', label: 'Video Edit · Instruction / Style transfer' },
     ],
   },
   wan26: {
@@ -535,29 +550,145 @@ let videoJobs = [];           // active generation jobs
 let videoLbCurrentId = null;  // lightbox: current video id
 let videoLbDuration = 0;
 let videoRefs = [];           // [{data, mimeType, name}] — unified ref array per model
-let videoMotionFile = null;   // V2V: File object for motion reference video
-let topazSrcVideoId = null;   // Topaz: source video gallery ID
-let wan27eSrcVideoId = null;  // WAN 2.7 Video Edit: source video gallery ID
+let videoMotionFile    = null;   // V2V: File object (from upload)
+let videoMotionVideoId = null;   // V2V: gallery DB video ID (from gallery pick)
+let topazSrcVideoId    = null;   // Topaz/Magnific: source video gallery ID
+let wan27eSrcVideoId   = null;   // WAN 2.7 Video Edit: source video gallery ID
+let wan27vSrcVideoId   = null;   // WAN 2.7 I2V: optional source video for extension
+
+// ── WAN 2.7 I2V extend-video helpers ─────────────────────
+function wan27vClearSource() {
+  wan27vSrcVideoId = null;
+  const info    = document.getElementById('wan27vSrcInfo');
+  const thumbDiv = document.getElementById('wan27vSrcThumb');
+  const clearBtn = document.getElementById('wan27vSrcClearBtn');
+  const descBtn  = document.getElementById('wan27vSrcDescribeBtn');
+  if (info)     info.textContent       = 'None selected';
+  if (thumbDiv) thumbDiv.style.display = 'none';
+  if (clearBtn) clearBtn.style.display = 'none';
+  if (descBtn)  descBtn.style.display  = 'none';
+}
+
+async function wan27vSetSource(videoId) {
+  wan27vSrcVideoId = videoId;
+  const meta   = await dbGet('video_meta', videoId).catch(() => null);
+  const thumb  = await dbGet('video_thumbs', videoId).catch(() => null);
+  const info    = document.getElementById('wan27vSrcInfo');
+  const thumbDiv = document.getElementById('wan27vSrcThumb');
+  const imgEl   = document.getElementById('wan27vSrcImg');
+  const metaEl  = document.getElementById('wan27vSrcMeta');
+  const clearBtn = document.getElementById('wan27vSrcClearBtn');
+  const descBtn  = document.getElementById('wan27vSrcDescribeBtn');
+  if (info && meta) {
+    const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
+    info.textContent = `${meta.duration || '?'}s · ${mb}`;
+  }
+  if (thumb?.data && imgEl && thumbDiv) { imgEl.src = thumb.data; thumbDiv.style.display = 'block'; }
+  if (metaEl && meta) {
+    const res = meta.outWidth && meta.outHeight ? `${meta.outWidth}x${meta.outHeight}` : (meta.params?.resolution || null);
+    const chips = [res, meta.duration ? `${meta.duration}s` : null].filter(Boolean);
+    metaEl.innerHTML = chips.map(c =>
+      `<span style="background:var(--s2);border:1px solid var(--border);padding:2px 8px;font-size:10px;border-radius:2px;">${c}</span>`
+    ).join('');
+  }
+  if (clearBtn) clearBtn.style.display = '';
+  if (descBtn)  descBtn.style.display  = thumb?.data ? '' : 'none';
+}
+
+function wan27vPickFromGallery() {
+  switchView('video');
+  toast('Select a video in the gallery, then click ▷ Use', 'ok');
+}
+
+async function wan27vDescribeSource() {
+  const img = document.getElementById('wan27vSrcImg');
+  if (!img?.src || img.src === window.location.href) return;
+  await _describeFromThumb(img.src);
+}
+
+// ── Shared: open describe modal with a thumbnail dataURL ──────
+async function _describeFromThumb(thumbDataUrl) {
+  const apiKey = localStorage.getItem('gis_apikey') || '';
+  if (!apiKey) { toast('Enter Google API key in Setup', 'err'); return; }
+  // Extract base64 (strip data:image/jpeg;base64, prefix)
+  const comma = thumbDataUrl.indexOf(',');
+  const b64   = comma >= 0 ? thumbDataUrl.slice(comma + 1) : thumbDataUrl;
+  _describeSource = 'video';
+  document.getElementById('dmPreview').src = thumbDataUrl;
+  document.getElementById('dmResult').value = '';
+  document.getElementById('dmStatus').textContent = '⟳ Generating…';
+  document.getElementById('describeModal').classList.add('show');
+  setDescribeTab('prompt');
+  await _runDescribe(apiKey, b64, 'image/jpeg', 'prompt');
+}
 
 // ── V2V / Motion Control helpers ─────────────────────────
-function v2vVideoSelected(files) {
+function _v2vSetPanel(thumbDataUrl, infoText) {
+  const info    = document.getElementById('v2vSrcInfo');
+  const thumbDiv = document.getElementById('v2vSrcThumb');
+  const img     = document.getElementById('v2vSrcImg');
+  const metaEl  = document.getElementById('v2vSrcMeta');
+  const clearBtn = document.getElementById('v2vClearBtn');
+  const descBtn  = document.getElementById('v2vDescribeBtn');
+  if (info) info.textContent = infoText || '';
+  if (thumbDataUrl && img && thumbDiv) {
+    img.src = thumbDataUrl;
+    thumbDiv.style.display = 'block';
+  } else if (thumbDiv) {
+    thumbDiv.style.display = 'none';
+  }
+  if (metaEl) metaEl.innerHTML = '';
+  if (clearBtn) clearBtn.style.display = '';
+  if (descBtn)  descBtn.style.display  = thumbDataUrl ? '' : 'none';
+}
+
+async function v2vVideoSelected(files) {
   const file = files?.[0];
   if (!file) return;
-  videoMotionFile = file;
-  const label = document.getElementById('v2vFileLabel');
-  if (label) label.textContent = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
-  const clearBtn = document.getElementById('v2vClearBtn');
-  if (clearBtn) clearBtn.style.display = '';
+  videoMotionFile    = file;
+  videoMotionVideoId = null;  // clear gallery selection
+  const infoText = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
+  _v2vSetPanel(null, infoText);  // show name immediately, then load thumb async
+  try {
+    const thumb = await generateVideoThumb(file);
+    if (thumb) _v2vSetPanel(thumb, infoText);
+  } catch(e) { /* thumb optional */ }
+}
+
+async function v2vSetFromGallery(videoId) {
+  videoMotionFile    = null;
+  videoMotionVideoId = videoId;
+  const meta  = await dbGet('video_meta', videoId).catch(() => null);
+  const thumb = await dbGet('video_thumbs', videoId).catch(() => null);
+  const mb    = meta?.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
+  const info  = `${meta?.duration || '?'}s · ${mb}`;
+  _v2vSetPanel(thumb?.data || null, info);
 }
 
 function clearV2VVideo() {
-  videoMotionFile = null;
-  const label = document.getElementById('v2vFileLabel');
-  if (label) label.textContent = 'No video selected';
+  videoMotionFile    = null;
+  videoMotionVideoId = null;
+  const info     = document.getElementById('v2vSrcInfo');
+  const thumbDiv = document.getElementById('v2vSrcThumb');
   const clearBtn = document.getElementById('v2vClearBtn');
+  const descBtn  = document.getElementById('v2vDescribeBtn');
+  const input    = document.getElementById('v2vVideoInput');
+  if (info)     info.textContent      = 'No video selected';
+  if (thumbDiv) thumbDiv.style.display = 'none';
   if (clearBtn) clearBtn.style.display = 'none';
-  const input = document.getElementById('v2vVideoInput');
-  if (input) input.value = '';
+  if (descBtn)  descBtn.style.display  = 'none';
+  if (input)    input.value            = '';
+}
+
+function v2vPickFromGallery() {
+  switchView('video');
+  toast('Select a video in the gallery, then click ▷ Use', 'ok');
+}
+
+async function v2vDescribeSource() {
+  const img = document.getElementById('v2vSrcImg');
+  if (!img?.src || img.src === window.location.href) return;
+  await _describeFromThumb(img.src);
 }
 
 // ── Topaz: source video management ──────────────────────
@@ -566,10 +697,12 @@ function topazClearSource() {
   const info    = document.getElementById('topazSrcInfo');
   const thumb   = document.getElementById('topazSrcThumb');
   const btn     = document.getElementById('topazSrcClearBtn');
+  const descBtn = document.getElementById('topazSrcDescribeBtn');
   const metaEl  = document.getElementById('topazSrcMeta');
   if (info)   info.textContent    = 'None selected';
   if (thumb)  thumb.style.display = 'none';
   if (btn)    btn.style.display   = 'none';
+  if (descBtn) descBtn.style.display = 'none';
   if (metaEl) metaEl.innerHTML    = '';
 }
 
@@ -582,6 +715,7 @@ async function topazSetSource(videoId) {
   const imgEl    = document.getElementById('topazSrcImg');
   const metaEl   = document.getElementById('topazSrcMeta');
   const btn      = document.getElementById('topazSrcClearBtn');
+  const descBtn  = document.getElementById('topazSrcDescribeBtn');
   if (info && meta) {
     const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
     info.textContent = `${meta.duration || '?'}s · ${mb}`;
@@ -594,7 +728,8 @@ async function topazSetSource(videoId) {
   if (metaEl && meta) {
     _renderTopazSrcMeta(metaEl, meta, null, null);
   }
-  if (btn) btn.style.display = '';
+  if (btn)     btn.style.display     = '';
+  if (descBtn) descBtn.style.display = thumb?.data ? '' : 'none';
 
   // Async: load actual pixel dims + fps from video data (MP4 parser + video element)
   if (metaEl && meta) {
@@ -622,6 +757,12 @@ async function topazSetSource(videoId) {
   }
 }
 
+async function topazDescribeSource() {
+  const img = document.getElementById('topazSrcImg');
+  if (!img?.src || img.src === window.location.href) return;
+  await _describeFromThumb(img.src);
+}
+
 function _renderTopazSrcMeta(metaEl, meta, w, h, detectedFps) {
   const resStr = w && h ? `${w}×${h}` : (meta.outWidth && meta.outHeight ? `${meta.outWidth}×${meta.outHeight}` : (meta.params?.resolution || null));
   const ar = meta.params?.aspectRatio || null;
@@ -646,9 +787,11 @@ function wan27eClearSource() {
   const info  = document.getElementById('wan27eSrcInfo');
   const thumb = document.getElementById('wan27eSrcThumb');
   const btn   = document.getElementById('wan27eSrcClearBtn');
+  const desc  = document.getElementById('wan27eSrcDescribeBtn');
   if (info)  info.textContent    = 'None selected';
   if (thumb) thumb.style.display = 'none';
   if (btn)   btn.style.display   = 'none';
+  if (desc)  desc.style.display  = 'none';
 }
 
 async function wan27eSetSource(videoId) {
@@ -658,7 +801,9 @@ async function wan27eSetSource(videoId) {
   const info    = document.getElementById('wan27eSrcInfo');
   const thumbDiv = document.getElementById('wan27eSrcThumb');
   const imgEl   = document.getElementById('wan27eSrcImg');
+  const metaEl  = document.getElementById('wan27eSrcMeta');
   const btn     = document.getElementById('wan27eSrcClearBtn');
+  const desc    = document.getElementById('wan27eSrcDescribeBtn');
   if (info && meta) {
     const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
     info.textContent = `${meta.duration || '?'}s · ${mb}`;
@@ -667,7 +812,21 @@ async function wan27eSetSource(videoId) {
     imgEl.src = thumb.data;
     thumbDiv.style.display = 'block';
   }
-  if (btn) btn.style.display = '';
+  if (btn)  btn.style.display  = '';
+  if (desc) desc.style.display = thumb?.data ? '' : 'none';
+  if (metaEl && meta) {
+    const res = meta.outWidth && meta.outHeight ? `${meta.outWidth}×${meta.outHeight}` : (meta.params?.resolution || null);
+    const chips = [res, meta.duration ? `${meta.duration}s` : null].filter(Boolean);
+    metaEl.innerHTML = chips.map(c =>
+      `<span style="background:var(--s2);border:1px solid var(--border);padding:2px 8px;font-size:10px;border-radius:2px;">${c}</span>`
+    ).join('');
+  }
+}
+
+async function wan27eDescribeSource() {
+  const img = document.getElementById('wan27eSrcImg');
+  if (!img?.src || img.src === window.location.href) return;
+  await _describeFromThumb(img.src);
 }
 
 async function wan27ePickFromGallery() {
@@ -714,24 +873,30 @@ async function useVideoFromGallery(videoId) {
   } else if (VIDEO_MODELS[activeKey]?.type === 'wan27e_video') {
     await wan27eSetSource(videoId);
     toast('Source video set for WAN 2.7 Edit', 'ok');
+  } else if (VIDEO_MODELS[activeKey]?.refMode === 'video_ref') {
+    await v2vSetFromGallery(videoId);
+    toast('Motion reference video set', 'ok');
+  } else if (VIDEO_MODELS[activeKey]?.type === 'wan27_video' && VIDEO_MODELS[activeKey]?.refMode === 'single_end') {
+    await wan27vSetSource(videoId);
+    toast('Extend source video set for WAN 2.7 I2V', 'ok');
   } else {
-    toast('Switch to Topaz or Magnific Video to use a source video', 'info');
+    toast('Switch to a model that uses a source video first', 'info');
   }
 }
 
 async function uploadVideoToFal(file, falKey) {
-  // Upload video file to fal.ai storage CDN, returns URL
-  const res = await fetch('https://storage.fal.run/files', {
+  // Upload via Worker R2 proxy — storage.fal.run is CORS-blocked from file:// protocol
+  // falKey param kept for API compatibility but not used (R2 needs no external key)
+  const proxyUrl = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
+  if (!proxyUrl) throw new Error('Proxy URL missing. Add it in Setup tab.');
+  const res = await fetch(`${proxyUrl}/r2/upload`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Key ${falKey}`,
-      'Content-Type': file.type || 'video/mp4',
-    },
+    headers: { 'Content-Type': file.type || 'video/mp4' },
     body: file,
   });
-  if (!res.ok) throw new Error(`Video upload failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Video upload failed: ${res.status} ${await res.text().catch(() => '')}`);
   const data = await res.json();
-  if (!data.url) throw new Error('No URL in upload response');
+  if (!data.url) throw new Error('No URL in R2 upload response');
   return data.url;
 }
 
@@ -1146,6 +1311,9 @@ function _applyVideoModel(key) {
 
   const wan27vParams = document.getElementById('wan27vParams');
   if (wan27vParams) wan27vParams.style.display = m.type === 'wan27_video' ? '' : 'none';
+  // Extend video row: only I2V (single_end refMode)
+  const wan27vExtendRow = document.getElementById('wan27vExtendRow');
+  if (wan27vExtendRow) wan27vExtendRow.style.display = (m.type === 'wan27_video' && m.refMode === 'single_end') ? '' : 'none';
 
   // wan27_video has own params panel → hide generic duplicate rows
   if (m.type === 'wan27_video') {
@@ -1522,14 +1690,10 @@ async function generateVideo() {
     if (!lumaKey)  { showApiKeyWarning('Luma API Key missing', 'Ray3 / Ray3.14 requires a Luma API key. Add it in the Setup tab.'); return; }
     if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'Luma video requires the GIS proxy URL. Add it in the Setup tab.'); return; }
   } else if (model.type === 'wan27_video') {
-    const rKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
-    if (!rKey)     { showApiKeyWarning('Replicate API Key missing', 'WAN 2.7 I2V requires a Replicate API key. Add it in the Setup tab.'); return; }
-    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'WAN 2.7 I2V requires the GIS proxy URL. Add it in the Setup tab.'); return; }
+    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 requires a fal.ai API key. Add it in the Setup tab.'); return; }
   } else if (model.type === 'wan27e_video') {
-    const rKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
-    if (!rKey)     { showApiKeyWarning('Replicate API Key missing', 'WAN 2.7 Video Edit requires a Replicate API key. Add it in the Setup tab.'); return; }
-    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'WAN 2.7 Video Edit requires the GIS proxy URL. Add it in the Setup tab.'); return; }
-    if (!wan27eSrcVideoId) { toast('Select a source video — click ▷ Use on a video in the gallery', 'err'); return; }
+    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 Video Edit requires a fal.ai API key. Add it in the Setup tab.'); return; }
+    if (!wan27eSrcVideoId) { toast('Select a source video first — click ▷ Use on any video in the gallery', 'err'); return; }
   } else {
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'Video generation requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
   }
@@ -1545,22 +1709,31 @@ async function generateVideo() {
   // Validate refs based on refMode
   const refMode = model.refMode || 'none';
   // Veo + Luma: refs are optional — 0 refs = T2V, 1+ refs = I2V/Keyframes automatically
-  if ((refMode === 'single' || refMode === 'single_end') && videoRefs.length === 0 && model.type !== 'veo' && model.type !== 'luma_video' && model.type !== 'wan27e_video') {
+  // wan27_r2v: refs optional (image_urls + video_urls)
+  if ((refMode === 'single' || refMode === 'single_end') && videoRefs.length === 0 && model.type !== 'veo' && model.type !== 'luma_video' && model.type !== 'wan27e_video' && model.refMode !== 'wan_r2v') {
     toast('Start frame image required for I2V', 'err'); return;
   }
   if (refMode === 'keyframe' && videoRefs.length < 2) {
     toast(`Both start and end frames required (have ${videoRefs.length}/2)`, 'err'); return;
   }
-  if (refMode === 'video_ref' && !videoMotionFile) {
-    toast('Upload a motion reference video for Motion Control', 'err'); return;
+  if (refMode === 'video_ref' && !videoMotionFile && !videoMotionVideoId) {
+    toast('Upload or pick a motion reference video for Motion Control', 'err'); return;
   }
 
-  // V2V: upload motion video to fal.ai CDN before submitting jobs
+  // V2V: upload motion video to R2 before submitting jobs
   let motionVideoUrl = null;
-  if (refMode === 'video_ref' && videoMotionFile) {
+  if (refMode === 'video_ref' && (videoMotionFile || videoMotionVideoId)) {
     toast('Uploading motion video…', 'ok');
     try {
-      motionVideoUrl = await uploadVideoToFal(videoMotionFile, falKey);
+      if (videoMotionFile) {
+        motionVideoUrl = await uploadVideoToFal(videoMotionFile, falKey);
+      } else {
+        // Gallery pick — load binary from DB and upload to R2
+        const full = await dbGet('videos', videoMotionVideoId);
+        if (!full?.videoData) throw new Error('Video data not found in gallery');
+        const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
+        motionVideoUrl = await uploadVideoToFal(blob, falKey);
+      }
     } catch(e) {
       toast(`Motion video upload failed: ${e.message}`, 'err'); return;
     }
@@ -1588,22 +1761,26 @@ async function generateVideo() {
   // Character ref for Ray3 (single asset ID stored in hidden input)
   const lumaCharRefAssetId = document.getElementById('lumaCharRefAssetId')?.value || null;
 
-  // WAN 2.7 I2V snap
+  // WAN 2.7 I2V/T2V snap (wan27_video type — covers T2V + I2V + R2V)
   const wan27vSnap = model.type === 'wan27_video' ? {
     resolution:   document.getElementById('wan27vResolution')?.value || '1080p',
     duration:     parseInt(document.getElementById('wan27vDuration')?.value || '5'),
     negPrompt:    document.getElementById('wan27vNegPrompt')?.value?.trim() || '',
     promptExpand: document.getElementById('wan27vPromptExpand')?.checked !== false,
+    safety:       document.getElementById('wan27vSafety')?.checked !== false,
     seed:         document.getElementById('wan27vSeed')?.value?.trim() || null,
+    audioUrl:     document.getElementById('wan27vAudioUrl')?.value?.trim() || null,
+    extendVideoId: wan27vSrcVideoId || null,
   } : null;
 
   // WAN 2.7 Video Edit snap
   const wan27eSnap = model.type === 'wan27e_video' ? {
     srcVideoId:   wan27eSrcVideoId,
     resolution:   document.getElementById('wan27eResolution')?.value || '1080p',
-    duration:     parseInt(document.getElementById('wan27eDuration')?.value || '0') || null,
+    duration:     document.getElementById('wan27eDuration')?.value || '0',
     aspectRatio:  document.getElementById('wan27eAspect')?.value || 'auto',
     audioSetting: document.getElementById('wan27eAudio')?.value || 'auto',
+    safety:       document.getElementById('wan27eSafety')?.checked !== false,
     seed:         document.getElementById('wan27eSeed')?.value?.trim() || null,
   } : null;
 
@@ -1911,18 +2088,25 @@ async function runVideoJob(job) {
       images: [`data:${r.mimeType};base64,${r.data}`],
     }));
   } else if (refModeJob === 'video_ref') {
-    // V2V / Motion Control: upload video to fal.ai CDN, optional character image
+    // V2V / Motion Control: motion reference video + character image
+    // character_orientation REQUIRED by fal.ai motion-control API
+    // image_url REQUIRED — motion is applied to this character image
+    if (!videoRefsSnap[0]) {
+      throw new Error('Motion Control requires a character image — add one in the Refs panel.');
+    }
+    payload.character_orientation = 'video';
     if (job.motionVideoUrl) {
-      payload.video_url = job.motionVideoUrl;  // pre-uploaded CDN URL
+      payload.video_url = job.motionVideoUrl;  // pre-uploaded R2 URL
     }
-    if (videoRefsSnap[0]) {
-      // Character image (optional) — sent as image_url
-      payload.image_url = `data:${videoRefsSnap[0].mimeType};base64,${videoRefsSnap[0].data}`;
-    }
+    payload.image_url = `data:${videoRefsSnap[0].mimeType};base64,${videoRefsSnap[0].data}`;
   }
 
   // Submit to queue
-  console.log('[GIS Video] Submitting payload:', JSON.stringify({...payload, start_image_url: payload.start_image_url?.slice(0,40)+'…'}));
+  const logPayload = {...payload};
+  ['start_image_url','image_url','end_image_url','start_frame_image_url','end_frame_image_url'].forEach(k => {
+    if (logPayload[k]) logPayload[k] = logPayload[k].slice(0, 40) + '…';
+  });
+  console.log('[GIS Video] Submitting payload:', JSON.stringify(logPayload));
   const queueUrl = `https://queue.fal.run/${model.endpoint}`;
   const submitRes = await fetch(queueUrl, {
     method: 'POST',
@@ -2574,7 +2758,7 @@ async function renderVideoGallery(items) {
           <button class="video-ibtn" onclick="event.stopPropagation();videoDownloadById('${item.id}')">↓ MP4</button>
           <button class="video-ibtn" onclick="event.stopPropagation();reuseVideoJob('${item.id}')">↺ Reuse</button>
           <button class="video-ibtn" onclick="event.stopPropagation();useVideoFromGallery('${item.id}')" style="border-color:rgba(255,255,255,.5);color:#fff;">▷ Use</button>
-          <button class="video-ibtn" onclick="event.stopPropagation();openTopazFromGallery('${item.id}')" style="border-color:rgba(212,160,23,.5);color:var(--accent);">✦ Topaz</button>
+          <button class="video-ibtn" onclick="event.stopPropagation();openTopazFromGallery('${item.id}')" style="border-color:rgba(212,160,23,.5);color:var(--accent);">✦ Upscale</button>
         </div>
       </div>
       <div class="video-card-meta">
@@ -3058,221 +3242,249 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── Wan 2.7 I2V — přes Replicate (CORS → proxy) ─────────
-// Replicate model: wan-video/wan-2.7-i2v
-// first_frame = start, last_frame = end (optional FLF2V)
-// Output: single URL string
+// ── WAN 2.7 I2V — fal.ai queue (přímé, bez proxy) ────────
+// T2V i I2V — sdílí stejnou funkci, falEndpoint rozlišuje
 async function callWan27Video(job) {
-  const { model, modelKey, prompt, proxyUrl, targetFolder,
+  const { model, modelKey, prompt, targetFolder, falKey,
           videoRefsSnapshot, wan27vSnap } = job;
 
-  const replicateKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
-  if (!replicateKey) throw new Error('Replicate API key missing. Add it in Setup tab.');
-  if (!proxyUrl)     throw new Error('Proxy URL missing. Add it in Setup tab.');
+  if (!falKey) throw new Error('fal.ai API key missing. Add it in Setup tab.');
 
-  const resolution    = wan27vSnap?.resolution    || '1080p';
-  const duration      = wan27vSnap?.duration      || 5;
-  const negPrompt     = wan27vSnap?.negPrompt     || '';
-  const promptExpand  = wan27vSnap?.promptExpand  !== false;
-  const seed          = wan27vSnap?.seed          ? parseInt(wan27vSnap.seed) : undefined;
+  const endpoint     = model.falEndpoint || 'fal-ai/wan/v2.7/image-to-video';
+  const resolution   = wan27vSnap?.resolution    || '1080p';
+  const duration     = wan27vSnap?.duration      || 5;
+  const negPrompt    = wan27vSnap?.negPrompt     || '';
+  const promptExpand = wan27vSnap?.promptExpand  !== false;
+  const safety       = wan27vSnap?.safety        !== false;
+  const seed         = wan27vSnap?.seed          ? parseInt(wan27vSnap.seed) : undefined;
+  const audioUrl     = wan27vSnap?.audioUrl      || null;
+  const extendVideoId = wan27vSnap?.extendVideoId || null;
+  const isT2V        = model.refMode === 'none';
+  const isR2V        = model.refMode === 'wan_r2v';
 
-  const input = {
-    prompt: prompt || '',
+  const payload = {
+    prompt:                   prompt || '',
     resolution,
-    duration,
-    negative_prompt: negPrompt,
-    enable_prompt_expansion: promptExpand,
+    duration:                 String(duration),
+    enable_prompt_expansion:  promptExpand,
+    enable_safety_checker:    safety,
   };
-  if (seed !== undefined) input.seed = seed;
+  if (negPrompt)          payload.negative_prompt = negPrompt;
+  if (seed !== undefined) payload.seed = seed;
+  if (audioUrl)           payload.audio_url = audioUrl;
 
-  // Load refs from DB + compress
-  const loadRef = async (snap) => {
-    if (!snap) return null;
-    let imgData = snap.imageData;
-    if (!imgData && snap.assetId) {
-      const asset = await dbGet('assets', snap.assetId);
-      imgData = asset?.imageData;
+  if (isR2V) {
+    // R2V: load character refs → image_urls[] / video_urls[]
+    // videoRefsSnapshot contains image assets (pre-loaded with imageData)
+    const imageRefs = [], videoRefs_ = [];
+    for (const snap of (videoRefsSnapshot || [])) {
+      if (snap.mimeType?.startsWith('video/')) {
+        // Video ref — encode as data URI
+        if (snap.imageData) videoRefs_.push(`data:${snap.mimeType};base64,${snap.imageData}`);
+      } else {
+        // Image ref
+        let imgData = snap.imageData;
+        if (!imgData && snap.assetId) {
+          const asset = await dbGet('assets', snap.assetId);
+          imgData = asset?.imageData;
+        }
+        if (imgData) {
+          const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+          imageRefs.push(`data:${compressed.mimeType};base64,${compressed.data}`);
+        }
+      }
     }
-    if (!imgData) return null;
-    const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
-    return `data:${compressed.mimeType};base64,${compressed.data}`;
-  };
+    if (imageRefs.length > 0) payload.image_urls = imageRefs;
+    if (videoRefs_.length > 0) payload.video_urls = videoRefs_;
 
-  const firstFrameUri = await loadRef(videoRefsSnapshot?.[0]);
-  const lastFrameUri  = await loadRef(videoRefsSnapshot?.[1]);
+  } else if (!isT2V) {
+    // I2V: load refs as data URI
+    const loadRef = async (snap) => {
+      if (!snap) return null;
+      let imgData = snap.imageData;
+      if (!imgData && snap.assetId) {
+        const asset = await dbGet('assets', snap.assetId);
+        imgData = asset?.imageData;
+      }
+      if (!imgData) return null;
+      const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+      return `data:${compressed.mimeType};base64,${compressed.data}`;
+    };
+    const firstFrameUri = await loadRef(videoRefsSnapshot?.[0]);
+    const lastFrameUri  = await loadRef(videoRefsSnapshot?.[1]);
+    if (!firstFrameUri) throw new Error('Start frame (first ref) required for WAN 2.7 I2V.');
+    payload.image_url = firstFrameUri;
+    if (lastFrameUri) payload.end_image_url = lastFrameUri;
 
-  if (!firstFrameUri) throw new Error('Start frame (first ref) required for WAN 2.7 I2V.');
-  input.first_frame = firstFrameUri;
-  if (lastFrameUri) input.last_frame = lastFrameUri;
+    // Extend video — optional source video to continue (encodes as data URI)
+    if (extendVideoId) {
+      const extFull = await dbGet('videos', extendVideoId).catch(() => null);
+      if (extFull?.videoData) {
+        const extBytes = new Uint8Array(extFull.videoData);
+        let extBin = '';
+        for (let i = 0; i < extBytes.length; i += 8192)
+          extBin += String.fromCharCode(...extBytes.subarray(i, i + 8192));
+        payload.video_url = `data:video/mp4;base64,${btoa(extBin)}`;
+      }
+    }
+  }
 
-  // Submit via proxy
+  // Submit to fal.ai queue (same as Kling, WAN 2.6)
   job.status = 'queued'; renderVideoQueue();
-  const submitResp = await fetch(`${proxyUrl}/replicate/wan27v/submit`, {
+  const queueUrl = `https://queue.fal.run/${endpoint}`;
+  console.log('[wan27] submit →', endpoint, '| resolution:', resolution, '| duration:', duration);
+  const submitRes = await fetch(queueUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ replicateKey, input }),
+    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
-  if (!submitResp.ok) {
-    const err = await submitResp.json().catch(() => ({}));
-    throw new Error(`Replicate submit ${submitResp.status}: ${err.detail || err.error || JSON.stringify(err).slice(0,200)}`);
+  if (!submitRes.ok) {
+    const errText = await submitRes.text().catch(() => '');
+    throw new Error(`WAN 2.7 submit ${submitRes.status}: ${errText.slice(0,300)}`);
   }
-  const submitData = await submitResp.json();
-  const predictionId = submitData.id;
-  if (!predictionId) throw new Error('Replicate: no prediction ID returned.');
+  const submitted = await submitRes.json();
+  const requestId = submitted.request_id;
+  if (!requestId) throw new Error(`WAN 2.7: no request_id. Response: ${JSON.stringify(submitted).slice(0,200)}`);
 
-  job.requestId = predictionId;
+  job.requestId = requestId;
+  job.status = 'queued';
+  renderVideoQueue();
+  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
 
-  // Poll until succeeded
-  const MAX_POLLS = 400;   // 400 × 3s = 20 min max
-  const POLL_MS   = 3000;
-  job.status = 'generating'; renderVideoQueue();
+  const statusUrl = submitted.status_url || `${queueUrl}/requests/${requestId}/status`;
+  const resultUrl = submitted.response_url || `${queueUrl}/requests/${requestId}`;
+  const POLL_MS = 5000;
+  const TIMEOUT = 25 * 60 * 1000;
+  const deadline = Date.now() + TIMEOUT;
 
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise(r => setTimeout(r, POLL_MS));
+  await new Promise((resolve, reject) => {
+    const poll = async () => {
+      if (Date.now() > deadline) { reject(new Error('WAN 2.7: timeout after 25 minutes')); return; }
+      if (job.cancelled) { reject(new Error('Cancelled')); return; }
+      try {
+        const st = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+        if (!st.ok) { setTimeout(poll, POLL_MS); return; }
+        const s = await st.json();
+        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+        if (s.status === 'IN_QUEUE')    { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
+        else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `GENERATING · ${elapsed}s`); }
+        else if (s.status === 'COMPLETED') { resolve(); return; }
+        else if (s.status === 'FAILED')  { reject(new Error(s.error || 'Generation failed')); return; }
+        setTimeout(poll, POLL_MS);
+      } catch(e) { setTimeout(poll, POLL_MS); }
+    };
+    setTimeout(poll, POLL_MS);
+  });
 
-    const statusResp = await fetch(`${proxyUrl}/replicate/wan27v/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ replicateKey, predictionId }),
-    });
-    if (!statusResp.ok) continue;
-    const statusData = await statusResp.json();
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
 
-    if (statusData.status === 'failed') {
-      throw new Error(`WAN 2.7 I2V failed: ${statusData.error || 'unknown error'}`);
+  let videoUrl = null;
+  try {
+    const fst = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+    if (fst.ok) {
+      const fd = await fst.json();
+      videoUrl = fd.output?.video?.url || fd.output?.url || fd.video?.url;
     }
-    if (statusData.status === 'succeeded' && statusData.output) {
-      const videoUrl = typeof statusData.output === 'string'
-        ? statusData.output
-        : statusData.output?.url || statusData.output?.[0];
-      if (!videoUrl) throw new Error('WAN 2.7 I2V: no output URL in result.');
-
-      // Download video
-      const videoRes = await fetch(videoUrl);
-      if (!videoRes.ok) throw new Error(`Video download failed: ${videoRes.status}`);
-      const videoArrayBuffer = await videoRes.arrayBuffer();
-
-      const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-      job.status = 'done';
-      job.elapsed = `${elapsed}s`;
-
-      // Thumbnail + dims
-      const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-      const thumbData = await generateVideoThumb(blob);
-      const dims = await _topazGetDims(blob).catch(() => null);
-
-      // Save to DB
-      const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-      const detectedFps = _parseMp4Fps(videoArrayBuffer);
-      const videoRecord = {
-        id: videoId, ts: Date.now(),
-        model: model.name, modelKey,
-        prompt: job.prompt,
-        params: {
-          duration, resolution, seed: statusData.input?.seed ?? (wan27vSnap?.seed || null),
-          negPrompt, promptExpand,
-          ...(detectedFps ? { fps: detectedFps } : {}),
-        },
-        videoData: videoArrayBuffer,
-        mimeType: 'video/mp4',
-        duration, fileSize: videoArrayBuffer.byteLength,
-        ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
-        folder: targetFolder === 'all' ? '' : targetFolder,
-        favorite: false,
-        cdnUrl: videoUrl,
-        cdnExpiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
-        usedVideoRefs: job.videoRefsSnapshot || [],
-      };
-
-      await dbPut('videos', videoRecord);
-      const { videoData, ...metaOnly } = videoRecord;
-      await dbPut('video_meta', metaOnly);
-      if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-
-      // Spending: resolution-based pricing
-      const spendKey = resolution === '1080p' ? '_replicate_wan27v_1080p' : '_replicate_wan27v_720p';
-      trackSpend('replicate', spendKey, 1, duration);
-
-      renderVideoQueue();
-      removeVideoPlaceholder(job);
-      toast(`WAN 2.7 I2V done · ${elapsed}s`, 'ok');
-      renderVideoResultCard(videoRecord, thumbData);
-      return;
-    }
+  } catch(e) {}
+  if (!videoUrl) {
+    const result = await (await fetch(resultUrl, { headers: { 'Authorization': `Key ${falKey}` } })).json();
+    videoUrl = result.video?.url || result.data?.video?.url;
   }
-  throw new Error('WAN 2.7 I2V: timeout — generation did not complete within 20 minutes.');
+  if (!videoUrl) throw new Error('WAN 2.7: no video URL in result.');
+
+  const videoRes = await fetch(videoUrl);
+  if (!videoRes.ok) throw new Error(`WAN 2.7 video download ${videoRes.status}`);
+  const videoArrayBuffer = await videoRes.arrayBuffer();
+
+  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+  job.status = 'done'; job.elapsed = `${elapsed}s`;
+
+  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
+  const thumbData = await generateVideoThumb(blob);
+  const dims = await _topazGetDims(blob).catch(() => null);
+  const detectedFps = _parseMp4Fps(videoArrayBuffer);
+
+  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
+  const videoRecord = {
+    id: videoId, ts: Date.now(),
+    model: model.name, modelKey,
+    prompt: job.prompt,
+    params: { duration, resolution, seed: seed || null, negPrompt, promptExpand,
+              ...(detectedFps ? { fps: detectedFps } : {}) },
+    videoData: videoArrayBuffer, mimeType: 'video/mp4',
+    duration, fileSize: videoArrayBuffer.byteLength,
+    ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
+    folder: targetFolder === 'all' ? '' : targetFolder,
+    favorite: false,
+    usedVideoRefs: job.videoRefsSnapshot || [],
+  };
+  await dbPut('videos', videoRecord);
+  const { videoData, ...metaOnly } = videoRecord;
+  await dbPut('video_meta', metaOnly);
+  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
+
+  trackSpend('fal', resolution === '1080p' ? '_wan27_1080p' : '_wan27_720p', 1, duration);
+
+  renderVideoQueue();
+  removeVideoPlaceholder(job);
+  toast(`WAN 2.7 done · ${elapsed}s`, 'ok');
+  renderVideoResultCard(videoRecord, thumbData);
 }
 
-// ── WAN 2.7 Video Edit — přes Replicate (CORS → proxy) ──
+// ── WAN 2.7 Video Edit — fal.ai queue (přímé, bez proxy) ──
+// fal-ai/wan/v2.7/edit-video
+// Source video: ANY gallery video → base64 data URI (no CDN URL dependency)
+// Ref image: optional, base64 data URI
 async function callWan27eVideo(job) {
-  const { model, modelKey, prompt, proxyUrl, targetFolder, falKey,
+  const { model, modelKey, prompt, targetFolder, falKey,
           videoRefsSnapshot, wan27eSnap } = job;
 
-  const replicateKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
-  if (!replicateKey) throw new Error('Replicate API key missing. Add it in Setup tab.');
-  if (!proxyUrl)     throw new Error('Proxy URL missing. Add it in Setup tab.');
+  if (!falKey)               throw new Error('fal.ai API key missing. Add it in Setup tab.');
+  if (!prompt)               throw new Error('Prompt required — describe the edit or style transfer.');
   if (!wan27eSnap?.srcVideoId) throw new Error('No source video selected.');
 
-  let resolution     = wan27eSnap.resolution   || '1080p';
-  const audioSetting = wan27eSnap.audioSetting || 'auto';
-  const aspectRatio  = wan27eSnap.aspectRatio  || 'auto';
-  const seed         = wan27eSnap.seed         ? parseInt(wan27eSnap.seed) : undefined;
-  const duration     = wan27eSnap.duration     || null; // null = match input video
+  const endpoint     = model.falEndpoint || 'fal-ai/wan/v2.7/edit-video';
+  const resolution   = wan27eSnap.resolution   || '1080p';
+  const duration     = wan27eSnap.duration;      // string enum: "0"|"2"..."10"
+  const audioSetting = wan27eSnap.audioSetting  || 'auto';  // 'auto' | 'origin'
+  const aspectRatio  = wan27eSnap.aspectRatio   || 'auto';
+  const safety       = wan27eSnap.safety        !== false;
+  const seed         = wan27eSnap.seed          ? parseInt(wan27eSnap.seed) : undefined;
 
-  // Load source video — use CDN URL if still valid, otherwise upload via Replicate Files API
+  // Load source video from DB → base64 data URI
+  job.status = 'submitting'; renderVideoQueue();
+  const srcFull = await dbGet('videos', wan27eSnap.srcVideoId).catch(() => null);
+  if (!srcFull?.videoData) throw new Error('Source video data not found in gallery. Try re-adding it.');
   const srcMeta = await dbGet('video_meta', wan27eSnap.srcVideoId).catch(() => null);
-  if (!srcMeta) throw new Error('Source video not found in gallery.');
 
-  // Auto-detect resolution from source dimensions — avoid upscaling (720p→1080p may cause 400)
-  if (srcMeta.outHeight && srcMeta.outHeight <= 720 && resolution === '1080p') {
-    resolution = '720p';
+  // Auto-match resolution to source video to avoid quality downgrade
+  let effectiveRes = resolution;
+  if (srcMeta?.outHeight && srcMeta.outHeight <= 720 && resolution === '1080p') {
+    effectiveRes = '720p';
   }
+  const actualDuration = srcMeta?.duration || 5;
 
-  // Tighten duration validation — DashScope requires strictly < 10s
-  if (srcMeta.duration && srcMeta.duration >= 10) {
-    throw new Error(`Source video is ${srcMeta.duration}s — WAN 2.7 Video Edit requires strictly under 10s. Select a shorter video or use a 5s WAN I2V output.`);
-  }
+  // Encode source video as base64 data URI (fal.ai accepts data URIs natively)
+  const srcBytes = new Uint8Array(srcFull.videoData);
+  let srcBin = '';
+  for (let i = 0; i < srcBytes.length; i += 8192)
+    srcBin += String.fromCharCode(...srcBytes.subarray(i, i + 8192));
+  const srcB64 = btoa(srcBin);
+  const videoUri = `data:video/mp4;base64,${srcB64}`;
 
-  // Load video binary — not needed for CDN URL approach, but kept for reference_image
-  // Check is skipped: CDN URL approach doesn't require local binary
-  // (full.videoData only needed if we re-upload, which we don't anymore)
-
-  // WAN 2.7 Video Edit requires a replicate.delivery CDN URL with .mp4 extension.
-  if (!srcMeta.cdnUrl || !srcMeta.cdnUrl.includes('replicate.delivery')) {
-    throw new Error('WAN 2.7 Video Edit requires a video generated via Replicate (WAN 2.7 I2V or similar). Import or re-generate the source video.');
-  }
-  const savedAt = srcMeta.cdnExpiry ? srcMeta.cdnExpiry - 7 * 24 * 60 * 60 * 1000 : 0;
-  const cdnAge  = Date.now() - savedAt;
-  if (cdnAge > 20 * 60 * 60 * 1000) {
-    throw new Error('Source video CDN URL has expired (>20h old). Re-generate the source video first, then immediately run Video Edit.');
-  }
-  // Use source video CDN URL. If WAN I2V CDN causes 400, log full URL for diagnosis.
-  const videoUri = srcMeta.cdnUrl;
-  console.log('[wan27e] video URL:', videoUri);
-
-  const effectivePrompt = prompt;
-
-  if (!prompt) throw new Error('WAN 2.7 Video Edit requires a prompt — describe the edit (e.g. "Change lighting to golden hour sunset").');
-
-  const input = {
-    video:         videoUri,
-    prompt:        effectivePrompt,
-    resolution:    resolution,
-    aspect_ratio:  aspectRatio,
-    audio_setting: audioSetting,
+  const payload = {
+    prompt,
+    video_url:              videoUri,
+    resolution:             effectiveRes,
+    audio_setting:          audioSetting,
+    enable_safety_checker:  safety,
   };
-  if (duration) input.duration = duration;
-  if (seed !== undefined) input.seed = seed;
-  if (duration) input.duration = duration;
-  if (seed !== undefined) input.seed = seed;
+  if (aspectRatio && aspectRatio !== 'auto') payload.aspect_ratio = aspectRatio;
+  if (duration && duration !== '0')          payload.duration     = duration;
+  if (seed !== undefined)                    payload.seed         = seed;
 
-  console.log('[wan27e] input:', JSON.stringify({
-    video: videoUri.slice(0, 60) + '…',
-    prompt: prompt.slice(0, 40),
-    resolution, aspectRatio, audioSetting, duration, seed,
-  }));
-
-  // Reference image — same upload flow → serving_url with .jpg extension
+  // Optional reference image for style guidance
   const refSnap = videoRefsSnapshot?.[0];
   if (refSnap) {
     let imgData = refSnap.imageData;
@@ -3282,116 +3494,109 @@ async function callWan27eVideo(job) {
     }
     if (imgData) {
       const compressed = await compressImageForUpload(imgData, refSnap.mimeType || 'image/jpeg');
-      const imgBin  = Uint8Array.from(atob(compressed.data), c => c.charCodeAt(0));
-      const imgBlob = new Blob([imgBin], { type: compressed.mimeType });
-      const imgExt  = compressed.mimeType.includes('png') ? 'ref.png' : 'ref.jpg';
-      const uploadImgRes = await fetch(`${proxyUrl}/replicate/upload/video`, {
-        method: 'POST',
-        headers: {
-          'X-Replicate-Key':  replicateKey,
-          'Content-Type':     compressed.mimeType,
-          'X-Content-Length': imgBin.byteLength.toString(),
-          'X-Filename':       imgExt,
-        },
-        body: imgBlob,
-      });
-      if (uploadImgRes.ok) {
-        const imgUpload = await uploadImgRes.json();
-        if (imgUpload.url) input.reference_image = imgUpload.url;
-      }
+      payload.reference_image_url = `data:${compressed.mimeType};base64,${compressed.data}`;
     }
   }
 
-  // Submit via proxy
+  // Submit to fal.ai queue
   job.status = 'queued'; renderVideoQueue();
-  const submitResp = await fetch(`${proxyUrl}/replicate/wan27e/submit`, {
+  const queueUrl = `https://queue.fal.run/${endpoint}`;
+  console.log('[wan27e] submit → fal.ai | resolution:', effectiveRes, '| duration:', duration, '| audio:', audioSetting);
+  const submitRes = await fetch(queueUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ replicateKey, input }),
+    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
-  if (!submitResp.ok) {
-    const err = await submitResp.json().catch(() => ({}));
-    throw new Error(`Replicate submit ${submitResp.status}: ${err.detail || err.error || JSON.stringify(err).slice(0,200)}`);
+  if (!submitRes.ok) {
+    const errText = await submitRes.text().catch(() => '');
+    throw new Error(`WAN 2.7 Edit submit ${submitRes.status}: ${errText.slice(0,300)}`);
   }
-  const submitData = await submitResp.json();
-  const predictionId = submitData.id;
-  if (!predictionId) throw new Error('Replicate: no prediction ID returned.');
+  const submitted = await submitRes.json();
+  const requestId = submitted.request_id;
+  if (!requestId) throw new Error(`WAN 2.7 Edit: no request_id. Response: ${JSON.stringify(submitted).slice(0,200)}`);
 
-  job.requestId = predictionId;
+  job.requestId = requestId;
+  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
 
-  // Poll until succeeded (max 60 min — DashScope queue can be very long)
-  const MAX_POLLS = 1200;  // 1200 × 3s = 60 min
-  const POLL_MS   = 3000;
-  job.status = 'generating'; renderVideoQueue();
+  const statusUrl = submitted.status_url || `${queueUrl}/requests/${requestId}/status`;
+  const resultUrl = submitted.response_url || `${queueUrl}/requests/${requestId}`;
+  const POLL_MS = 5000;
+  const TIMEOUT = 30 * 60 * 1000; // Video Edit can be slow
+  const deadline = Date.now() + TIMEOUT;
 
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise(r => setTimeout(r, POLL_MS));
+  await new Promise((resolve, reject) => {
+    const poll = async () => {
+      if (Date.now() > deadline) { reject(new Error('WAN 2.7 Edit: timeout after 30 minutes')); return; }
+      if (job.cancelled) { reject(new Error('Cancelled')); return; }
+      try {
+        const st = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+        if (!st.ok) { setTimeout(poll, POLL_MS); return; }
+        const s = await st.json();
+        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+        if (s.status === 'IN_QUEUE')    { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
+        else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `EDITING · ${elapsed}s`); }
+        else if (s.status === 'COMPLETED') { resolve(); return; }
+        else if (s.status === 'FAILED')  { reject(new Error(s.error || 'Edit failed')); return; }
+        setTimeout(poll, POLL_MS);
+      } catch(e) { setTimeout(poll, POLL_MS); }
+    };
+    setTimeout(poll, POLL_MS);
+  });
 
-    const statusResp = await fetch(`${proxyUrl}/replicate/wan27e/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ replicateKey, predictionId }),
-    });
-    if (!statusResp.ok) continue;
-    const statusData = await statusResp.json();
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
 
-    if (statusData.status === 'failed') {
-      const detail = statusData.logs ? `\nLogs: ${statusData.logs.slice(-300)}` : '';
-      throw new Error(`WAN 2.7 Video Edit failed: ${statusData.error || 'unknown error'}${detail}`);
+  let videoUrl = null;
+  try {
+    const fst = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+    if (fst.ok) {
+      const fd = await fst.json();
+      videoUrl = fd.output?.video?.url || fd.video?.url;
     }
-    if (statusData.status === 'succeeded' && statusData.output) {
-      const videoUrl = typeof statusData.output === 'string'
-        ? statusData.output
-        : statusData.output?.url || statusData.output?.[0];
-      if (!videoUrl) throw new Error('WAN 2.7 Video Edit: no output URL in result.');
-
-      const videoRes = await fetch(videoUrl);
-      if (!videoRes.ok) throw new Error(`Video download failed: ${videoRes.status}`);
-      const videoArrayBuffer = await videoRes.arrayBuffer();
-
-      const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-      job.status = 'done';
-      job.elapsed = `${elapsed}s`;
-
-      const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-      const thumbData = await generateVideoThumb(blob);
-      const dims = await _topazGetDims(blob).catch(() => null);
-
-      const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-      const detectedFps = _parseMp4Fps(videoArrayBuffer);
-      const actualDuration = duration || srcMeta.duration || 5;
-      const videoRecord = {
-        id: videoId, ts: Date.now(),
-        model: model.name, modelKey,
-        prompt: job.prompt,
-        params: { resolution, audioSetting, aspectRatio, seed: statusData.input?.seed ?? (wan27eSnap.seed || null),
-                  srcVideoId: wan27eSnap.srcVideoId, ...(detectedFps ? { fps: detectedFps } : {}) },
-        videoData: videoArrayBuffer,
-        mimeType: 'video/mp4',
-        duration: actualDuration, fileSize: videoArrayBuffer.byteLength,
-        ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
-        folder: targetFolder === 'all' ? '' : targetFolder,
-        favorite: false,
-        cdnUrl: videoUrl,
-        cdnExpiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
-        usedVideoRefs: job.videoRefsSnapshot || [],
-      };
-
-      await dbPut('videos', videoRecord);
-      const { videoData, ...metaOnly } = videoRecord;
-      await dbPut('video_meta', metaOnly);
-      if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-
-      // Spending
-      const spendKey = resolution === '1080p' ? '_replicate_wan27e_1080p' : '_replicate_wan27e_720p';
-      trackSpend('replicate', spendKey, 1, actualDuration);
-
-      renderVideoQueue();
-      refreshVideoGalleryUI();
-      return;
-    }
+  } catch(e) {}
+  if (!videoUrl) {
+    const result = await (await fetch(resultUrl, { headers: { 'Authorization': `Key ${falKey}` } })).json();
+    videoUrl = result.video?.url || result.data?.video?.url;
   }
-  throw new Error('WAN 2.7 Video Edit: timeout — generation did not complete within 60 minutes.');
+  if (!videoUrl) throw new Error('WAN 2.7 Edit: no video URL in result.');
+
+  const videoRes = await fetch(videoUrl);
+  if (!videoRes.ok) throw new Error(`WAN 2.7 Edit video download ${videoRes.status}`);
+  const videoArrayBuffer = await videoRes.arrayBuffer();
+
+  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+  job.status = 'done'; job.elapsed = `${elapsed}s`;
+
+  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
+  const thumbData = await generateVideoThumb(blob);
+  const dims = await _topazGetDims(blob).catch(() => null);
+  const detectedFps = _parseMp4Fps(videoArrayBuffer);
+
+  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
+  const videoRecord = {
+    id: videoId, ts: Date.now(),
+    model: model.name, modelKey,
+    prompt: job.prompt,
+    params: { resolution: effectiveRes, audioSetting, aspectRatio, seed: seed || null,
+              srcVideoId: wan27eSnap.srcVideoId, ...(detectedFps ? { fps: detectedFps } : {}) },
+    videoData: videoArrayBuffer, mimeType: 'video/mp4',
+    duration: actualDuration, fileSize: videoArrayBuffer.byteLength,
+    ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
+    folder: targetFolder === 'all' ? '' : targetFolder,
+    favorite: false,
+    usedVideoRefs: job.videoRefsSnapshot || [],
+  };
+  await dbPut('videos', videoRecord);
+  const { videoData, ...metaOnly } = videoRecord;
+  await dbPut('video_meta', metaOnly);
+  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
+
+  trackSpend('fal', effectiveRes === '1080p' ? '_wan27e_1080p' : '_wan27e_720p', 1, actualDuration);
+
+  renderVideoQueue();
+  removeVideoPlaceholder(job);
+  toast(`WAN 2.7 Edit done · ${elapsed}s`, 'ok');
+  renderVideoResultCard(videoRecord, thumbData);
 }
 
 // ── Describe video ref image ──────────────────────────────
@@ -3697,6 +3902,7 @@ async function _generateMagnificVideoJob(modelKey, freepikKey, proxyUrl) {
   const creativity   = parseInt(document.getElementById('magnificVidCreativity')?.value || '50');
   const flavor       = document.querySelector('input[name="magnificVidFlavor"]:checked')?.value || 'vivid';
   const strength     = parseInt(document.getElementById('magnificVidStrength')?.value || '60');
+  const vidPrompt    = document.getElementById('magnificVidPrompt')?.value?.trim() || '';
   const targetFolder = document.getElementById('videoTargetFolder')?.value || '';
 
   const jobId = `mgvid_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
@@ -3706,7 +3912,7 @@ async function _generateMagnificVideoJob(modelKey, freepikKey, proxyUrl) {
     srcId: topazSrcVideoId,
     srcDuration: srcMeta.duration || 5,
     magnificMode: mvm.mode,
-    resolution, fpsBost, sharpen, smartGrain, creativity, flavor, strength,
+    resolution, fpsBost, sharpen, smartGrain, creativity, flavor, strength, vidPrompt,
     freepikKey, proxyUrl,
     targetFolder: targetFolder === 'all' ? '' : targetFolder,
     status: 'pending', startedAt: Date.now(),
@@ -3743,16 +3949,18 @@ async function runMagnificVideoUpscaleJob(job) {
   const submitResp = await fetch(`${job.proxyUrl}/magnific/video-upscale`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      freepik_key: job.freepikKey,
-      video_b64:   videoB64,
-      mode:        job.magnificMode,
-      resolution:  job.resolution,
-      fps_boost:   job.fpsBost,
-      sharpen:     job.sharpen,
-      smart_grain: job.smartGrain,
-      creativity:  job.creativity,
-      flavor:      job.flavor,
-      strength:    job.strength,
+      freepik_key:   job.freepikKey,
+      replicate_key: (localStorage.getItem('gis_replicate_apikey') || '').trim(),
+      video_b64:     videoB64,
+      mode:          job.magnificMode,
+      resolution:    job.resolution,
+      fps_boost:     job.fpsBost,
+      sharpen:       job.sharpen,
+      smart_grain:   job.smartGrain,
+      creativity:    job.creativity,
+      flavor:        job.flavor,
+      strength:      job.strength,
+      prompt:        job.vidPrompt || '',
     }),
   });
   if (!submitResp.ok) throw new Error(`Magnific Video submit: ${submitResp.status} ${await submitResp.text()}`);
