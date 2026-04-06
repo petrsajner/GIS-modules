@@ -3265,10 +3265,11 @@ async function callWan27Video(job) {
   const payload = {
     prompt:                   prompt || '',
     resolution,
-    duration:                 String(duration),
     enable_prompt_expansion:  promptExpand,
     enable_safety_checker:    safety,
   };
+  // R2V has no duration field — only T2V and I2V accept duration
+  if (!isR2V) payload.duration = duration; // WAN 2.7 requires integer (not string like WAN 2.6)
   if (negPrompt)          payload.negative_prompt = negPrompt;
   if (seed !== undefined) payload.seed = seed;
   if (audioUrl)           payload.audio_url = audioUrl;
@@ -3351,11 +3352,14 @@ async function callWan27Video(job) {
   renderVideoQueue();
   updateVideoPlaceholderStatus(job, 'IN QUEUE…');
 
-  const statusUrl = submitted.status_url || `${queueUrl}/requests/${requestId}/status`;
-  const resultUrl = submitted.response_url || `${queueUrl}/requests/${requestId}`;
+  const statusUrl  = submitted.status_url  || `${queueUrl}/requests/${requestId}/status`;
+  const responseUrl = submitted.response_url || null;
   const POLL_MS = 5000;
   const TIMEOUT = 25 * 60 * 1000;
   const deadline = Date.now() + TIMEOUT;
+
+  // Capture COMPLETED response directly — fal.ai includes output in the status response
+  let completedData = null;
 
   await new Promise((resolve, reject) => {
     const poll = async () => {
@@ -3368,7 +3372,7 @@ async function callWan27Video(job) {
         const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
         if (s.status === 'IN_QUEUE')    { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
         else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `GENERATING · ${elapsed}s`); }
-        else if (s.status === 'COMPLETED') { resolve(); return; }
+        else if (s.status === 'COMPLETED') { completedData = s; resolve(); return; }
         else if (s.status === 'FAILED')  { reject(new Error(s.error || 'Generation failed')); return; }
         setTimeout(poll, POLL_MS);
       } catch(e) { setTimeout(poll, POLL_MS); }
@@ -3379,19 +3383,33 @@ async function callWan27Video(job) {
   job.status = 'fetching';
   updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
 
-  let videoUrl = null;
-  try {
-    const fst = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-    if (fst.ok) {
-      const fd = await fst.json();
-      videoUrl = fd.output?.video?.url || fd.output?.url || fd.video?.url;
+  // fal.ai output extraction — output is in the COMPLETED status response
+  const _extractVideoUrl = (obj) =>
+    obj?.output?.video?.url   // standard: {status:COMPLETED, output:{video:{url}}}
+    || obj?.output?.url       // direct: {output:{url}}
+    || obj?.video?.url        // top-level
+    || obj?.data?.video?.url  // wrapped
+    || null;
+
+  // response_url returns 200+video on success, 422+error on job failure
+  // (fal.ai WAN 2.7 returns result synchronously at response_url after COMPLETED)
+  let videoUrl = _extractVideoUrl(completedData);
+
+  if (!videoUrl && responseUrl) {
+    try {
+      const r = await fetch(responseUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+      if (r.ok) {
+        videoUrl = _extractVideoUrl(await r.json());
+      } else {
+        const body = await r.text().catch(() => '');
+        throw new Error(`WAN 2.7 result fetch ${r.status}: ${body.slice(0, 400)}`);
+      }
+    } catch(e) {
+      if (e.message.startsWith('WAN 2.7 result fetch')) throw e;
     }
-  } catch(e) {}
-  if (!videoUrl) {
-    const result = await (await fetch(resultUrl, { headers: { 'Authorization': `Key ${falKey}` } })).json();
-    videoUrl = result.video?.url || result.data?.video?.url;
   }
-  if (!videoUrl) throw new Error('WAN 2.7: no video URL in result.');
+
+  if (!videoUrl) throw new Error('WAN 2.7: no video URL in result. Job: ' + requestId);
 
   const videoRes = await fetch(videoUrl);
   if (!videoRes.ok) throw new Error(`WAN 2.7 video download ${videoRes.status}`);
@@ -3519,10 +3537,11 @@ async function callWan27eVideo(job) {
   updateVideoPlaceholderStatus(job, 'IN QUEUE…');
 
   const statusUrl = submitted.status_url || `${queueUrl}/requests/${requestId}/status`;
-  const resultUrl = submitted.response_url || `${queueUrl}/requests/${requestId}`;
   const POLL_MS = 5000;
   const TIMEOUT = 30 * 60 * 1000; // Video Edit can be slow
   const deadline = Date.now() + TIMEOUT;
+
+  let completedData = null;
 
   await new Promise((resolve, reject) => {
     const poll = async () => {
@@ -3535,7 +3554,7 @@ async function callWan27eVideo(job) {
         const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
         if (s.status === 'IN_QUEUE')    { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
         else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `EDITING · ${elapsed}s`); }
-        else if (s.status === 'COMPLETED') { resolve(); return; }
+        else if (s.status === 'COMPLETED') { completedData = s; resolve(); return; }
         else if (s.status === 'FAILED')  { reject(new Error(s.error || 'Edit failed')); return; }
         setTimeout(poll, POLL_MS);
       } catch(e) { setTimeout(poll, POLL_MS); }
@@ -3546,19 +3565,20 @@ async function callWan27eVideo(job) {
   job.status = 'fetching';
   updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
 
-  let videoUrl = null;
-  try {
-    const fst = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-    if (fst.ok) {
-      const fd = await fst.json();
-      videoUrl = fd.output?.video?.url || fd.video?.url;
-    }
-  } catch(e) {}
+  const _extractVidUrl = (obj) =>
+    obj?.output?.video?.url || obj?.output?.url || obj?.video?.url || obj?.data?.video?.url || null;
+
+  let videoUrl = _extractVidUrl(completedData);
+
   if (!videoUrl) {
-    const result = await (await fetch(resultUrl, { headers: { 'Authorization': `Key ${falKey}` } })).json();
-    videoUrl = result.video?.url || result.data?.video?.url;
+    try {
+      await new Promise(r => setTimeout(r, 2000));
+      const fst = await fetch(`${statusUrl}?logs=1`, { headers: { 'Authorization': `Key ${falKey}` } });
+      if (fst.ok) videoUrl = _extractVidUrl(await fst.json());
+    } catch(e) {}
   }
-  if (!videoUrl) throw new Error('WAN 2.7 Edit: no video URL in result.');
+
+  if (!videoUrl) throw new Error('WAN 2.7 Edit: no video URL in result. Check fal.ai dashboard for job ' + requestId);
 
   const videoRes = await fetch(videoUrl);
   if (!videoRes.ok) throw new Error(`WAN 2.7 Edit video download ${videoRes.status}`);
