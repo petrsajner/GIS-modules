@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════
 
 // ── Application identity ──────────────────────────────
-const GIS_COPYRIGHT = 'Generative Image Studio \u00a9 2025 Petr Sajner. All rights reserved.';
+const GIS_COPYRIGHT = 'Generative Image Studio \u00a9 2026 Petr Sajner. All rights reserved.';
 const _GIS_SIG = btoa(unescape(encodeURIComponent(GIS_COPYRIGHT))).slice(0, 20);
 // ─────────────────────────────────────────────────────
 const MODELS = {
@@ -16,6 +16,16 @@ const MODELS = {
     maxRefs: 14,
     seed: false,
     resolutions: ['512', '1K', '2K', '4K'],
+  },
+  nb1: {
+    id: 'gemini-2.5-flash-image',
+    name: 'NB',
+    type: 'gemini',
+    thinking: false,
+    refs: true,
+    maxRefs: 14,
+    seed: false,
+    resolutions: ['1K'],   // NB1 max resolution is 1K
   },
   nbpro: {
     id: 'gemini-3-pro-image-preview',

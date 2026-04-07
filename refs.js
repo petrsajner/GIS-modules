@@ -189,6 +189,11 @@ function renderRefThumbs() {
   if (strengthRow) {
     strengthRow.style.display = (m?.i2iModel && refs.length > 0) ? '' : 'none';
   }
+
+  // Re-apply model-specific @mention names in prompt (refs may have shifted)
+  if (typeof rewritePromptForModel === 'function' && m) {
+    rewritePromptForModel(m.type, m.type);  // same model, but refs changed
+  }
 }
 
 // ── Drag & drop reordering v ref panelu ──
@@ -352,7 +357,6 @@ let mentionActiveIdx = -1;
 function initMentionSystem() {
   const ta = document.getElementById('prompt');
   if (!ta) return;
-
   ta.addEventListener('input', handleMentionInput);
   ta.addEventListener('keydown', handleMentionKeydown);
   document.addEventListener('click', e => {
@@ -364,7 +368,6 @@ async function handleMentionInput(e) {
   const ta = e.target;
   const val = ta.value;
   const pos = ta.selectionStart;
-  // Najdi @xxx před kurzorem
   const before = val.slice(0, pos);
   const match = before.match(/@(\w*)$/);
   if (!match) { closeMention(); return; }
@@ -372,8 +375,17 @@ async function handleMentionInput(e) {
   await showMentionDropdown(ta, match.index, pos);
 }
 
+// \u2500\u2500 Model-specific ref label for display & insertion \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+function _refModelLabel(refIdx, modelType) {
+  if (modelType === 'kling' || modelType === 'flux') return `@Image${refIdx + 1}`;
+  if (modelType === 'seedream') return `Figure ${refIdx + 1}`;
+  if (modelType === 'gemini') return `image ${refIdx + 1}`;
+  return null; // other models: use user label
+}
+
 async function showMentionDropdown(ta, atStart, curPos) {
-  // Show only currently active refs (not all assets from DB)
+  const modelType = MODELS[currentModel]?.type;
+
   mentionAssets = refs.filter(r => {
     const label = (r.userLabel || r.autoName || '').toLowerCase();
     return !mentionFilter || label.startsWith(mentionFilter) || label.includes(mentionFilter);
@@ -382,24 +394,25 @@ async function showMentionDropdown(ta, atStart, curPos) {
   const dd = document.getElementById('mentionDropdown');
 
   if (!mentionAssets.length) {
-    dd.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--dim2);font-style:italic;">No refs added — add reference images below the prompt first</div>';
+    dd.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--dim2);font-style:italic;">No refs added \u2014 add reference images below the prompt first</div>';
   } else {
     dd.innerHTML = mentionAssets.map((r, i) => {
-      const label = r.userLabel || r.autoName || `ref ${i + 1}`;
+      const userLabel = r.userLabel || r.autoName || `ref ${i + 1}`;
+      const refIdx = refs.indexOf(r);
+      const modelLabel = _refModelLabel(refIdx, modelType);
       const thumbSrc = `data:${r.mimeType||'image/png'};base64,${r.thumb}`;
       return `
       <div class="mention-item ${i === mentionActiveIdx ? 'mi-active' : ''}" data-idx="${i}" onmousedown="insertMention(event,${i})">
-        <img class="mi-thumb" src="${thumbSrc}" alt="${label}">
+        <img class="mi-thumb" src="${thumbSrc}" alt="${escHtml(userLabel)}">
         <div class="mi-info">
-          <div class="mi-name">${escHtml(label)}</div>
-          <div class="mi-sub">${r.userLabel ? r.autoName : 'no custom name'}</div>
+          <div class="mi-name">${modelLabel ? escHtml(modelLabel) : escHtml(userLabel)}</div>
+          <div class="mi-sub">${modelLabel ? escHtml(userLabel) : (r.userLabel ? r.autoName : 'no custom name')}</div>
         </div>
-        <span class="mi-insert">↵</span>
+        <span class="mi-insert">\u21b5</span>
       </div>`;
     }).join('');
   }
 
-  // Pozice pod kurzorem — vypočti ze textarea
   const coords = getTextareaCaretCoords(ta, atStart);
   const taRect = ta.getBoundingClientRect();
   let x = taRect.left + coords.left;
@@ -414,7 +427,6 @@ async function showMentionDropdown(ta, atStart, curPos) {
 }
 
 function getTextareaCaretCoords(ta, pos) {
-  // Jednoduchý fallback — vrátí přibližnou pozici na základě scrollTop
   return { left: 10, top: ta.scrollTop + 16 };
 }
 
@@ -450,13 +462,18 @@ function insertMention(e, idx) {
 function insertMentionByIdx(idx) {
   if (idx < 0 || idx >= mentionAssets.length) return;
   const r = mentionAssets[idx];
-  const label = r.userLabel || r.autoName || `ref_${idx + 1}`;
+  const refIdx = refs.indexOf(r);
+  const modelType = MODELS[currentModel]?.type;
+  const modelLabel = _refModelLabel(refIdx, modelType);
+  const userLabel = (r.userLabel || r.autoName || `ref_${refIdx + 1}`).replace(/\s+/g, '_');
+  const insertText = modelLabel || ('@' + userLabel);
+
   const ta = document.getElementById('prompt');
   const val = ta.value;
   const pos = ta.selectionStart;
   const before = val.slice(0, pos);
   const after = val.slice(pos);
-  const newBefore = before.replace(/@(\w*)$/, `@${label.replace(/\s+/g,'_')}`);
+  const newBefore = before.replace(/@(\w*)$/, insertText);
   ta.value = newBefore + after;
   ta.selectionStart = ta.selectionEnd = newBefore.length;
   ta.focus();
@@ -470,22 +487,88 @@ function closeMention() {
   mentionActiveIdx = -1;
 }
 
-// ═══════════════════════════════════════════════════════
-// PROMPT PREPROCESSING — @mention → model-specific format
-// ═══════════════════════════════════════════════════════
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// LIVE PROMPT REWRITING
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+// Reverse-map model-specific names back to @UserLabel form
+function promptModelToUserLabels(prompt, activeRefs, modelType) {
+  if (!prompt || !activeRefs.length) return prompt;
+
+  if (modelType === 'kling' || modelType === 'flux') {
+    return prompt.replace(/@Image(\d+)/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  if (modelType === 'seedream') {
+    return prompt.replace(/\bFigure\s+(\d+)\b/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  if (modelType === 'gemini') {
+    let p = prompt.replace(/^\[Reference images:[^\]]*\]\s*/i, '');
+    p = p.replace(/\bimage\s+\d+\s*\(([^)]+)\)/gi, (full, label) => {
+      return '@' + label.trim().replace(/\s+/g, '_');
+    });
+    p = p.replace(/\bimage\s+(\d+)\b/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+    return p;
+  }
+
+  return prompt;
+}
+
+// Called on model switch and after refs change
+function rewritePromptForModel(prevType, newType) {
+  const ta = document.getElementById('prompt');
+  if (!ta || !ta.value.trim()) return;
+  if (!refs.length) return;
+
+  // Step 1: convert current text back to canonical @UserLabel form
+  const canonical = prevType
+    ? promptModelToUserLabels(ta.value, refs, prevType)
+    : ta.value;
+
+  // Step 2: apply new model's format
+  const newPrompt = preprocessPromptForModel(canonical, refs, newType);
+
+  if (newPrompt !== ta.value) {
+    const pos = ta.selectionStart;
+    ta.value = newPrompt;
+    ta.selectionStart = ta.selectionEnd = Math.min(pos, newPrompt.length);
+    if (typeof updateCharCount === 'function') updateCharCount();
+  }
+}
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// PROMPT PREPROCESSING \u2014 @mention \u2192 model-specific format
+// (safety net at generate-time; live rewriting happens above)
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 function preprocessPromptForModel(prompt, activeRefs, modelType) {
   if (!prompt || !activeRefs.length) return prompt;
 
-  // Mapa: label (lowercased, underscores→spaces) → index v refs
   const labelMap = new Map();
   activeRefs.forEach((r, i) => {
     const key = (r.userLabel || r.autoName || '').replace(/_/g, ' ').toLowerCase();
     if (key) labelMap.set(key, i);
-    // Také zkus s podtržítky
     const keyU = (r.userLabel || r.autoName || '').toLowerCase();
     if (keyU) labelMap.set(keyU, i);
-    // autoName vždy
     const an = (r.autoName || '').toLowerCase();
     if (an) labelMap.set(an, i);
   });
@@ -499,13 +582,9 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
   }
 
   if (modelType === 'flux' || modelType === 'seedream' || modelType === 'kling') {
-    // FLUX/SeeDream: @Label → @Image{N+1} / Figure {N}
-    // Kling Image: @Label → @Image{N} (1-indexed, nativní syntax modelu)
-    const tmpl = modelType === 'flux'
-      ? (i) => `@Image${i + 1}`
-      : modelType === 'kling'
-      ? (i) => `@Image${i + 1}`
-      : (i) => `Figure ${i + 1}`;
+    const tmpl = modelType === 'seedream'
+      ? (i) => `Figure ${i + 1}`
+      : (i) => `@Image${i + 1}`;
     return prompt.replace(/@([\w]+)/g, (full, mention) => {
       const idx = findIdx(mention);
       return idx >= 0 ? tmpl(idx) : full;
@@ -513,7 +592,6 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
   }
 
   if (modelType === 'gemini') {
-    // Gemini: přidat kontext prefix + @Label → "obrázek N (Label)"
     const namedRefs = activeRefs.filter(r => r.userLabel || r.autoName);
     let prefix = '';
     if (namedRefs.length > 0) {
@@ -534,7 +612,6 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
 
   return prompt;
 }
-
 
 
 
@@ -628,58 +705,57 @@ function setDescribeTab(mode) {
 
 // Describe fallback chain: Gemini 2.5 Flash → OpenRouter Qwen2.5-VL-72B
 // OpenRouter is a completely separate cloud — immune to Google outages.
-const DESCRIBE_MODELS = ['gemini-2.5-flash'];
-const OR_DESCRIBE_MODEL = 'qwen/qwen2.5-vl-72b-instruct';
+const OR_DESCRIBE_MODEL      = 'anthropic/claude-sonnet-4-6';  // primary: vision + creative
+const GEMINI_DESCRIBE_MODEL  = 'gemini-3.1-pro-preview';        // fallback if no OR key
 
 async function callGeminiDescribe(apiKey, imageData, mimeType, mode, source, signal) {
   let instruction;
   if (source === 'video' && mode === 'prompt') {
-    instruction = 'This image is the starting frame for an AI video generation. Write a concise video generation prompt in English. Focus on: what action or movement the subject will perform, camera motion (pan, zoom, tilt, dolly, static, handheld, etc.), and scene dynamics or atmosphere changes. Do NOT re-describe the visual appearance of the image — the model already receives it as input. Output ONLY the motion/action prompt, no explanations, no quotes, no markdown.';
+    instruction = 'This image is the starting frame for an AI video generation. Write a concise video generation prompt in English. Focus on: what specific action or movement the subject will perform, camera motion (pan, zoom, tilt, dolly, static, handheld, etc.), and how the scene atmosphere or light evolves during the shot. Do NOT re-describe the static visual appearance — the model already sees the image. Be specific about motion and dynamics. Output ONLY the motion/action prompt, no explanations, no quotes, no markdown.';
   } else if (mode === 'desc') {
     instruction = 'Describe this image briefly and clearly in 2–4 sentences in English. Cover: what is shown, setting/context, and any notable visual details. Output ONLY the description, no lists, no markdown, no explanations.';
   } else {
-    instruction = 'Describe this image as a detailed image generation prompt in English. Include: subject, composition, lighting, mood/atmosphere, color palette, style or medium (photo/illustration/cinematic/etc.), camera angle if relevant. Output ONLY the prompt text, no explanations, no quotes, no markdown.';
+    instruction = 'Describe this image as a detailed image generation prompt in English. Think like a photographer seeing this shot for the first time — what is the most distinctive element? Include: subject with specific detail, composition and framing, quality and direction of light, mood/atmosphere, color palette, material textures, camera/lens feel if apparent. Avoid generic phrases like \"cinematic lighting\" or \"beautiful scene\" — be specific and evocative. Output ONLY the prompt text, no explanations, no quotes, no markdown.';
   }
   const statusEl = document.getElementById('dmStatus');
+  const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
 
-  // ── 1. Try Gemini models ──────────────────────────────
-  const geminiBody = {
-    contents: [{ role: 'user', parts: [
-      { inlineData: { mimeType, data: imageData } },
-      { text: instruction }
-    ]}],
-    generationConfig: { temperature: 0.4, maxOutputTokens: 1024 }
-  };
-  let lastErr = null;
-  for (let i = 0; i < DESCRIBE_MODELS.length; i++) {
+  if (orKey) {
+    // ── Primary: Claude Sonnet via OpenRouter (vision) ──────────────────
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    return await _callOpenRouterVision(orKey, imageData, mimeType, instruction, signal);
+  }
+
+  // ── Fallback: Gemini 3.1 Pro ─────────────────────────────────────
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_DESCRIBE_MODEL}:generateContent?key=${apiKey}`;
+  for (let i = 0; i < 2; i++) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (i > 0) {
-      if (statusEl) statusEl.textContent = `⟳ Retrying with ${DESCRIBE_MODELS[i]}…`;
-      await new Promise(r => setTimeout(r, 1200));
+      if (statusEl) statusEl.textContent = `⟳ Retrying…`;
+      await new Promise(r => setTimeout(r, 1500));
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     }
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${DESCRIBE_MODELS[i]}:generateContent?key=${apiKey}`;
     const resp = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(geminiBody), signal,
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [
+          { inlineData: { mimeType, data: imageData } },
+          { text: instruction }
+        ]}],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+      }),
+      signal,
     });
     const data = await resp.json();
     if (resp.ok) return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    lastErr = new Error(`API ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
-    if (resp.status !== 503 && resp.status !== 429 && resp.status !== 500) throw lastErr;
+    const err = new Error(`API ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
+    if (resp.status !== 503 && resp.status !== 429 && resp.status !== 500) throw err;
+    if (i === 1) throw err;
   }
-
-  // ── 2. Google failed → OpenRouter fallback ────────────
-  const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
-  if (!orKey) throw lastErr; // no OR key configured — surface original Google error
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  if (statusEl) statusEl.textContent = `⟳ Google unavailable — trying OpenRouter…`;
-  await new Promise(r => setTimeout(r, 600));
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  return await _callOpenRouterVision(orKey, imageData, mimeType, instruction, signal);
 }
 
-// OpenRouter vision call — OpenAI-compatible format with base64 image
+// OpenRouter vision call — Claude Sonnet with base64 image
 async function _callOpenRouterVision(orKey, imageData, mimeType, instruction, signal) {
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -687,7 +763,7 @@ async function _callOpenRouterVision(orKey, imageData, mimeType, instruction, si
       'Authorization': `Bearer ${orKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://gis.local',
-      'X-Title': 'Google Image Studio',
+      'X-Title': 'Generative Image Studio',
     },
     body: JSON.stringify({
       model: OR_DESCRIBE_MODEL,
@@ -696,7 +772,7 @@ async function _callOpenRouterVision(orKey, imageData, mimeType, instruction, si
         { type: 'text', text: instruction },
       ]}],
       max_tokens: 1024,
-      temperature: 0.4,
+      temperature: 0.7,
     }),
     signal,
   });
@@ -704,7 +780,6 @@ async function _callOpenRouterVision(orKey, imageData, mimeType, instruction, si
   if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
   return data.choices?.[0]?.message?.content || '';
 }
-
 function closeDescribeModal() {
   if (_describeAbortCtrl) { _describeAbortCtrl.abort(); _describeAbortCtrl = null; }
   document.getElementById('describeModal')?.classList.remove('show');

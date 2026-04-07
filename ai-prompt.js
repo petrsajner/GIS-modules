@@ -45,7 +45,10 @@ function getActivePrompt() {
 
 // ── Open / Close ──────────────────────────────────────
 function openAiPromptModal() {
-  if (!aiBuffer) setAiBuffer(getActivePrompt());
+  if (!aiBuffer) {
+    setAiBuffer(getActivePrompt());  // Fresh open — load current prompt
+    _clearTabOutput(aiCurrentTab);   // Clear any stale output from previous session
+  }
   _syncBufferToTabInput(aiCurrentTab);
   const isVideo = window.aiPromptContext === 'video';
   const badge = document.getElementById('aiContextBadge');
@@ -129,6 +132,27 @@ function _prepChatInput() {
 }
 
 // ── Use as Prompt ─────────────────────────────────────
+function _resetAiModal() {
+  aiBuffer = '';
+  aiChatHistory = [];
+  // Clear all tab output textareas
+  Object.values(AI_OUTPUT_IDS).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.style.height = 'auto'; }
+  });
+  // Clear all tab input textareas
+  Object.values(AI_INPUT_IDS).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.style.height = 'auto'; }
+  });
+  // Clear chat history DOM
+  const hist = document.getElementById('aiChatHistory');
+  if (hist) hist.innerHTML = '';
+  const chatInput = document.getElementById('aiChatInput');
+  if (chatInput) { chatInput.value = ''; chatInput.style.height = 'auto'; }
+  document.getElementById('aiStatus').textContent = '';
+}
+
 function useAiBuffer() {
   if (!aiBuffer) { toast('No prompt in buffer', 'err'); return; }
   const ta = window.aiPromptContext === 'video'
@@ -140,7 +164,7 @@ function useAiBuffer() {
     const cc = document.getElementById('charCount');
     if (cc) cc.textContent = aiBuffer.length + ' ch.';
   }
-  aiBuffer = '';  // Clear buffer — next open will load current prompt from textarea
+  _resetAiModal();  // Full reset — next open loads fresh prompt from textarea
   closeAiPromptModal();
 }
 
@@ -341,28 +365,35 @@ Output ONLY the prompt text. No explanations, no labels, no markdown.`;
 }
 
 // ── Chat ──────────────────────────────────────────────
-const AI_CHAT_SYSTEM_IMAGE = `You are a precise prompt editor for AI image generation working in a multi-turn conversation.
+const AI_CHAT_SYSTEM_IMAGE = `You are an expert photographer and prompt editor for AI image generation, working in a multi-turn conversation.
 
-CRITICAL RULES:
-1. Your previous response IS the current prompt. Always start from it.
-2. Keep ALL existing content from your last response — every word, every detail.
-3. Only add, remove, or change exactly what the user specifically requests.
-4. Never summarize, shorten, reorder, or restructure the prompt unless explicitly asked.
-5. Respond ONLY with the complete revised prompt. No notes, no labels, no explanations, no markdown.
+HOW TO EDIT:
+- Understand the user's INTENT, not just their literal words. "Make the light warmer" means rewriting the lighting description naturally into the prompt — not appending "warm light" at the end.
+- Integrate every change into the existing prose. Find the relevant part of the sentence and rewrite it. Do not append keywords or phrases at the end.
+- Preserve the style, voice, and structure of the existing prompt for everything not affected by the change.
+- If the user wants something added that has no existing counterpart, weave it in at the natural place in the sentence — not bolted on at the end.
 
-If this is the first message, start from the provided starting prompt and apply the user's request to it.`;
+TECHNICAL:
+- Your previous response IS the current prompt. Always start from it.
+- Respond ONLY with the complete revised prompt. No explanations, no labels, no markdown.
 
-const AI_CHAT_SYSTEM_VIDEO = `You are a precise prompt editor for AI video generation working in a multi-turn conversation.
-A video prompt must include: subject + action/movement, camera motion, atmosphere.
+If this is the first message, start from the provided starting prompt and apply the user's request.`;
 
-CRITICAL RULES:
-1. Your previous response IS the current prompt. Always start from it.
-2. Keep ALL existing content from your last response — every word, every detail.
-3. Only add, remove, or change exactly what the user specifically requests.
-4. Never summarize, shorten, reorder, or restructure the prompt unless explicitly asked.
-5. Respond ONLY with the complete revised prompt. No notes, no labels, no explanations, no markdown.
+const AI_CHAT_SYSTEM_VIDEO = `You are an expert cinematographer and prompt editor for AI video generation, working in a multi-turn conversation.
 
-If this is the first message, start from the provided starting prompt and apply the user's request to it.`;
+A strong video prompt describes: subject + specific action/movement, camera motion, atmosphere/light, and how things change or evolve during the shot.
+
+HOW TO EDIT:
+- Understand the user's INTENT, not just their literal words. "The sun turns red during the shot" means rewriting the lighting/atmosphere section to describe this transition as it unfolds — not appending "Red sun" at the end.
+- Integrate every change into the existing prose. Find the relevant phrase and rewrite it to carry the new meaning naturally. Use language like "as the shot progresses...", "while the camera holds...", "the light shifts to..." for temporal changes.
+- Temporal events (light changing, subject reacting, weather shifting) must be described as things that HAPPEN DURING the shot — woven into the flow of the action, not listed separately.
+- Preserve the style, voice, and structure of everything not affected by the change.
+
+TECHNICAL:
+- Your previous response IS the current prompt. Always start from it.
+- Respond ONLY with the complete revised prompt. No explanations, no labels, no markdown.
+
+If this is the first message, start from the provided starting prompt and apply the user's request.`;
 
 function clearAiChat() {
   aiChatHistory = [];
@@ -454,30 +485,14 @@ function _appendChatTyping() {
   return div;
 }
 
-// ── Gemini API + OpenRouter fallback ─────────────────
-const AI_PROMPT_MODEL    = 'gemini-2.5-flash';
-const OR_AI_PROMPT_MODEL = 'qwen/qwen2.5-72b-instruct';  // text-only, no vision needed here
+// ── AI Prompt API — Claude (OR) primary, Gemini 3.1 Pro fallback ─────
+const OR_AI_PROMPT_MODEL    = 'anthropic/claude-sonnet-4-6';  // primary: best creative writing
+const GEMINI_FALLBACK_MODEL = 'gemini-3.1-pro-preview';       // fallback if no OR key
 
-// Try Gemini with retries; on persistent 503/429/500 → throw _retryable_ error
-async function _geminiPost(url, body, retries = 2) {
-  let lastErr = null;
-  for (let i = 0; i < retries; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, 1500 * i));
-    const resp = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const data = await resp.json();
-    if (resp.ok) return data;
-    lastErr = new Error(`API ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
-    if (resp.status !== 503 && resp.status !== 429 && resp.status !== 500) throw lastErr;
-  }
-  // Mark as retryable so callers know to try OpenRouter
-  lastErr._googleUnavailable = true;
-  throw lastErr;
-}
-
-// OpenRouter text-only call — OpenAI-compatible format
+// OpenRouter call — Claude Sonnet
 async function _callOpenRouterText(systemPrompt, userMsg, temperature, maxTokens) {
   const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
-  if (!orKey) return null; // no key configured — caller will surface original error
+  if (!orKey) return null;
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
   messages.push({ role: 'user', content: userMsg });
@@ -487,7 +502,7 @@ async function _callOpenRouterText(systemPrompt, userMsg, temperature, maxTokens
       'Authorization': `Bearer ${orKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://gis.local',
-      'X-Title': 'Google Image Studio',
+      'X-Title': 'Generative Image Studio',
     },
     body: JSON.stringify({ model: OR_AI_PROMPT_MODEL, messages, max_tokens: maxTokens, temperature }),
   });
@@ -496,42 +511,58 @@ async function _callOpenRouterText(systemPrompt, userMsg, temperature, maxTokens
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callGeminiTextMultiTurn(apiKey, systemPrompt, history) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${AI_PROMPT_MODEL}:generateContent?key=${apiKey}`;
-  try {
-    const data = await _geminiPost(url, {
+// Gemini 3.1 Pro — fallback when no OR key
+async function _callGeminiTextFallback(apiKey, systemPrompt, userMsg, temperature, maxTokens) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_FALLBACK_MODEL}:generateContent?key=${apiKey}`;
+  for (let i = 0; i < 2; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 1500));
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        generationConfig: { temperature, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
+      }),
+    });
+    const data = await resp.json();
+    if (resp.ok) return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const err = new Error(`API ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
+    if (resp.status !== 503 && resp.status !== 429 && resp.status !== 500) throw err;
+    if (i === 1) throw err;
+  }
+}
+
+async function _callGeminiMultiTurnFallback(apiKey, systemPrompt, history, temperature, maxTokens) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_FALLBACK_MODEL}:generateContent?key=${apiKey}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
       contents: history,
       systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { temperature: 0.85, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } }
-    });
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  } catch(e) {
-    if (!e._googleUnavailable) throw e;
-    // Convert multi-turn history to a single user message for OpenRouter
+      generationConfig: { temperature, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: -1 } },
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`API ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function callGeminiTextMultiTurn(apiKey, systemPrompt, history) {
+  const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+  if (orKey) {
     const lastUserMsg = [...history].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
-    const result = await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
-    if (result === null) throw e;
-    return result;
+    return await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
   }
+  return await _callGeminiMultiTurnFallback(apiKey, systemPrompt, history, 0.85, 2048);
 }
 
 async function callGeminiText(apiKey, systemPrompt, userMsg) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${AI_PROMPT_MODEL}:generateContent?key=${apiKey}`;
-  try {
-    const data = await _geminiPost(url, {
-      contents: [{ role: 'user', parts: [{ text: userMsg }] }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { temperature: 0.9, maxOutputTokens: 8192, thinkingConfig: { thinkingBudget: 0 } }
-    });
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  } catch(e) {
-    if (!e._googleUnavailable) throw e;
-    const result = await _callOpenRouterText(systemPrompt, userMsg, 0.9, 8192);
-    if (result === null) throw e;
-    return result;
-  }
+  const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+  if (orKey) return await _callOpenRouterText(systemPrompt, userMsg, 0.9, 8192);
+  return await _callGeminiTextFallback(apiKey, systemPrompt, userMsg, 0.9, 8192);
 }
-
 // ── Init chips ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#aiRandomChips .aipm-chip').forEach(chip => {

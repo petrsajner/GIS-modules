@@ -982,11 +982,15 @@ function getActiveVideoModelKey() {
 
 // ── Model change ─────────────────────────────────────────
 function onVideoModelChange(value) {
+  const prevM = VIDEO_MODELS[_prevVideoModelKey] || null;
+  _videoModelSwitching = true;
   // Topaz models are selected directly from main select — no sub-select needed
   if (TOPAZ_MODELS[value]) {
     const row = document.getElementById('klingVersionRow');
     if (row) row.style.display = 'none';
     _applyVideoModel(value);
+    _prevVideoModelKey = value;
+    _videoModelSwitching = false;
     return;
   }
   // Magnific video models — direct, no sub-select
@@ -994,6 +998,8 @@ function onVideoModelChange(value) {
     const row = document.getElementById('klingVersionRow');
     if (row) row.style.display = 'none';
     _applyVideoModel(value);
+    _prevVideoModelKey = value;
+    _videoModelSwitching = false;
     return;
   }
   // Kling group
@@ -1009,15 +1015,26 @@ function onVideoModelChange(value) {
     const row = document.getElementById('klingVersionRow');
     if (row) row.style.display = '';
     _applyVideoModel(group.default);
+    _prevVideoModelKey = group.default;
+    _videoModelSwitching = false;
+    rewriteVideoPromptForModel(prevM, VIDEO_MODELS[group.default] || null);
     return;
   }
   const row = document.getElementById('klingVersionRow');
   if (row) row.style.display = 'none';
   _applyVideoModel(value);
+  _prevVideoModelKey = value;
+  _videoModelSwitching = false;
+  rewriteVideoPromptForModel(prevM, VIDEO_MODELS[value] || null);
 }
 
 function onKlingVersionChange(variantKey) {
+  const prevM = VIDEO_MODELS[_prevVideoModelKey] || null;
+  _videoModelSwitching = true;
   _applyVideoModel(variantKey);
+  _prevVideoModelKey = variantKey;
+  _videoModelSwitching = false;
+  rewriteVideoPromptForModel(prevM, VIDEO_MODELS[variantKey] || null);
 }
 
 
@@ -1515,6 +1532,14 @@ function renderVideoRefPanel() {
     </div>` : '';
 
   panel.innerHTML = tiles + addTile;
+
+  // Init prev key on first render (so model switches know what to reverse from)
+  if (_prevVideoModelKey === null) _prevVideoModelKey = getActiveVideoModelKey();
+
+  // Re-apply model-specific @mention names when refs change (not during model switch)
+  if (!_videoModelSwitching && typeof rewriteVideoPromptForModel === 'function') {
+    rewriteVideoPromptForModel(m, m);  // same model, refs shifted → re-number
+  }
 }
 
 // ── Inline rename video ref label (dblclick) ─────────────
@@ -1699,15 +1724,24 @@ async function generateVideo() {
   }
 
   const rawVideoPrompt = document.getElementById('videoPrompt')?.value?.trim();
-  if (!rawVideoPrompt) { toast('Enter a prompt', 'err'); return; }
+  const refMode = model.refMode || 'none';
+  // Most models with start/end frames support generation without prompt
+  // EXCEPTIONS: Luma (API hard-requires prompt) and Kling via fal.ai (same)
+  const veoFramesMode = model.type === 'veo' &&
+    document.getElementById('veoRefMode')?.value === 'frames';
+  const promptOptional = veoFramesMode ||
+    (model.type !== 'luma_video' && model.type !== 'kling_video' &&
+     (refMode === 'single_end' || refMode === 'single' || refMode === 'keyframe' ||
+      refMode === 'wan_r2v' || refMode === 'multi'));
+  if (!rawVideoPrompt && !promptOptional) { toast('Enter a prompt', 'err'); return; }
   // Append style + camera suffix
   const vStyleSuffix = buildStyleSuffix('flux');
   const vCameraSuffix = buildCameraSuffix();
   const vExtra = [vStyleSuffix, vCameraSuffix].filter(Boolean).join(', ');
-  const prompt = vExtra ? rawVideoPrompt + ', ' + vExtra : rawVideoPrompt;
+  const prompt = vExtra ? (rawVideoPrompt ? rawVideoPrompt + ', ' + vExtra : vExtra) : rawVideoPrompt;
 
   // Validate refs based on refMode
-  const refMode = model.refMode || 'none';
+  // (refMode already declared above)
   // Veo + Luma: refs are optional — 0 refs = T2V, 1+ refs = I2V/Keyframes automatically
   // wan27_r2v: refs optional (image_urls + video_urls)
   if ((refMode === 'single' || refMode === 'single_end') && videoRefs.length === 0 && model.type !== 'veo' && model.type !== 'luma_video' && model.type !== 'wan27e_video' && model.refMode !== 'wan_r2v') {
@@ -2036,7 +2070,9 @@ async function runVideoJob(job) {
   // duration: string for most models, integer for Vidu Q3 (durationInt flag)
   // duration: clamp to model minDur/maxDur, convert to string or int per model flag
   const durNum = Math.max(model.minDur || 1, Math.min(model.maxDur || 120, parseInt(duration)));
-  const payload = { prompt, duration: model.durationInt ? durNum : String(durNum) };
+  const payload = {};
+  if (prompt) payload.prompt = prompt;  // omit entirely if empty — APIs reject empty string
+  payload.duration = model.durationInt ? durNum : String(durNum);
   // aspect_ratio only for T2V (I2V infers from start image)
   if (refModeJob === 'none') payload.aspect_ratio = aspectRatio;
   // audio: always explicit — models with audioField use that key; default is 'generate_audio'
@@ -2550,13 +2586,132 @@ function renderVideoResultCard(rec, thumbData) {
 }
 
 // ── Video error ──────────────────────────────────────────
+// Builds friendly error message — video-specific + delegates to image friendlyError
+function friendlyVideoError(raw) {
+  if (!raw) return 'Video generation failed. Please try again.';
+  const m = raw.toString();
+
+  // Video-specific errors
+  if (/no video url|no video in result/i.test(m))       return 'No video returned — server may have filtered it';
+  if (/source video.*not found|video data not found/i.test(m)) return 'Source video missing — re-add it and try again';
+  if (/no source video|select a source video/i.test(m)) return 'Source video required — use ▷ on a video in gallery';
+  if (/start frame.*required|no.*start.*frame/i.test(m)) return 'Start frame image required for I2V';
+  if (/prompt.*required|prompt.*must be provided/i.test(m)) return 'Prompt required for this model';
+  if (/missing prompt/i.test(m))                        return 'Prompt required — enter a description';
+  if (/audio.*cost|generate_audio/i.test(m))            return 'Audio setting error — try again';
+  if (/result fetch failed.*422/i.test(m))              return 'Server rejected payload (422) — check model settings';
+  if (/submit.*422/i.test(m))                           return 'Server rejected request (422) — check model settings';
+  if (/luma submit 400/i.test(m))                       return m.replace(/^Luma submit \d+:\s*/, '');
+  if (/download.*404|video.*404/i.test(m))              return 'Video download failed — result may have expired';
+  if (/timeout.*25 min|timeout.*30 min|timeout.*10 min/i.test(m)) return 'No result after timeout — server is slow, try Rerun';
+  if (/cancelled/i.test(m))                             return 'Cancelled';
+
+  // Delegate to image friendlyError for generic API/network errors
+  return friendlyError(raw);
+}
+
 function videoJobError(job, msg) {
   job.status = 'error';
   job.errorMsg = msg;
   renderVideoQueue();
-  removeVideoPlaceholder(job);
-  toast(`Video failed: ${msg.slice(0, 100)}`, 'err');
+
+  // Find placeholder card and convert to error card
+  const cardEl = document.getElementById(`vphold_${job.id}`);
+  if (cardEl) {
+    const isTopaz = !!job.isTopaz;
+    const modelName = isTopaz
+      ? `✦ Topaz ${TOPAZ_MODEL_NAMES[job.topazModel] || job.topazModel}`
+      : (job.model?.name || '?');
+
+    const isTimeout = /timeout|deadline/i.test(msg || '');
+    const icon = isTimeout ? '⏱' : '⚠';
+    const friendlyMsg = escHtml(friendlyVideoError(msg));
+    const fullPrompt = escHtml((job.prompt || '').trim());
+    const cardKey = job.id;
+
+    // Video ref thumbnails
+    const vrefs = job.videoRefsSnapshot || [];
+    const refsHtml = vrefs.length
+      ? `<div class="err-refs">${vrefs.map(r => r.thumb
+          ? `<img class="err-ref-thumb" src="data:image/jpeg;base64,${r.thumb}" title="${escHtml(r.userLabel || r.autoName || '')}">`
+          : `<div class="err-ref-thumb err-ref-nothumb">?</div>`
+        ).join('')}</div>`
+      : '';
+
+    // Param chips — duration + model-specific info
+    const chips = [];
+    if (job.duration)   chips.push(`${job.duration}s`);
+    if (job.resolution) chips.push(job.resolution);
+    const chipHtml = chips.map(c => `<span class="err-chip">${escHtml(c)}</span>`).join('');
+
+    cardEl.classList.remove('placeholder-card');
+    cardEl.classList.add('error-card');
+
+    cardEl.innerHTML = `
+      <div class="img-card-top-spacer"></div>
+      <div class="err-detail">
+        <div class="err-banner">
+          <span class="err-banner-icon">${icon}</span>
+          <span class="err-banner-msg">${friendlyMsg}</span>
+        </div>
+        <div class="err-content">
+          <div class="err-meta-row">
+            <span class="err-model-label">${escHtml(modelName)}</span>
+            ${chipHtml}
+          </div>
+          ${fullPrompt ? `<div class="err-prompt">${fullPrompt}</div>` : ''}
+          ${refsHtml}
+          <div class="err-btns">
+            <button class="ibtn" onclick="reuseVideoJob_err('${cardKey}')" title="Load params into form to review and re-generate">↺ Reuse</button>
+            <button class="ibtn err-rerun-btn" onclick="rerunVideoJob('${cardKey}')" title="Re-run this video job immediately">▶ Rerun</button>
+          </div>
+        </div>
+      </div>
+      <div class="img-card-meta">
+        <div class="meta-pill">Model: <b>${escHtml(modelName)}</b></div>
+        <div class="meta-pill" style="color:#c08060;">${icon} ${friendlyMsg}</div>
+      </div>`;
+  } else {
+    // No placeholder card (e.g. Topaz background jobs) — just toast
+    toast(`Video failed: ${friendlyVideoError(msg).slice(0, 100)}`, 'err');
+  }
   console.error('Video job error:', job.id, msg);
+}
+
+// ── Video error card actions ──────────────────────────────
+function reuseVideoJob_err(jobId) {
+  const card = document.getElementById(`vphold_${jobId}`);
+  const job = videoJobs.find(j => j.id === jobId);
+  if (!job) { toast('Cannot reuse — job data lost', 'err'); return; }
+  if (card) card.remove();
+
+  // Restore into form (best-effort — model + prompt)
+  switchView('gen');
+  setGenMode('video');
+  const promptEl = document.getElementById('videoPrompt');
+  if (promptEl && job.prompt) promptEl.value = job.prompt;
+  if (job.modelKey) {
+    const sel = document.getElementById('videoModelSelect');
+    if (sel) { sel.value = job.modelKey; onVideoModelChange(job.modelKey); }
+  }
+  toast('Parameters restored — review and click Generate', 'ok');
+}
+
+function rerunVideoJob(jobId) {
+  const card = document.getElementById(`vphold_${jobId}`);
+  const job = videoJobs.find(j => j.id === jobId);
+  if (!job) { toast('Cannot rerun — job data lost', 'err'); return; }
+  if (card) card.remove();
+  // Re-queue with same parameters, fresh ID
+  const { id: _id, status: _s, startedAt: _st, elapsed: _e,
+          requestId: _r, cancelled: _c, errorMsg: _em, ...jobData } = job;
+  const newJob = { ...jobData,
+    id: `vid_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
+    status: 'queued' };
+  videoJobs.push(newJob);
+  videoShowPlaceholder(newJob);
+  renderVideoQueue();
+  runVideoJob(newJob).catch(e => videoJobError(newJob, e.message || 'Unknown error'));
 }
 
 // ── Video queue rendering ────────────────────────────────
@@ -3275,7 +3430,7 @@ async function callWan27Video(job) {
   if (audioUrl)           payload.audio_url = audioUrl;
 
   if (isR2V) {
-    // R2V: load character refs → image_urls[] / video_urls[]
+    // R2V: load character refs → reference_image_urls[] / reference_video_urls[]
     // videoRefsSnapshot contains image assets (pre-loaded with imageData)
     const imageRefs = [], videoRefs_ = [];
     for (const snap of (videoRefsSnapshot || [])) {
@@ -3295,8 +3450,8 @@ async function callWan27Video(job) {
         }
       }
     }
-    if (imageRefs.length > 0) payload.image_urls = imageRefs;
-    if (videoRefs_.length > 0) payload.video_urls = videoRefs_;
+    if (imageRefs.length > 0) payload.reference_image_urls = imageRefs;
+    if (videoRefs_.length > 0) payload.reference_video_urls = videoRefs_;
 
   } else if (!isT2V) {
     // I2V: load refs as data URI
@@ -3534,9 +3689,12 @@ async function callWan27eVideo(job) {
   if (!requestId) throw new Error(`WAN 2.7 Edit: no request_id. Response: ${JSON.stringify(submitted).slice(0,200)}`);
 
   job.requestId = requestId;
+  job.status = 'queued';
+  renderVideoQueue();
   updateVideoPlaceholderStatus(job, 'IN QUEUE…');
 
-  const statusUrl = submitted.status_url || `${queueUrl}/requests/${requestId}/status`;
+  const statusUrl   = submitted.status_url   || `${queueUrl}/requests/${requestId}/status`;
+  const responseUrl = submitted.response_url || null;
   const POLL_MS = 5000;
   const TIMEOUT = 30 * 60 * 1000; // Video Edit can be slow
   const deadline = Date.now() + TIMEOUT;
@@ -3552,10 +3710,10 @@ async function callWan27eVideo(job) {
         if (!st.ok) { setTimeout(poll, POLL_MS); return; }
         const s = await st.json();
         const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-        if (s.status === 'IN_QUEUE')    { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
+        if (s.status === 'IN_QUEUE')         { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
         else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `EDITING · ${elapsed}s`); }
-        else if (s.status === 'COMPLETED') { completedData = s; resolve(); return; }
-        else if (s.status === 'FAILED')  { reject(new Error(s.error || 'Edit failed')); return; }
+        else if (s.status === 'COMPLETED')   { completedData = s; resolve(); return; }
+        else if (s.status === 'FAILED')      { reject(new Error(s.error || 'Edit failed')); return; }
         setTimeout(poll, POLL_MS);
       } catch(e) { setTimeout(poll, POLL_MS); }
     };
@@ -3570,12 +3728,19 @@ async function callWan27eVideo(job) {
 
   let videoUrl = _extractVidUrl(completedData);
 
-  if (!videoUrl) {
+  // Fallback: fetch result from response_url (same pattern as callWan27Video)
+  if (!videoUrl && responseUrl) {
     try {
-      await new Promise(r => setTimeout(r, 2000));
-      const fst = await fetch(`${statusUrl}?logs=1`, { headers: { 'Authorization': `Key ${falKey}` } });
-      if (fst.ok) videoUrl = _extractVidUrl(await fst.json());
-    } catch(e) {}
+      const r = await fetch(responseUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+      if (r.ok) {
+        videoUrl = _extractVidUrl(await r.json());
+      } else {
+        const body = await r.text().catch(() => '');
+        throw new Error(`WAN 2.7 Edit result fetch ${r.status}: ${body.slice(0, 400)}`);
+      }
+    } catch(e) {
+      if (e.message.startsWith('WAN 2.7 Edit result fetch')) throw e;
+    }
   }
 
   if (!videoUrl) throw new Error('WAN 2.7 Edit: no video URL in result. Check fal.ai dashboard for job ' + requestId);
@@ -3735,6 +3900,8 @@ function videoUpdateFilterBanner(filtered, total) {
 // (kopie systému z refs.js, pro #videoPrompt textarea)
 // ═══════════════════════════════════════════════════════
 
+let _prevVideoModelKey  = null;  // tracks last applied model key for rewrite
+let _videoModelSwitching = false; // guard: prevents renderVideoRefPanel from firing rewrite during model switch
 let videoMentionOpen = false;
 let videoMentionFilter = '';
 let videoMentionAssets = [];
@@ -3851,6 +4018,107 @@ function closeVideoMention() {
   document.getElementById('mentionDropdown')?.classList.remove('show');
   videoMentionOpen = false;
   videoMentionActiveIdx = -1;
+}
+
+// ── Video prompt live rewriting ───────────────────────────
+// Reverse-map model-specific names back to @UserLabel form
+function videoPromptModelToUserLabels(prompt, activeRefs, prevM) {
+  if (!prompt || !activeRefs.length || !prevM) return prompt;
+  const mode = prevM.refMode || '';
+
+  if (mode === 'multi') {
+    // @Element1, @Element2 → @UserLabel
+    return prompt.replace(/@Element(\d+)/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  if (mode === 'wan_r2v') {
+    // Character1, Character2 → @UserLabel (no @ prefix in WAN R2V)
+    return prompt.replace(/\bCharacter(\d+)\b/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  return prompt;
+}
+
+// Apply model-specific names to canonical @UserLabel prompt
+function videoPromptUserLabelsToModel(prompt, activeRefs, newM) {
+  if (!prompt || !activeRefs.length || !newM) return prompt;
+  const mode = newM.refMode || '';
+
+  // Build label → index map
+  const labelMap = new Map();
+  activeRefs.forEach((r, i) => {
+    const key = (r.userLabel || r.autoName || '').replace(/_/g, ' ').toLowerCase();
+    if (key) labelMap.set(key, i);
+    const keyU = (r.userLabel || r.autoName || '').toLowerCase();
+    if (keyU) labelMap.set(keyU, i);
+    const an = (r.autoName || '').toLowerCase();
+    if (an) labelMap.set(an, i);
+  });
+
+  function findIdx(mention) {
+    const m = mention.replace(/_/g, ' ').toLowerCase();
+    if (labelMap.has(m)) return labelMap.get(m);
+    return labelMap.get(mention.toLowerCase()) ?? -1;
+  }
+
+  if (mode === 'multi') {
+    // @UserLabel → @Element{N+1}
+    return prompt.replace(/@([\w]+)/g, (full, mention) => {
+      const idx = findIdx(mention);
+      return idx >= 0 ? `@Element${idx + 1}` : full;
+    });
+  }
+
+  if (mode === 'wan_r2v') {
+    // @UserLabel → Character{N+1} (no @ prefix)
+    return prompt.replace(/@([\w]+)/g, (full, mention) => {
+      const idx = findIdx(mention);
+      return idx >= 0 ? `Character${idx + 1}` : full;
+    });
+  }
+
+  return prompt;
+}
+
+// Rewrite videoPrompt textarea when video model or refs change
+// prevM: previous VIDEO_MODELS model object (null = first load)
+// newM: new VIDEO_MODELS model object
+function rewriteVideoPromptForModel(prevM, newM) {
+  const ta = document.getElementById('videoPrompt');
+  if (!ta || !ta.value.trim()) return;
+  if (!videoRefs.length) return;
+
+  // Modes that use @mention naming
+  const mentionModes = ['multi', 'wan_r2v'];
+  const prevMode = prevM?.refMode || '';
+  const newMode  = newM?.refMode  || '';
+  if (!mentionModes.includes(prevMode) && !mentionModes.includes(newMode)) return;
+
+  // Step 1: convert from prev model format → canonical @UserLabels
+  const canonical = prevM
+    ? videoPromptModelToUserLabels(ta.value, videoRefs, prevM)
+    : ta.value;
+
+  // Step 2: apply new model format
+  const newPrompt = videoPromptUserLabelsToModel(canonical, videoRefs, newM);
+
+  if (newPrompt !== ta.value) {
+    const pos = ta.selectionStart;
+    ta.value = newPrompt;
+    ta.selectionStart = ta.selectionEnd = Math.min(pos, newPrompt.length);
+  }
 }
 
 function initVideoRubberBand() {

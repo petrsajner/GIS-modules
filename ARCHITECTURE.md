@@ -1,5 +1,5 @@
 # GIS — ARCHITEKTURA
-*Aktuální pro v183en · 6. 4. 2026*
+*Aktuální pro v184en · 7. 4. 2026*
 
 ---
 
@@ -14,7 +14,7 @@ Standalone HTML single-file app. Žádný server, žádná instalace. Otevírá 
 - fal.ai queue endpoint pro Kling Video a ostatní async modely
 - fal.ai synchronní endpoint pro image modely a upscale
 - Cloudflare Workers proxy pro xAI, Luma, Magnific, Topaz, Replicate — CORS bloky obejity
-- **Modularizace:** 19 modulů + `build.js` → single-file HTML výstup
+- **Modularizace:** 20 modulů + `build.js` → single-file HTML výstup
 
 ---
 
@@ -25,26 +25,26 @@ src/
 ├── template.html          ← HTML + CSS + placeholder // __GIS_JS__
 ├── models.js              ← MODELS, MODEL_DESCS, FAL_PRESETS, helpers
 ├── styles.js              ← STYLES systém, 80+ stylů
-├── setup.js               ← API klíče (Google/fal/xAI/Luma/Freepik/Topaz/Replicate)
+├── setup.js               ← API klíče (Google/fal/xAI/Luma/Freepik/Topaz/Replicate/OpenRouter)
 ├── spending.js            ← SPEND_PRICES, trackSpend, spending UI
-├── model-select.js        ← selectModel(), switchView(), setGenMode(), onWan27SizeChange()
+├── model-select.js        ← selectModel(), switchView(), setGenMode(), rewritePromptForModel()
 ├── assets.js              ← asset library, pillarbox thumbs, assetFilters
-├── refs.js                ← refs management, @mention, describe modal
-├── generate.js            ← generate(), queue, runJob dispatch
+├── refs.js                ← refs management, @mention (live rewriting), describe modal
+├── generate.js            ← generate(), queue, runJob dispatch, withRetry
 ├── fal.js                 ← FLUX/Kling Image/SeeDream/ZImage/Qwen2
-├── output-placeholder.js  ← placeholder karty při generování
+├── output-placeholder.js  ← placeholder karty, error karty (Reuse + Rerun)
 ├── proxy.js               ← xAI + Luma Photon + Replicate WAN 2.7 image
-├── gemini.js              ← Gemini SSE streaming, Imagen
+├── gemini.js              ← Gemini SSE streaming, Imagen, streamAccepted timeout
 ├── output-render.js       ← result renderers, upscale dialog (Creative + Precision)
 ├── db.js                  ← IndexedDB (obrazky + videa + assets)
 ├── gallery.js             ← image gallery, filtry, rubber band, drag-to-folder
 ├── toast.js               ← notifikace
 ├── paint.js               ← Paint + Annotate
-├── ai-prompt.js           ← AI Prompt Tool (5 tabů, aiBuffer)
-└── video.js               ← Video modely, fronta, galerie, Topaz, WAN 2.7 I2V
+├── ai-prompt.js           ← AI Prompt Tool — Claude Sonnet (OR) primární, Gemini 3.1 Pro fallback
+└── video.js               ← Video modely, fronta, galerie, Topaz, video @mention rewriting
 ```
 
-Build: `node build.js 181en` → `dist/gis_v181en.html`
+Build: `node build.js 184en` → `dist/gis_v184en.html`
 
 ---
 
@@ -53,15 +53,28 @@ Build: `node build.js 181en` → `dist/gis_v181en.html`
 Ukládány do localStorage, načítány v setup.js při `window.onload`:
 
 ```javascript
-localStorage.getItem('gis_apikey')           // Google API key — NB2, NB Pro, Imagen, Veo, Describe
-localStorage.getItem('gis_flux_apikey')      // fal.ai key — FLUX, Kling, SeeDream, Z-Image, Qwen2, Seedance, Vidu, Wan 2.6
-localStorage.getItem('gis_xai_apikey')       // xAI key — Grok Imagine (přes proxy)
-localStorage.getItem('gis_luma_apikey')      // Luma key — Photon, Photon Flash, Ray video (přes proxy)
-localStorage.getItem('gis_freepik_apikey')   // Freepik key — Magnific Creative + Precision (přes proxy)
-localStorage.getItem('gis_topaz_apikey')     // Topaz key — Starlight video/image upscale (přes proxy)
-localStorage.getItem('gis_replicate_apikey') // Replicate key — WAN 2.7 image + I2V (přes proxy)
-localStorage.getItem('gis_proxy_url')        // Cloudflare Worker URL (default: gis-proxy.petr-gis.workers.dev)
+localStorage.getItem('gis_apikey')             // Google API key — NB2/NB1/NB Pro, Imagen, Veo
+localStorage.getItem('gis_flux_apikey')        // fal.ai key — FLUX, Kling, SeeDream, Z-Image, Qwen2, Seedance, Vidu, Wan
+localStorage.getItem('gis_xai_apikey')         // xAI key — Grok Imagine (přes proxy)
+localStorage.getItem('gis_luma_apikey')        // Luma key — Photon, Photon Flash, Ray video (přes proxy)
+localStorage.getItem('gis_freepik_apikey')     // Freepik key — Magnific Creative + Precision (přes proxy)
+localStorage.getItem('gis_topaz_apikey')       // Topaz key — Starlight video/image upscale (přes proxy)
+localStorage.getItem('gis_replicate_apikey')   // Replicate key — WAN 2.7 image (přes proxy)
+localStorage.getItem('gis_openrouter_apikey')  // OpenRouter key — AI Prompt + Describe (Claude Sonnet 4.6)
+localStorage.getItem('gis_proxy_url')          // Cloudflare Worker URL (default: gis-proxy.petr-gis.workers.dev)
 ```
+
+---
+
+## AI Prompt & Describe — model priorita (v184+)
+
+```
+OR klíč přítomen → anthropic/claude-sonnet-4-6 (OpenRouter) — primární
+OR klíč chybí   → gemini-3.1-pro-preview (Google API)        — fallback
+```
+
+- **AI Prompt Tool** (Enhance, Chat, Variants, Random, Translate): `callGeminiText()` / `callGeminiTextMultiTurn()`
+- **Describe** (✦ na referenci): `callGeminiDescribe()` + `_callOpenRouterVision()` — Claude podporuje vision
 
 ---
 
@@ -71,7 +84,7 @@ localStorage.getItem('gis_proxy_url')        // Cloudflare Worker URL (default: 
 // generate.js: addToQueue() → tryStartJobs() → runJob(job)
 
 if      (job.isUpscale)                  → runUpscaleJob()        // fal.ai + Magnific + Topaz
-else if (model.type === 'gemini')        → callGeminiStream()     // NB2, NB Pro
+else if (model.type === 'gemini')        → callGeminiStream()     // NB2/NB1/NB Pro
 else if (model.type === 'imagen')        → callImagen()           // Imagen 4/Fast/Ultra
 else if (model.type === 'flux')          → callFlux()             // FLUX.2 Pro/Flex/Max/Dev
 else if (model.type === 'seedream')      → callSeedream()         // SeeDream 4.5/5 Lite
@@ -85,22 +98,18 @@ else if (model.type === 'proxy_luma')    → callProxyLuma()        // Luma Phot
 
 ### Upscale dispatch (output-render.js)
 ```javascript
-// runUpscaleJob(job)
 if (mode === 'magnific' && magMode === 'precision') → runMagnificPrecisionJob()
-else if (mode === 'magnific')                       → runMagnificUpscaleJob()   // Creative
+else if (mode === 'magnific')                       → runMagnificUpscaleJob()
 else if (mode === 'topaz_gigapixel'/'topaz_bloom')  → runTopazImageUpscaleJob()
 else                                                → runFalUpscaleJob()        // Crisp/SeedVR2/Clarity
 ```
 
-Paralelismus: fal.ai = max 4 concurrent. Gemini/Imagen/Replicate = 1 concurrent.
-
-addToQueue count expression (VŠECHNY model snap count fields musí být přidány):
+### Gemini retry logika (v184+)
 ```javascript
-const count = job.geminiCount || job.fluxCount || job.sdCount || job.klingCount
-            || job.zimageCount || job.qwen2Count
-            || job.wan27Snap?.count          // ← WAN 2.7 image
-            || job.xaiSnap?.grokCount
-            || job.imagenSnap?.sampleCount || 1;
+// withRetry: 3× pro 503/529/429, 3s delay
+// job.streamAccepted = true → po přijetí HTTP response → neretrykuje
+// 10min stream deadline v callGeminiStream while loop
+// _updatePendingCardsStatus() — zobrazí retry stav na placeholder kartě
 ```
 
 ---
@@ -110,18 +119,94 @@ const count = job.geminiCount || job.fluxCount || job.sdCount || job.klingCount
 ```javascript
 // video.js: generateVideo() → runVideoJob(job)
 
-if (TOPAZ_MODELS[activeKey])
-  → _generateTopazJob()     // Topaz video upscale
-
-// Pro normální video modely: runVideoJob(job)
-model.type === 'veo'          → callVeoVideo()     // Gemini predictLongRunning
-model.type === 'luma_video'   → callLumaVideo()    // přes proxy
-model.type === 'wan27_video'  → callWan27Video()   // Replicate přes proxy (WAN 2.7 I2V)
+if (TOPAZ_MODELS[activeKey])  → _generateTopazJob()
+model.type === 'veo'          → callVeoVideo()
+model.type === 'luma_video'   → callLumaVideo()         // přes proxy
+model.type === 'wan27_video'  → callWan27Video()        // fal.ai queue
+model.type === 'wan27e_video' → callWan27eVideo()       // fal.ai queue (Video Edit)
 model.type === 'kling_video'  → fal.ai queue submit + poll
 model.type === 'seedance_video' → fal.ai queue
 model.type === 'vidu_video'   → fal.ai queue
-model.type === 'wan_video'    → fal.ai queue       // WAN 2.6
-model.type === 'topaz_video'  → runTopazQueueJob() // background, non-blocking
+model.type === 'wan_video'    → fal.ai queue            // WAN 2.6
+model.type === 'topaz_video'  → runTopazQueueJob()
+```
+
+### Video prompt optional (v184+)
+```javascript
+// promptOptional = true pokud:
+veoFramesMode  // Veo v "frames" módu
+|| (model.type !== 'luma_video' && model.type !== 'kling_video' &&
+    refMode ∈ {single_end, single, keyframe, wan_r2v, multi})
+// Luma a Kling vždy vyžadují prompt
+// Kling payload: prompt field vynechán pokud prázdný (API odmítá "" empty string)
+```
+
+---
+
+## @Mention live rewriting architektura (v184+)
+
+### Image modely (refs.js + model-select.js)
+```javascript
+// Canonical forma: @UserLabel (@Ref_031, @Ref_030)
+// Model-specific forma: @Image1 (Kling/FLUX), Figure 1 (SeeDream), image 1 (Gemini)
+
+preprocessPromptForModel(prompt, refs, modelType)    // canonical → model
+promptModelToUserLabels(prompt, refs, modelType)     // model → canonical (reverzní)
+rewritePromptForModel(prevType, newType)             // přepíše textarea při přepnutí
+
+// Hooky:
+// - selectModel() → rewritePromptForModel(prevType, newType)
+// - renderRefThumbs() → rewritePromptForModel(m.type, m.type) [re-číslování]
+
+// Mention dropdown: model-specific jméno jako primární, user label jako subtitle
+```
+
+### Video modely (video.js)
+```javascript
+// refModes s @mentions: 'multi' (@Element1, @Element2) | 'wan_r2v' (Character1, bez @)
+videoPromptModelToUserLabels(prompt, refs, prevM)
+videoPromptUserLabelsToModel(prompt, refs, newM)
+rewriteVideoPromptForModel(prevM, newM)
+
+// _prevVideoModelKey — ukládá key před přepnutím (onchange vrátí nový)
+// _videoModelSwitching — guard zabraňuje dvojitému rewrite z renderVideoRefPanel
+
+// Hooky:
+// - onVideoModelChange() → rewriteVideoPromptForModel(prevM, newM)
+// - onKlingVersionChange() → rewriteVideoPromptForModel(prevM, newM)
+// - renderVideoRefPanel() → rewriteVideoPromptForModel(m, m) [re-číslování, pouze !_videoModelSwitching]
+```
+
+---
+
+## Error karty architektura (v184+)
+
+### Image error karty (output-placeholder.js)
+```javascript
+showErrorPlaceholder(cardEl, job, msg)
+// → přepíše placeholder na error kartu:
+//    - červený banner: icon + friendlyError(msg)
+//    - err-meta-row: modelName + param chips (AR, resolution, tier, count, seed)
+//    - err-prompt: job.rawPrompt || job.prompt (plný text)
+//    - err-refs: ref thumbnails (data:mimeType;base64,thumb)
+//    - err-btns: [↺ Reuse] + [▶ Rerun]
+
+rerunJob(cardKey)         // okamžitě re-queue se stejnými parametry, nové ID
+reuseTimedOutJob(cardKey) // loadJobParamsToForm() → formulář pro review
+
+friendlyError(raw)        // přeloží technické chyby na čitelné zprávy
+```
+
+### Video error karty (video.js)
+```javascript
+videoJobError(job, msg)
+// → přepíše video placeholder na error kartu (stejný styl)
+//    - friendlyVideoError(msg) — video-specifické překlady + deleguje na friendlyError
+//    - chips: duration + resolution
+//    - ref thumbnails z job.videoRefsSnapshot
+
+rerunVideoJob(jobId)       // okamžitý rerun
+reuseVideoJob_err(jobId)   // obnoví prompt + model do formuláře
 ```
 
 ---
@@ -132,146 +217,75 @@ model.type === 'topaz_video'  → runTopazQueueJob() // background, non-blocking
 GIS (browser, file://) → Cloudflare Worker (gis-proxy.petr-gis.workers.dev) → Provider API
 ```
 
-**Pravidlo CF Worker (30s wall-clock limit):**
-- Worker nikdy nepolluje. Vždy odpoví do 5s.
-- Submit endpoint: pošle job → vrátí ID
-- Status endpoint: jeden GET → vrátí stav
-- Polling loop běží v GIS (browser, žádný limit)
-
-**Výjimka — Topaz download:** Worker streamuje video z R2 zpět na browser.
-
-### Proxy routes (v2026-09)
+### Proxy routes (v2026-09 + luma fix)
 
 | Route | Provider | Flow |
 |-------|----------|------|
 | POST /xai/generate | xAI Grok | sync |
 | POST /luma/generate + /status | Luma Photon image | submit+poll |
-| POST /luma/video/submit + /status | Luma Ray video | submit+poll |
+| POST /luma/video/submit + /status | Luma Ray video — **keyframes přes R2** | submit+poll |
 | POST /magnific/upscale + /status | Magnific Creative | submit+poll |
 | POST /magnific/precision + /status | Magnific Precision V1/V2 | submit+poll |
 | POST /fal/submit + /status + /result | fal.ai queue | CORS bypass |
 | POST /topaz/video/submit + /status + /download | Topaz video | stream |
 | POST /topaz/image/submit + /status + /download | Topaz image | stream |
 | POST /replicate/wan27/submit + /status | Replicate WAN 2.7 image | submit+poll |
-| POST /replicate/wan27v/submit + /status | Replicate WAN 2.7 I2V | submit+poll |
 | POST /r2/upload | R2 binary storage | store+return URL |
 | GET /r2/serve/{key} | R2 binary serving | stream |
 | POST /magnific/video-cleanup | R2 full cleanup | fire-and-forget |
 
-### Magnific status — upscaler_type routing
-```javascript
-// handleMagnificStatus (magnific.js)
-// Body: { freepik_key, task_id, upscaler_type }
-upscaler_type === 'creative'      → /v1/ai/image-upscaler/{task_id}
-upscaler_type === 'precision-v1'  → /v1/ai/image-upscaler-precision/{task_id}
-upscaler_type === 'precision-v2'  → /v1/ai/image-upscaler-precision-v2/{task_id}
+### Luma keyframe upload (v184+)
 ```
+Starý flow (nefunkční — /file_uploads vrátí 404):
+  GIS base64 → Worker → POST /dream-machine/v1/file_uploads → Luma CDN URL → generation API
 
-### Replicate API pattern
-```javascript
-// Auth: Authorization: Bearer {token}
-// Submit: POST https://api.replicate.com/v1/models/{owner}/{model}/predictions
-// Poll:   GET  https://api.replicate.com/v1/predictions/{id}
-// Output (image): output[] array of URLs
-// Output (I2V):   output single URL string
-// CORS: blokováno → vždy přes proxy
+Nový flow:
+  GIS base64 → Worker → R2 bucket (luma_kf_{ts}_{rand}.jpg) → /r2/serve/{key} URL → generation API
 ```
-
 
 ---
 
-## R2 Bucket Architecture (v183+)
+## R2 Bucket Architecture
 
 **Bucket:** `gis-magnific-videos` · Binding: `VIDEOS`
-
-**Účel:** Dočasné binární úložiště pro video soubory které musí být dostupné třetím stranám přes HTTPS URL.
-
-**Proč R2 a ne jiné služby:**
-- `storage.fal.run` → 530 DNS Error z CF Workers (blokuje CF IPs)
-- Replicate Files → serving vrací JSON metadata místo binary
-- `file://` blob URL → nefunguje pro fal.ai nebo jiné CORS požadavky
-- R2 + Worker → vždy funguje (same CF infrastructure, žádný CORS, žádné IP blocking)
-
-**Upload flow (GIS → proxy → R2):**
-```
-GIS: File|Blob → fetch POST {proxyUrl}/r2/upload (raw binary body, Content-Type: video/mp4)
-Worker: arrayBuffer() → env.VIDEOS.put(key, body) → return { url: {origin}/r2/serve/{key} }
-```
-
-**Serve flow (third-party API → proxy → R2):**
-```
-API: GET https://gis-proxy.petr-gis.workers.dev/r2/serve/{key}
-Worker: env.VIDEOS.get(key) → stream binary + Content-Type + CORS headers
-```
-
-**Cleanup:**
-- `POST /magnific/video-cleanup` → `env.VIDEOS.list()` + `env.VIDEOS.delete(keys[])`
-- Voláno z `setup.js window.onload` — fire-and-forget při každém startu GIS
 
 **Kdo používá:**
 | Model | Upload flow |
 |-------|------------|
-| Magnific Video Upscale | GIS base64 → JSON body → Worker Buffer.from() → R2 |
-| Kling V2V Motion Control | GIS File object → raw binary body → R2 |
-| (budoucí) WAN 2.7 Video Edit | plánováno — umožní editovat jakékoliv video, ne jen Replicate |
+| Magnific Video Upscale | GIS base64 → JSON → Worker Buffer.from() → R2 |
+| Kling V2V Motion Control | GIS File object → raw binary → R2 |
+| Luma Ray video keyframes | Worker base64 → R2 (nový v184) |
 
 ---
 
-## Magnific Upscale architektura (v181+)
+## Magnific Upscale architektura
 
-### Creative mode (původní)
+### Creative mode
 - Endpoint: `/v1/ai/image-upscaler`
 - Engine: magnific_sparkle / magnific_sharpy / magnific_illusio
-- Scale: 2x / 4x / 8x / 16x
-- Params: optimized_for, prompt, creativity, hdr, resemblance, fractality
 
 ### Precision mode (v181+)
-- **V2 versions** (v2_sublime / v2_photo / v2_photo_denoiser):
-  - Endpoint: `/v1/ai/image-upscaler-precision-v2`
-  - flavor: `sublime` | `photo` | `photo_denoiser`
-  - scale_factor: integer 2–16
-  - Params: sharpen (0–100, def 7), smart_grain (0–100, def 7), ultra_detail (0–100, def 30)
-- **V1** (v1_hdr):
-  - Endpoint: `/v1/ai/image-upscaler-precision`
-  - Bez scale_factor, bez flavor
-  - Params: sharpen (0–100, def 50), smart_grain (0–100, def 7), ultra_detail (0–100, def 30)
-
-### UI (output-render.js)
-```
-[Creative]  [Precision]     ← toggle tabs
-Creative panel:  Scale + Engine + Optimized for (radio) + Prompt + sliders
-Precision panel: Version (4 radio) + Scale (skryto pro V1) + Sharpen/Grain/Detail
-```
+- **V2**: `/v1/ai/image-upscaler-precision-v2` — flavor + scale_factor + sharpen/grain/detail
+- **V1**: `/v1/ai/image-upscaler-precision` — bez scale_factor/flavor
 
 ---
 
 ## Spending Tracker
 
 ```javascript
-// spending.js
 trackSpend(provider, priceKey, count = 1, durationSeconds = null)
 // provider: 'google' | 'fal' | 'xai' | 'luma' | 'freepik' | 'topaz' | 'replicate'
-// Ukládá do localStorage: { amount, periodStart }
-
-// Replicate ceny:
-'wan-video/wan-2.7-image':   0.030   // per image
-'_replicate_wan27v_720p':    0.10    // per second (720p I2V)
-'_replicate_wan27v_1080p':   0.15    // per second (1080p I2V)
 ```
 
 ---
 
-## Refs architektura (v102+)
+## Refs architektura
 
 ```javascript
 // refs[] a videoRefs[] — asset linky, žádná inline data
 { assetId, autoName, userLabel, mimeType, thumb, dims }
 
 // getRefDataForApi(ref, maxPx) — načte imageData on-demand z IndexedDB
-// maxPx: 'setting' = dle checkboxu | číslo = hard limit | null = bez omezení
-
-// usedVideoRefs v videos store — s imageData pro odolnost
-{ assetId, mimeType, autoName, userLabel, imageData }
 ```
 
 ---
@@ -281,35 +295,24 @@ trackSpend(provider, priceKey, count = 1, durationSeconds = null)
 ```javascript
 // generateThumb — mimeType POVINNÝ
 generateThumb(imageData, mimeType)  // ✓
-generateThumb(imageData)            // ✗ JPEG selhání na file://
 
 // setAspectRatioSafe — VŽDY místo přímého .value
-setAspectRatioSafe('16:9')          // ✓
+setAspectRatioSafe('16:9')  // ✓
 
 // fal.ai API klíč — správné ID elementu
-document.getElementById('fluxApiKey').value  // ✓
-document.getElementById('falApiKey').value   // ✗ null → tichý fail
+document.getElementById('fluxApiKey').value  // ✓ (ne 'falApiKey')
 
 // fal.ai auth header
-'Authorization': `Key ${falKey}`    // ✓
-'Authorization': `Bearer ${falKey}` // ✗
+'Authorization': `Key ${falKey}`  // ✓ (ne Bearer)
 
-// Replicate auth header
-'Authorization': `Bearer ${replicateKey}`  // ✓
-
-// WAN 2.7 I2V output — single string, ne array
-const videoUrl = typeof output === 'string' ? output : output?.[0]; // safe
-
-// Veo — generateAudio se NEPOSÍLÁ (způsobí 400)
-
-// Topaz: requestId (malé d), download.url (nested)
+// Kling video — prázdný prompt VYNECHAT (ne poslat "")
+if (prompt) payload.prompt = prompt;  // ✓
 
 // addToQueue count — VŽDY přidat nový snap count
-job.wan27Snap?.count   // ← nutno přidat pro každý nový model
+job.wan27Snap?.count  // ← nutno přidat pro každý nový model
 
-// Magnific Precision — magMode='precision' musí být v job objektu
-// runUpscaleJob() testuje job.magMode === 'precision' před dispatch
+// Gemini streamAccepted — nesmí se resetovat v retryi po přijetí response
+// Video @mention prevM — VŽDY číst _prevVideoModelKey, ne getActiveVideoModelKey() (ten vrátí nový)
 
-// Magnific status — vždy posílat upscaler_type ('creative'/'precision-v1'/'precision-v2')
-// handleMagnificStatus v proxy routuje podle tohoto pole
+// Luma keyframe upload — /file_uploads endpoint je 404 → použít R2 přes Worker
 ```

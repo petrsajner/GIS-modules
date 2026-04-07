@@ -1,151 +1,138 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 6. 4. 2026 · v183en*
+*Aktualizováno 7. 4. 2026 · v184en*
+
+---
+
+## Claude Sonnet jako primární AI Prompt model (7. 4. 2026)
+
+**Problém:** Gemini Flash produkuje mechanický, strojový text pro AI Prompt Tool a Describe. Uživatel s OR klíčem má přístup k výrazně lepším modelům.
+
+**Rozhodnutí:** Invertovat prioritu — OR (Claude Sonnet 4.6) primární, Gemini 3.1 Pro fallback.
+
+**Důvod volby Claude:** Ze všech dostupných modelů má nejpřirozenější styl — nepíše seznamy, vyhýbá se klišé ("cinematic lighting"), tíhne k precizním konkrétním popisům. Ideální pro filmovou produkci.
+
+**Fallback volba:** Gemini 3.1 Pro místo Flash — výrazně lepší kreativní psaní, cena není kritická (prompt je zanedbatelná část nákladů oproti generování obrazů).
+
+**Platí pro:** AI Prompt Tool (všechny tahy) + Describe (vision přes OR).
+
+---
+
+## Live @mention rewriting (7. 4. 2026)
+
+**Problém:** Uživatel píše `@Ref_031` do promptu, ale model (Kling, SeeDream) vyžaduje `@Image1` nebo `Figure 1`. Preprocessing proběhl pouze při generování — bez vizuální zpětné vazby.
+
+**Rozhodnutí:** Textarea se přepisuje živě při přepnutí modelu a při změně refs.
+
+**Architektura:**
+- Canonical forma: `@UserLabel` (autoName nebo userLabel)
+- Konverze forward: `preprocessPromptForModel()` — existující funkce
+- Konverze backward: nová `promptModelToUserLabels()` — reverzní mapping
+- Hook v `selectModel()` — přepisuje při každém přepnutí
+- Hook v `renderRefThumbs()` — přečísluje při přidání/odebrání refu
+
+**Klíčový bug při implementaci:** `getActiveVideoModelKey()` vrátí nový model klíč (select se updateuje před `onchange`). Řešení: `_prevVideoModelKey` persistent proměnná + `_videoModelSwitching` guard.
+
+**Veo ingredients:** Nepotřebuje @mentions — refs se posílají jako `reference_images[]` přímo.
+
+---
+
+## Error karty jako standardní error management (7. 4. 2026)
+
+**Problém:** Video chyby se zobrazovaly pouze jako toast zpráva (mizí za 5s) + console.error. Placeholder karta zmizela. Žádná možnost retry.
+
+**Rozhodnutí:** Unifikovat error management — video i image chyby zobrazit jako perzistentní error kartu stejného stylu s Reuse + Rerun tlačítky.
+
+**Rerun vs Reuse:**
+- Rerun: okamžitý re-queue se stejnými parametry, nové job ID, žádná interakce uživatele
+- Reuse: načte parametry do formuláře — uživatel může upravit před odesláním
+
+**Fallback:** Pokud placeholder karta neexistuje (Topaz background jobs) → toast.
+
+---
+
+## Luma keyframe upload přes R2 (7. 4. 2026)
+
+**Problém:** Luma `/dream-machine/v1/file_uploads` endpoint vrátí 404 — byl zrušen.
+
+**Rozhodnutí:** Použít stávající R2 bucket infrastructure pro keyframe image upload.
+
+**Flow:** Worker přijme base64 → uloží do R2 → vrátí `https://gis-proxy.../r2/serve/{key}` → tato URL předána Luma API jako keyframe URL.
+
+**Proč R2 funguje:** Luma potřebuje veřejnou HTTPS URL dostupnou z jejich serverů. R2 přes Worker to zajistí bez CORS problémů.
+
+---
+
+## Video prompt bez textu — selektivní povolení (7. 4. 2026)
+
+**Problém:** Modely s start+end frame umožňují generovat bez popisu, ale GIS to blokoval.
+
+**Rozhodnutí:** Selektivní `promptOptional` — povoleno pro všechny refMode modely KROMĚ `luma_video` a `kling_video` (oba vždy vyžadují prompt, Kling navíc odmítne prázdný string s 422).
+
+**Testováno:** WAN 2.7, Seedance, Vidu — fungují bez promptu. Luma 400, Kling 422.
 
 ---
 
 ## GitHub jako zdroj modulů (5. 4. 2026)
 
-**Problém:** `/mnt/project/` na Claude.ai platformě má cache bug — může vracet stale verze souborů i po re-uploadu. To způsobovalo opakované regrese (switchView block/flex, copyright 2025/2026).
+**Problém:** `/mnt/project/` na Claude.ai platformě má cache bug.
 
 **Rozhodnutí:** Zdrojové moduly přesunuty na GitHub: https://github.com/petrsajner/GIS-modules
 
 **Workflow:**
 - Konec session → Petr nahraje nové moduly na GitHub
-- Začátek session → Claude fetchne moduly z GitHub blob URL (web_fetch)
-- /mnt/project/ zůstává jako záloha pro syntax check
-
-**Odmítnuto:** Google Drive — connector funguje ale čte pouze Google Docs (.js soubory nelze)
+- Začátek session → Claude fetchne moduly z GitHub blob URL
 
 ---
 
 ## R2 jako univerzální video storage v proxy (6. 4. 2026)
 
-**Problém:** Více video modelů potřebuje předat binární video třetí straně přes HTTPS URL. Přímé přístupy selhávají:
-- `storage.fal.run` — 530 DNS Error z CF Workers; blokuje CF datacenter IPs
-- Replicate `/v1/uploads` — 404; endpoint není dostupný pro všechny plány
-- Replicate Files `/v1/files` — upload OK, ale serving vždy vrátí JSON metadata, ne binary
-- Přímé base64 pro video — Freepik API odmítá (validuje jako URL)
-- Přímé base64 pro motion video — blob URL selhává na `file://` (`blob:null/...`)
+**Problém:** Více video modelů potřebuje předat binární video třetí straně přes HTTPS URL.
 
-**Rozhodnutí:** Cloudflare R2 bucket jako universal binary storage v proxy.
+**Rozhodnutí:** Cloudflare R2 bucket jako universal binary storage.
 
-**Architektura:**
-```
-GIS → POST {proxyUrl}/r2/upload (raw binary body)
-    → Worker ukládá do R2: upload_{ts}_{rand}.{ext}
-    → Worker vrací: { url: "https://gis-proxy.../r2/serve/{key}" }
-GIS posílá tuto URL do API (Freepik, fal.ai atd.)
-API → GET https://gis-proxy.../r2/serve/{key}
-    → Worker streamuje z R2 jako raw binary
-```
-
-**Konfigurace:**
-- Bucket: `gis-magnific-videos` (jméno historické, slouží pro vše)
-- Binding: `VIDEOS` v wrangler.toml
-- Vytvořit jednou: `wrangler r2 bucket create gis-magnific-videos`
-- Free tier: 10GB, 1M reads/month
-
-**Cleanup:** `POST /magnific/video-cleanup` smaže vše z bucketu (batch delete 1000/call). Voláno fire-and-forget při každém startu GIS v `setup.js`.
-
-**Použití:**
-- Magnific Video Upscaler: GIS → base64 v JSON → Worker dekóduje (Buffer.from) → R2 → URL → Freepik
-- Kling V2V Motion Control: GIS → File objekt jako raw binary → Worker → R2 → URL → fal.ai queue
-
-**Zobecnění:** Kdykoli Worker potřebuje:
-1. Dočasně uložit binární data (video, velký obrázek)
-2. Dostat zpět veřejnou HTTPS URL
-→ použij `/r2/upload` endpoint. Žádná závislost na externích službách.
-
+**Bucket:** `gis-magnific-videos`, Binding: `VIDEOS` v wrangler.toml
 
 ---
 
 ## WAN 2.7 — migrace z Replicate na fal.ai (6. 4. 2026)
 
-**Problém:** WAN 2.7 Video Edit byl implementován přes Replicate s podmínkou `cdnUrl.includes('replicate.delivery')` — tj. fungoval POUZE s videi generovanými přes WAN 2.7 I2V přes Replicate. Prakticky nefunkční.
-
-**Hlavní issues:**
-- `cdnUrl` expirovalo za 7 dní (a 20h limit byl v kódu)
-- Replicate `/v1/uploads` endpoint vrací 404 (není dostupný pro všechny plány)
-- Ref image upload přes `/replicate/upload/video` → stejný 404
-
-**fal.ai API zjištění:**
-- `fal-ai/wan/v2.7/edit-video` akceptuje `video_url` jako **base64 data URI** (!)
-- `fal-ai/wan/v2.7/image-to-video` — standardní fal.ai queue, stejný vzor jako WAN 2.6
-- `fal-ai/wan/v2.7/text-to-video` — nový T2V model
-- `fal-ai/wan/v2.7/reference-to-video` — R2V s character refs
-- Audio `audio_setting`: pouze `auto` | `origin` (ne `add_bgm`/`none` jak jsme měli)
+**Problém:** WAN 2.7 Video Edit přes Replicate — CDN URL expirovala, `/v1/uploads` vrátí 404.
 
 **Rozhodnutí:** Všechny WAN 2.7 video modely přesunout na fal.ai queue.
-- Video Edit: zdrojové video = base64 data URI načtené z IndexedDB → přímý JSON payload
-- I2V/T2V/R2V: standardní fal.ai queue (falKey, ne replicateKey)
-- Žádná CDN URL závislost, žádná proxy potřeba pro video
-
-**Removed:** WAN 2.7 Replicate proxy kód, `replicateModel` field v model definicích, CDN URL checks
-
 
 ---
 
 ## Freepik Edit Tools jako image modely (5. 4. 2026)
 
-**Problém:** Relight/Style Transfer/Skin Enhancer byly v Edit modalu na kartách — špatné UX, špatná dostupnost.
-
-**Rozhodnutí:** Přidány jako regulérní image modely (`proxy_freepik_edit`) do hlavního selectu.
-
-**Architektura:**
-- Ref[0] = source image (required pro všechny 3)
-- Ref[1] = style/lighting reference (optional u Relight, required u Style Transfer)
-- Prompt = lighting description (pouze Relight)
-- `editModel: true` → speciální ref label v UI
+**Rozhodnutí:** Relight/Style Transfer/Skin Enhancer přidány jako regulérní image modely (`proxy_freepik_edit`).
 
 ---
 
 ## switchView display:flex (opakovaná regrese)
 
-**Bug:** `model-select.js` `switchView()` nastavoval `setupView.style.display = 'block'` místo `'flex'`. Způsobovalo zmizení copyright karty v Setup (flex layout se neuplatnil).
+**Bug:** `model-select.js` `switchView()` nastavoval `'block'` místo `'flex'`.
 
-**Původ:** Stale modul z `/mnt/project/` cache obsahoval starší verzi před opravou.
-
-**Fix:** `'flex'` + přidán do session-start check listu.
-
-**Poznámka:** Tento bug byl opravován vícekrát. Přidán do regrese watch-listu v STAV.md.
+**Fix:** `'flex'` — přidán do session-start check listu. Nesmí se nikdy změnit.
 
 ---
 
 ## Dynamický params systém — odloženo
 
-**Analýza (4. 4. 2026):** 665 řádků statického HTML pro params, 20× opakující se radio patterns.
-
-**Rozhodnutí:** Neimplementovat globální refaktor — příliš velké riziko regresí. Místo toho hybridní přístup: nové modely používají `params[]` array kde to dává smysl, staré ponechat.
+**Rozhodnutí:** Neimplementovat — příliš velké riziko regresí. Hybridní přístup pro nové modely.
 
 ---
 
 ## Tauri distribuce — odloženo
 
-**Důvod odkládání:** Řeší CORS proxy problém, ale GIS není feature-complete.
-
-**Odhad:** ~3-4 sessions implementace. Dokumentováno v TAURI_DISTRIBUTION.md.
-
-**Spustit kdy:** GIS je stabilní a feature-complete.
+**Spustit kdy:** GIS je stabilní a feature-complete. Odhad: ~3-4 sessions.
 
 ---
 
-## Proxy architektura (Cloudflare Workers)
+## Proxy architektura — verze history
 
-**Důvod existence:** CORS blokuje přímé volání z `file://` pro: xAI, Luma, Freepik/Magnific, Topaz, Replicate.
-
-**Verze:** 2026-09 (6. 4. 2026)
-
-**Nové routes v 2026-09:**
-- `POST /r2/upload` — generický R2 binary upload (Kling V2V, jakákoliv binární data)
-- `GET /r2/serve/{key}` — serving z R2 s CORS hlavičkami
-
-**Nové routes v 2026-08:**
-- `POST /magnific/mystic` — Mystic generation
-- `POST /magnific/skin-enhancer` — Skin Enhancer
-- `POST /magnific/relight` — Relight
-- `POST /magnific/style-transfer` — Style Transfer
-- `POST /magnific/video-upscale` — Video Upscaler (Creative + Precision)
-
-**Status handler** rozšířen na 9 typů: creative, precision-v1, precision-v2, mystic, skin_enhancer, relight, style_transfer, video_upscale, video_upscale_prec.
-
+| Verze | Datum | Změny |
+|-------|-------|-------|
+| 2026-09 | 6. 4. 2026 | R2 generic upload/serve, Kling V2V fix |
+| 2026-08 | dříve | Magnific video, Mystic, Relight, Style Transfer, Skin Enhancer |
+| luma fix | 7. 4. 2026 | handleLumaVideoSubmit přijímá env, keyframes přes R2 |

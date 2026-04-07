@@ -2,7 +2,7 @@
 // GEMINI SSE STREAMING
 // ══════════════════════════════════════════════════════════
 
-async function callGeminiStream(apiKey, prompt, model, refsOverride, snap, onThinking) {
+async function callGeminiStream(apiKey, prompt, model, refsOverride, snap, onThinking, jobRef = null) {
   const aspectRatio   = snap?.aspectRatio   || document.getElementById('aspectRatio').value;
   const imageSize     = snap?.imageSize     || (document.querySelector('input[name="nbRes"]:checked')?.value || '1K');
   const thinkingLevel = snap?.thinkingLevel || (document.querySelector('input[name="thinking"]:checked')?.value || 'minimal');
@@ -43,6 +43,11 @@ async function callGeminiStream(apiKey, prompt, model, refsOverride, snap, onThi
     throw new Error(errMsg);
   }
 
+  // Mark job as accepted — withRetry will not retry errors from this point
+  if (jobRef) jobRef.streamAccepted = true;
+
+  const STREAM_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for active generation
+  const streamDeadline = Date.now() + STREAM_TIMEOUT_MS;
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -51,6 +56,7 @@ async function callGeminiStream(apiKey, prompt, model, refsOverride, snap, onThi
   let finalImage = null;
 
   while (true) {
+    if (Date.now() > streamDeadline) { reader.cancel(); throw new Error('Generation timeout after 10 minutes. Click Rerun to retry.'); }
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });

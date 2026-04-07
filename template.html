@@ -1214,6 +1214,43 @@ input[type=range].prange::-webkit-slider-thumb {
   color:var(--accent) !important;
 }
 
+/* ══ ERROR KARTY ══ */
+.error-card .err-detail { display:flex; flex-direction:column; border-bottom:1px solid var(--border); aspect-ratio:16/9; overflow:hidden; }
+.error-card .err-banner {
+  display:flex; align-items:center; gap:8px;
+  padding:9px 14px;
+  background:rgba(200,70,50,.15); border-bottom:1px solid rgba(200,70,50,.3);
+  overflow:hidden;
+}
+.error-card .err-banner-icon { font-size:13px; color:#d07060; flex-shrink:0; }
+.error-card .err-banner-msg  { font-size:11px; font-weight:600; color:#d88878; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.error-card .err-content { padding:11px 13px; display:flex; flex-direction:column; gap:9px; flex:1; overflow-y:auto; min-height:0; }
+.error-card .err-meta-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.error-card .err-model-label { font-size:12px; font-weight:700; color:var(--fg); font-family:'IBM Plex Mono',monospace; }
+.error-card .err-chip {
+  font-size:10px; color:var(--dim2); background:var(--s3);
+  padding:2px 6px; border:1px solid var(--border); font-family:'IBM Plex Mono',monospace;
+}
+.error-card .err-prompt {
+  font-size:11px; color:var(--dim); line-height:1.6;
+  max-height:100px; overflow-y:auto; word-break:break-word;
+}
+.error-card .err-refs { display:flex; gap:5px; flex-wrap:wrap; }
+.error-card .err-ref-thumb { width:38px; height:38px; object-fit:cover; border:1px solid var(--border); opacity:.75; }
+.error-card .err-ref-nothumb {
+  display:flex; align-items:center; justify-content:center;
+  font-size:10px; color:var(--dim2); background:var(--s3); border:1px solid var(--border);
+}
+.error-card .err-btns { display:flex; gap:8px; padding-top:2px; }
+.error-card .err-rerun-btn { border-color:var(--accent); color:var(--accent); }
+.error-card .err-rerun-btn:hover { background:var(--accent); color:#000; }
+
+.ph-retry-status {
+  font-size:10px; color:#c08060; font-family:'IBM Plex Mono',monospace;
+  text-align:center; padding:3px 8px; letter-spacing:.04em;
+  background:rgba(200,80,50,.12); border-top:1px solid rgba(200,80,50,.2);
+}
+
 /* ══ PLACEHOLDER KARTY ══ */
 .placeholder-card .ph-body {
   position:relative; aspect-ratio: 16 / 9; background:var(--s2); overflow:hidden;
@@ -1646,6 +1683,7 @@ input[type=range].prange::-webkit-slider-thumb {
         <div class="plabel">Model</div>
         <select id="modelSelect" onchange="selectModel(this.value)" style="width:100%">
           <option value="nb2">Nano Banana 2 — gemini-3.1-flash-image-preview</option>
+          <option value="nb1">Nano Banana — gemini-2.5-flash-image</option>
           <option value="nbpro">Nano Banana Pro — gemini-3.1-pro-image-preview</option>
           <option value="i4">Imagen 4 — imagen-4.0-generate-001</option>
           <option value="i4fast">Imagen 4 Fast — imagen-4.0-fast-generate-001</option>
@@ -3180,7 +3218,7 @@ input[type=range].prange::-webkit-slider-thumb {
       <!-- Copyright watermark — bottom-right corner -->
       <div id="gisWatermark" style="position:absolute;bottom:14px;right:18px;pointer-events:none;z-index:1;text-align:right;line-height:1.55;">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.60);letter-spacing:.04em;">Generative Image Studio</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2026 Petr Sajner · info.genimagestudio@gmail.com</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2026 Petr Sajner · info.genimagestudio&#64;gmail.com</div>
       </div>
     </div>
 
@@ -3196,7 +3234,7 @@ input[type=range].prange::-webkit-slider-thumb {
       <!-- Copyright watermark — bottom-right corner -->
       <div style="position:absolute;bottom:14px;right:18px;pointer-events:none;z-index:1;text-align:right;line-height:1.55;">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.60);letter-spacing:.04em;">Generative Image Studio</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2026 Petr Sajner · info.genimagestudio@gmail.com</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:rgba(255,255,255,.50);letter-spacing:.03em;">© 2026 Petr Sajner · info.genimagestudio&#64;gmail.com</div>
       </div>
     </div>
 
@@ -3597,10 +3635,8 @@ input[type=range].prange::-webkit-slider-thumb {
           <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:16px;">AI Image &amp; Video Production Tool</div>
           <div style="font-size:12px;color:var(--text);font-weight:500;margin-bottom:12px;">Petr Sajner</div>
           <div style="display:flex;flex-direction:column;gap:6px;">
-            <a href="mailto:info.genimagestudio@gmail.com"
-               style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);text-decoration:none;display:inline-flex;align-items:center;gap:7px;transition:color .15s;"
-               onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--dim)'">
-              <span style="opacity:.5;">✉</span> info.genimagestudio@gmail.com
+            <a href="mailto:info.genimagestudio@gmail.com" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);text-decoration:none;display:inline-flex;align-items:center;gap:7px;transition:color .15s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--dim)'">
+              <span style="opacity:.5;">✉</span> <span>info.genimagestudio&#64;gmail.com</span>
             </a>
             <a href="https://www.linkedin.com/in/sajner/" target="_blank" rel="noopener"
                style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);text-decoration:none;display:inline-flex;align-items:center;gap:7px;transition:color .15s;"
@@ -4153,18 +4189,4 @@ input[type=range].prange::-webkit-slider-thumb {
 </div>
 
 <!-- ══ API KEY WARNING OVERLAY ══ -->
-<div id="apiKeyWarning" onclick="if(event.target===this)closeApiKeyWarning()">
-  <div class="akw-box">
-    <div class="akw-icon">🔑</div>
-    <div class="akw-title" id="akwTitle">API key missing</div>
-    <div class="akw-msg" id="akwMsg">This model requires an API key.</div>
-    <button class="akw-btn-primary" onclick="closeApiKeyWarning(true)">Go to Setup →</button>
-    <button class="akw-btn-secondary" onclick="closeApiKeyWarning()">Close</button>
-  </div>
-</div>
-
-
-<!-- ══ TOPAZ VIDEO UPSCALE MODAL ══ -->
-
-</body>
-</html>
+<div id="apiKeyWarning" onclick="if(event.tar

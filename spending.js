@@ -11,6 +11,7 @@
 const SPEND_PRICES = {
   // ── Google — image (per image) ──────────────────────
   'gemini-3.1-flash-image-preview': 0.039,   // NB2
+  'gemini-2.5-flash-image':         0.039,   // NB (gen 1) — same price as NB2
   'gemini-3-pro-image-preview':     0.039,   // NB Pro (same token rate, ~1290 output tokens)
   'imagen-4.0-generate-001':        0.040,   // Imagen 4
   'imagen-4.0-fast-generate-001':   0.020,   // Imagen 4 Fast

@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════
 const MODEL_DESCS = {
   nb2:        'Flash · Thinking ✦ · Refs ✦ max 14 · 512/1K/2K/4K · Grounding ✦',
+  nb1:        'Nano Banana gen 1 · stable · Refs ✦ max 14 · 1K max · fallback for NB2',
   nbpro:      'Pro · Refs ✦ max 14 · 1K/2K/4K · Best quality',
   i4:         'Imagen 4 · 1K · 1–4 images',
   i4fast:     'Imagen 4 Fast · 1K · faster · 1–4 images',
@@ -36,6 +37,7 @@ const MODEL_DESCS = {
 };
 
 function selectModel(key) {
+  const prevType = MODELS[currentModel]?.type;  // save before switching
   currentModel = key;
   document.getElementById('modelSelect').value = key;
   document.getElementById('modelDesc').textContent = MODEL_DESCS[key] || '';
@@ -263,6 +265,11 @@ function selectModel(key) {
   // Imagen Fast: 1K only
   const sz2k = document.getElementById('sz2k');
   if (sz2k) sz2k.disabled = (key === 'i4fast');
+
+  // Live-rewrite @mentions in prompt textarea for new model
+  if (typeof rewritePromptForModel === 'function') {
+    rewritePromptForModel(prevType, MODELS[key]?.type);
+  }
 }
 
 // ═══════════════════════════════════════════════════════

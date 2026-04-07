@@ -213,6 +213,8 @@ async function generate() {
       // Relight
       relightStr:      parseInt(document.getElementById('fepRelightStr')?.value || '100'),
       relightChangeBg: document.getElementById('fepRelightChangeBg')?.checked || false,
+      relightStyle:    document.querySelector('input[name="fepRelightStyle"]:checked')?.value || 'smooth',
+      relightInterpolate: document.getElementById('fepRelightInterpolate')?.checked || false,
       // Style Transfer
       stylePortrait:   document.getElementById('fepStylePortrait')?.checked || false,
       styleFixed:      document.getElementById('fepStyleFixed')?.checked || false,
@@ -312,7 +314,24 @@ async function runJobAndContinue(job) {
   tryStartJobs(); // okamžitě spustit další waitingcí job pro tento model
 }
 
+// ── Update all pending placeholder cards with a status line ──
+function _updatePendingCardsStatus(job, text) {
+  for (const card of (job.pendingCards || [])) {
+    if (!card || !document.contains(card)) continue;
+    let el = card.querySelector('.ph-retry-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'ph-retry-status';
+      const overlay = card.querySelector('.ph-overlay');
+      if (overlay) overlay.appendChild(el);
+    }
+    el.textContent = text;
+    el.style.display = text ? '' : 'none';
+  }
+}
+
 // ── Retry helper: 3× pro 503/529/429, 3s delay mezi pokusy ──
+// Neretry-uje pokud job.streamAccepted (model přijal, generuje) — timeout řeší callGeminiStream
 const RETRY_CODES = ['503', '529', '429'];
 const RETRY_MAX = 3;
 const RETRY_DELAY_MS = 3000;
@@ -320,16 +339,21 @@ const RETRY_DELAY_MS = 3000;
 async function withRetry(fn, job) {
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
+      job.streamAccepted = false; // reset před každým pokusem
       return await fn();
     } catch(e) {
-      const isRetryable = RETRY_CODES.some(code => e.message.startsWith(`API ${code}`));
+      const isSubmitError = RETRY_CODES.some(code => e.message.startsWith(`API ${code}`));
+      const isRetryable = isSubmitError && !job.streamAccepted;
       if (!isRetryable || attempt === RETRY_MAX) throw e;
       job.retryAttempt = attempt;
       job.retryTotal = RETRY_MAX;
       renderQueue();
       const errCode = RETRY_CODES.find(code => e.message.startsWith(`API ${code}`)) || '';
-      toast(`${errCode} — waitingm ${RETRY_DELAY_MS/1000}s, pokus ${attempt}/${RETRY_MAX}…`, 'err');
+      const statusTxt = `⟳ ${errCode} — retry ${attempt}/${RETRY_MAX} in ${RETRY_DELAY_MS/1000}s`;
+      _updatePendingCardsStatus(job, statusTxt);
+      toast(`${errCode} — retrying in ${RETRY_DELAY_MS/1000}s (attempt ${attempt}/${RETRY_MAX})`, 'err');
       await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      _updatePendingCardsStatus(job, '');
     }
   }
 }
@@ -362,7 +386,8 @@ async function runJob(job) {
           if (tb) tb.textContent = '';
           return callGeminiStream(
             job.apiKey, job.prompt, job.model, job.refsCopy, job.geminiSnap,
-            (txt) => updatePlaceholderThinking(cardEl, txt)
+            (txt) => updatePlaceholderThinking(cardEl, txt),
+            job
           );
         }, job);
         const galId = await saveToGallery(result, job.prompt, job.geminiSnap?.targetFolder, job.refsCopy, job.rawPrompt, job);
@@ -388,7 +413,8 @@ async function runJob(job) {
                 if (tb) tb.textContent = '';
                 return callGeminiStream(
                   job.apiKey, job.prompt, job.model, job.refsCopy, job.geminiSnap,
-                  (txt) => updatePlaceholderThinking(cardEl, txt)
+                  (txt) => updatePlaceholderThinking(cardEl, txt),
+                  job
                 );
               }, job);
             })
@@ -656,7 +682,8 @@ async function runJob(job) {
       const srcB64 = srcRef.data;
 
       let resultData;
-      const { tool, relightStr, relightChangeBg, stylePortrait, styleFixed, skinVariant, skinSharpen, skinGrain } = job.editSnap;
+      const { tool, relightStr, relightChangeBg, relightStyle, relightInterpolate,
+              stylePortrait, styleFixed, skinVariant, skinSharpen, skinGrain } = job.editSnap;
 
       if (tool === 'relight') {
         let transferRef = null;
@@ -669,6 +696,8 @@ async function runJob(job) {
           transfer_ref_b64: transferRef,
           light_transfer_strength: relightStr,
           change_background: relightChangeBg,
+          style:    relightStyle    || 'smooth',
+          interpolate: relightInterpolate || false,
         });
       } else if (tool === 'style_transfer') {
         if (job.refsCopy.length < 2)

@@ -165,6 +165,34 @@ function isTimeoutError(e) {
   return /timeout/i.test(e.message || '');
 }
 
+// ── Extract key params as chip labels for error card display ──
+function _jobParamChips(job) {
+  const chips = [];
+  const snap = job.geminiSnap || job.fluxSnap || job.sdSnap || job.klingSnap
+             || job.zimageSnap || job.qwen2Snap || job.imagenSnap || job.wan27Snap
+             || job.xaiSnap || job.lumaSnap || job.mysticSnap || job.editSnap;
+
+  const ar = snap?.aspectRatio || snap?.ratio;
+  if (ar && ar !== 'auto') chips.push(ar);
+
+  const res = snap?.imageSize || snap?.resolution || snap?.imgSize || snap?.size;
+  if (res) chips.push(res);
+
+  if (snap?.tier) chips.push(`tier ${snap.tier}`);
+
+  if (snap?.thinkingLevel && snap.thinkingLevel !== 'none') chips.push(`think:${snap.thinkingLevel}`);
+
+  const count = job.geminiCount || job.fluxCount || job.sdCount || job.klingCount
+              || job.zimageCount || job.qwen2Count
+              || snap?.sampleCount || snap?.count || snap?.grokCount;
+  if (count && count > 1) chips.push(`×${count}`);
+
+  const seed = snap?.seed;
+  if (seed && seed !== '—' && seed !== '') chips.push(`seed:${seed}`);
+
+  return chips;
+}
+
 function showErrorPlaceholder(cardEl, job, msg) {
   if (!cardEl || !document.contains(cardEl)) return;
   clearInterval(cardEl._ticker);
@@ -177,11 +205,23 @@ function showErrorPlaceholder(cardEl, job, msg) {
      : job.upscaleMode === 'topaz_bloom'     ? `✦ Bloom ${job.tBloomFactor}×`
      : 'Recraft Crisp')
     : (job.model?.name || '?');
-  const promptSnip  = escHtml((job.rawPrompt || job.prompt || '').slice(0, 80));
+
   const cardKey     = cardEl.dataset.cardKey || '';
   const isTimeout   = /timeout|deadline/i.test(msg || '');
   const icon        = isTimeout ? '⏱' : '⚠';
   const friendlyMsg = escHtml(friendlyError(msg));
+  const fullPrompt  = escHtml((job.rawPrompt || job.prompt || '').trim());
+
+  const chips    = _jobParamChips(job);
+  const chipHtml = chips.map(c => `<span class="err-chip">${escHtml(c)}</span>`).join('');
+
+  const refs = job.refsCopy || [];
+  const refsHtml = refs.length
+    ? `<div class="err-refs">${refs.map(r => r.thumb
+        ? `<img class="err-ref-thumb" src="data:${r.mimeType||'image/jpeg'};base64,${r.thumb}" title="${escHtml(r.userLabel || r.autoName || '')}">`
+        : `<div class="err-ref-thumb err-ref-nothumb" title="${escHtml(r.userLabel || r.autoName || '')}">?</div>`
+      ).join('')}</div>`
+    : '';
 
   cardEl.classList.remove('placeholder-card');
   cardEl.classList.add('error-card');
@@ -189,19 +229,21 @@ function showErrorPlaceholder(cardEl, job, msg) {
 
   cardEl.innerHTML = `
     <div class="img-card-top-spacer"></div>
-    <div class="img-wrap" style="aspect-ratio:16/9;background:var(--s2);position:relative;cursor:default;">
-      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:20px;text-align:center;pointer-events:none;">
-        <span style="font-size:28px;opacity:.3;line-height:1;">${icon}</span>
-        <div style="font-size:11px;color:var(--dim);line-height:1.5;max-width:260px;">${friendlyMsg}</div>
-        <div style="font-size:10px;color:var(--dim2);line-height:1.4;max-width:240px;font-style:italic;">${promptSnip}</div>
+    <div class="err-detail">
+      <div class="err-banner">
+        <span class="err-banner-icon">${icon}</span>
+        <span class="err-banner-msg">${friendlyMsg}</span>
       </div>
-      <div class="img-overlay">
-        <div class="img-overlay-top">
-          <span class="ov-badge model">${escHtml(modelName)}</span>
-          <span class="ov-badge dims" style="color:#c08060;">${icon} failed</span>
+      <div class="err-content">
+        <div class="err-meta-row">
+          <span class="err-model-label">${escHtml(modelName)}</span>
+          ${chipHtml}
         </div>
-        <div class="img-overlay-bottom">
-          <button class="ibtn-ov reuse" onclick="reuseTimedOutJob('${cardKey}')">↺ Reuse</button>
+        <div class="err-prompt">${fullPrompt}</div>
+        ${refsHtml}
+        <div class="err-btns">
+          <button class="ibtn" onclick="reuseTimedOutJob('${cardKey}')" title="Load params into form to review and re-generate">↺ Reuse</button>
+          <button class="ibtn err-rerun-btn" onclick="rerunJob('${cardKey}')" title="Re-run this job immediately with the same parameters">▶ Rerun</button>
         </div>
       </div>
     </div>
@@ -211,6 +253,16 @@ function showErrorPlaceholder(cardEl, job, msg) {
     </div>`;
 }
 
+// Immediately re-queues the failed job with identical parameters
+function rerunJob(cardKey) {
+  const card = document.querySelector(`[data-card-key="${cardKey}"]`);
+  const job = card?._job;
+  if (!job) { toast('Cannot rerun — job data lost', 'err'); return; }
+  if (card.parentNode) card.parentNode.removeChild(card);
+  const { id, status, startedAt, elapsed, retryAttempt, retryTotal, pendingCards,
+          requestId, cancelled, ...jobData } = job;
+  addToQueue(jobData);
+}
 // Re-loads job parameters into the form so the user can review and re-generate
 async function loadJobParamsToForm(job) {
   if (!job) return;

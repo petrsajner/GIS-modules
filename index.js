@@ -179,7 +179,7 @@ export default {
       if (path === '/luma/status')              return withCors(await handleLumaStatus(request));
 
       // ── Luma video (Ray3 / Ray3.14) ───────────────────
-      if (path === '/luma/video/submit')        return withCors(await handleLumaVideoSubmit(request));
+      if (path === '/luma/video/submit')        return withCors(await handleLumaVideoSubmit(request, env));
       if (path === '/luma/video/status')        return withCors(await handleLumaVideoStatus(request));
 
       // ── Magnific / Freepik upscale ────────────────────
