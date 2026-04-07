@@ -130,16 +130,41 @@ v184en dokončen. Worker **NENÍ deployován** — obsahuje změnu v `handlers/l
 
 ## Aktivní TODO (v pořadí priority)
 - [ ] #1 Style Library "My Presets"
+- [ ] #2 FLUX Pro Fill — inpainting (`fal-ai/flux-pro/v1/fill`)
 - [ ] #4 Clarity 8×/16×
 - [ ] #5 Claid.ai
 - [ ] #6 WAN audio (DashScope)
 - [ ] #7 Vidu Q3 Turbo
-- [ ] #9 Seedance 2.0
+- [ ] #9 Seedance 2.0 (přes MuAPI — viz RESEARCH_MUAPI.md)
 - [ ] #10 Ideogram V3
 - [ ] #11 Recraft V4
 - [ ] #12 GPT Image 1.5
 - [ ] #13 Hailuo 2.3
 - [ ] WAN 2.7 R2V — ověřit endpoint, otestovat
+- [ ] MuAPI klíč do Setup — pro Seedance 2.0 a další modely
+
+---
+
+## FLUX Pro Fill — implementační poznámky (research 7. 4. 2026)
+
+**Endpoint:** `fal-ai/flux-pro/v1/fill` · **Cena:** $0.05/MP (1024×1024 = $0.05)
+
+**CORS/proxy:** Nulové proxy změny — jde přes existující `/fal/submit` + `/fal/status` + `/fal/result`. Stejný fal.ai klíč.
+
+**Vstupy:**
+- `image_url` — zdrojový obrázek (data URI nebo URL)
+- `mask_url` — bílá = inpaint area, černá = zachovat (data URI funguje)
+- `prompt` — co vygenerovat do masky
+- `num_inference_steps` (def 28), `seed`, `num_images`
+
+**Plánovaná architektura:**
+1. **Tlačítko ✦ Fill na output kartě** → otevře Paint tool s nahraným obrázkem jako podkladem
+2. **Paint tool rozšíření:**
+   - Přidat "fill enclosed area" — uživatel nakreslí obrys, oblast se automaticky vyplní (flood fill)
+   - Maska = bílá nakreslená oblast na černém pozadí
+   - Uložit masku jako asset (stejný systém jako anotace)
+3. **"Generate Fill" tlačítko v Paint** → spustí `fal-ai/flux-pro/v1/fill` s image + mask jako data URI
+4. Výsledek přistane jako nová output karta
 
 ---
 
