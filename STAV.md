@@ -158,13 +158,38 @@ v184en dokončen. Worker **NENÍ deployován** — obsahuje změnu v `handlers/l
 - `num_inference_steps` (def 28), `seed`, `num_images`
 
 **Plánovaná architektura:**
-1. **Tlačítko ✦ Fill na output kartě** → otevře Paint tool s nahraným obrázkem jako podkladem
-2. **Paint tool rozšíření:**
-   - Přidat "fill enclosed area" — uživatel nakreslí obrys, oblast se automaticky vyplní (flood fill)
-   - Maska = bílá nakreslená oblast na černém pozadí
-   - Uložit masku jako asset (stejný systém jako anotace)
-3. **"Generate Fill" tlačítko v Paint** → spustí `fal-ai/flux-pro/v1/fill` s image + mask jako data URI
-4. Výsledek přistane jako nová output karta
+
+**1. Vstup — volba rozlišení**
+- Tlačítko ✦ Fill na output kartě → dialog: "Plné rozlišení (Xpx × Ypx) / Zmenšit"
+- Při volbě zmenšení: nabídnout předvolby (50%, 25%, nebo px limit)
+- **Pokud uživatel zvolí zmenšenou kopii → uložit ji jako nový asset do knihovny** (to je nový originál, se kterým se pracuje dál)
+- Otevřít Paint tool s tímto obrázkem jako podkladem
+
+**2. Kreslení masky v Paint**
+- Přidat flood fill — uživatel nakreslí obrys tvaru, kliknutím vyplní oblast bílou barvou
+- Maska = bílá oblast na černém pozadí (stejný formát jako anotace)
+- Uložit masku jako asset (stejný systém jako anotace)
+
+**3. Rámeček kolem masky**
+- Po dokončení masky: z bílých pixelů vypočítat bounding box (min/max X, Y)
+- Kolem středu bbox vykreslit overlay rámeček přesně MODEL_MAX × MODEL_MAX px (FLUX Fill = 1024×1024)
+- Pokud vylézá za kraj → posunout ke kraji; umožnit ruční drag pro korekci pozice
+- Uživatel potvrdí rámeček → pokračovat
+
+**4. Ořez obrázku + masky**
+- `canvas.getImageData(cropX, cropY, 1024, 1024)` → base64 pro image i mask
+- Obojí jako data URI → payload do FLUX Fill
+
+**5. Generování**
+- Standardní fal.ai queue flow (submit → poll → result) přes existující proxy
+
+**6. Kompozit zpět**
+- Inpaintovaný výřez (1024×1024) vložit přes originál na přesné souřadnice: `ctx.drawImage(result, cropX, cropY)`
+- **Žádné zvětšování** — výřez sedí pixel-perfect na svém místě v obrázku
+- Uložit výsledný složený obrázek jako nový asset do IndexedDB
+- Pokud uživatel potřebuje celý obrázek ve větším rozlišení → použije standardní upscale
+
+**Poznámka k scale:** Pokud uživatel pracoval na zmenšené kopii (která je jeho novým originálem), souřadnice cropX/cropY jsou v rozlišení zmenšeného obrázku — žádný přepočet scale není potřeba. Vše je konzistentní.
 
 ---
 
