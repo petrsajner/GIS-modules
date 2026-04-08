@@ -10,11 +10,17 @@ let _annotateBaseB64    = null;  // clean original image b64 (no strokes) for in
 let _annotateBaseName   = null;  // image/model name for gallery label
 let _paintDirty            = {};    // { 'a': bool } — true = has unsaved strokes
 let _inpaintCropInfo       = null;  // { cropX, cropY, cropW, cropH } for compositeBack
-let _inpaintAbort          = null;  // AbortController for cancel support
+let _inpaintAbort          = null;  // AbortController for cancel support (legacy, queue uses job.abort)
 let _inpaintControlNetB64  = null;  // generated depth/canny image b64
 let _inpaintControlNetType = null;  // 'depth' | 'canny'
 let _inpaintCtrlMode       = 'none'; // 'none'|'canny'|'depth' — what to send in API call
 let _inpaintRefB64         = null;  // optional reference image b64 (max 2K)
+let _inpaintRefId          = null;  // gallery image ID for lazy load (alternative to _inpaintRefB64)
+let _inpaintRefPendingPick = false; // when true, gallery modal shows "⊕ Inpaint Ref" button
+
+// ── Inpaint queue ──────────────────────────────────────
+let inpaintQueue        = [];   // array of job objects
+let _inpaintQueueActive = false; // true while a job is running
 
 function createPaintEngine(prefix, canvas) {
   const state = {
@@ -771,6 +777,10 @@ function openInpaintPanel() {
   document.getElementById('inpaintStatus').textContent = '';
   document.getElementById('inpaintGenerateBtn').disabled = false;
 
+  // Apply section visibility for currently selected model
+  const curModel = document.getElementById('inpaintModelSel')?.value || 'flux_fill';
+  onInpaintModelChange(curModel);
+
   // Snapshot painted canvas (image + mask strokes) → middle column preview
   const snapEng = paintEngines['a'];
   if (snapEng) {
@@ -1065,8 +1075,119 @@ async function _setRefFromGallery(id) {
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
+// ── Gallery ref pick ─────────────────────────────────────────────────────────
+function _showInpaintPickBanner() {
+  let el = document.getElementById('inpaintReturnBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'inpaintReturnBanner';
+    el.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:99999',
+      'background:#1a1015', 'border-bottom:2px solid #ff9966',
+      'padding:9px 16px', 'display:flex', 'align-items:center', 'gap:12px',
+      'font-family:"IBM Plex Mono",monospace', 'font-size:12px', 'color:#ff9966',
+      'box-shadow:0 3px 20px rgba(0,0,0,.7)',
+    ].join(';');
+    el.innerHTML = `
+      <span style="flex:1;">🎯 <strong>Inpaint ref pick mode</strong> — open any gallery image → click <strong style="border:1px solid #ff9966;padding:1px 5px;">⊕ Inpaint Ref</strong></span>
+      <button onclick="cancelInpaintRefPick()" style="background:none;border:1px solid #ff9966;color:#ff9966;padding:5px 14px;cursor:pointer;font-family:inherit;font-size:11px;flex-shrink:0;">← Return to Inpaint (cancel)</button>
+    `;
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+
+function _hideInpaintPickBanner() {
+  const el = document.getElementById('inpaintReturnBanner');
+  if (el) el.style.display = 'none';
+}
+
+// Opens gallery in "pick mode" — hides annotate modal without resetting state
+function openGalleryForInpaintRef() {
+  _inpaintRefPendingPick = true;
+  // Hide annotate modal temporarily (NOT closeAnnotateModal — would reset state)
+  document.getElementById('annotateModal').classList.remove('show');
+  _showInpaintPickBanner();
+  switchView('gallery');  // navigate to gallery view
+}
+
+// Return to inpaint without picking (user clicks ← Return or decides to cancel)
+function returnToInpaintWork() {
+  _inpaintRefPendingPick = false;
+  _hideInpaintPickBanner();
+  document.getElementById('annotateModal').classList.add('show');
+}
+
+// Cancel ref pick entirely (clears any pending state)
+function cancelInpaintRefPick() {
+  _inpaintRefPendingPick = false;
+  _hideInpaintPickBanner();
+  document.getElementById('annotateModal').classList.add('show');
+}
+
+// Called from gallery modal when user clicks "⊕ Inpaint Ref"
+async function setInpaintRefFromGallery(id) {
+  _inpaintRefId  = id;
+  _inpaintRefB64 = null;  // will lazy-load at submit time
+  _inpaintRefPendingPick = false;
+  _hideInpaintPickBanner();
+  closeModal();
+  // Show thumbnail preview
+  try {
+    const memThumb = thumbMemCache.get(id);
+    if (memThumb) {
+      _updateRefPreview(`data:image/png;base64,${memThumb}`);
+    } else {
+      const t = await dbGet('thumbs', id);
+      if (t?.data) _updateRefPreview(t.data);
+    }
+  } catch(_) {}
+  // Restore annotate modal
+  document.getElementById('annotateModal').classList.add('show');
+  toast('Reference set from gallery ✓', 'ok');
+}
+
+// Model change → update default params (steps/guidance per model)
+function onInpaintModelChange(val) {
+  // ── Defaults per model ──
+  const defaults = {
+    flux_fill:     { steps: 28,  guidance: 3.5 },
+    flux_general:  { steps: 28,  guidance: 3.5 },
+    flux_dev:      { steps: 28,  guidance: 3.5 },
+    flux_krea:     { steps: 28,  guidance: 3.5 },
+  };
+  const d = defaults[val];
+  if (d) {
+    const stepsEl = document.getElementById('inpaintSteps');
+    const guidEl  = document.getElementById('inpaintGuidance');
+    if (stepsEl) stepsEl.value = d.steps;
+    if (guidEl)  guidEl.value  = d.guidance;
+  }
+
+  // ── Capability map: which sections to show ──
+  const caps = {
+    flux_fill:     { strength: false, ctrl: false, ref: false, negPrompt: false, safety: true  },
+    flux_general:  { strength: true,  ctrl: true,  ref: true,  negPrompt: false, safety: false },
+    flux_dev:      { strength: true,  ctrl: false, ref: false, negPrompt: false, safety: false },
+    flux_krea:     { strength: true,  ctrl: false, ref: false, negPrompt: false, safety: false },
+  };
+  const c = caps[val] || caps['flux_general'];
+
+  const show = (id, visible) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? '' : 'none';
+  };
+
+  show('inpaintStrengthSec',  c.strength);
+  show('inpaintCtrlSec',      c.ctrl);
+  show('inpaintRefSec',       c.ref);
+  show('inpaintNegPromptSec', c.negPrompt);
+  show('inpaintSafetySec',    c.safety);
+}
+
 function clearInpaintRef() {
   _inpaintRefB64 = null;
+  _inpaintRefId  = null;
   const mini  = document.getElementById('inpaintRefMini');
   if (mini)  { mini.src = ''; mini.style.display = 'none'; }
   const wrap  = document.getElementById('inpaintRefPreviewWrap');
@@ -1150,189 +1271,443 @@ async function applyInpaintDownscale() {
   openInpaintPanel();
 }
 
-async function runInpaint() {
+// ── Inpaint queue entry point ────────────────────────────────────────────────
+// Captures current panel state synchronously, adds job to queue, frees UI.
+async function addToInpaintQueue() {
   const eng = paintEngines['a'];
   if (!eng || !_inpaintCropInfo) { toast('No crop info', 'err'); return; }
-
-  const { cropX, cropY, cropW, cropH } = _inpaintCropInfo;
-  const prompt    = (document.getElementById('inpaintPrompt')?.value || '').trim();
-  const falKey    = document.getElementById('fluxApiKey').value.trim();
+  const falKey = document.getElementById('fluxApiKey').value.trim();
   if (!falKey) { toast('fal.ai API key required', 'err'); return; }
 
-  const steps     = parseInt(document.getElementById('inpaintSteps')?.value || '28');
-  const guidance  = parseFloat(document.getElementById('inpaintGuidance')?.value || '3.5');
-  const strength  = parseFloat(document.getElementById('inpaintStrength')?.value || '0.85');
-  const seedRaw   = (document.getElementById('inpaintSeed')?.value || '').trim();
-  const seed      = seedRaw ? parseInt(seedRaw) : null;
-  const ctrlScale    = parseFloat(document.getElementById('inpaintCtrlScale')?.value || '0.5');
-  const refStrength  = parseFloat(document.getElementById('inpaintRefStrength')?.value || '0.65');
+  const { cropX, cropY, cropW, cropH } = _inpaintCropInfo;
+  const prompt     = (document.getElementById('inpaintPrompt')?.value || '').trim();
+  const steps      = parseInt(document.getElementById('inpaintSteps')?.value || '28');
+  const guidance   = parseFloat(document.getElementById('inpaintGuidance')?.value || '3.5');
+  const strength   = parseFloat(document.getElementById('inpaintStrength')?.value || '0.85');
+  const seedRaw    = (document.getElementById('inpaintSeed')?.value || '').trim();
+  const seed       = seedRaw ? parseInt(seedRaw) : null;
+  const ctrlScale  = parseFloat(document.getElementById('inpaintCtrlScale')?.value || '0.5');
+  const refStrength= parseFloat(document.getElementById('inpaintRefStrength')?.value || '0.65');
+  const modelSel   = document.getElementById('inpaintModelSel')?.value || 'flux_fill';
+  const hasCtrlNet = _inpaintCtrlMode !== 'none' && _inpaintControlNetB64 && _inpaintControlNetType === _inpaintCtrlMode;
 
-  const statusEl  = document.getElementById('inpaintStatus');
-  const genBtn    = document.getElementById('inpaintGenerateBtn');
-  const cancelBtn = document.getElementById('inpaintCancelBtn');
+  // ── Capture image + mask synchronously while panel is open ──
+  const statusEl = document.getElementById('inpaintStatus');
+  if (statusEl) statusEl.textContent = '⏳ Preparing…';
+  const genBtn = document.getElementById('inpaintGenerateBtn');
+  if (genBtn) genBtn.disabled = true;
 
-  statusEl.textContent = '⏳ Preparing…';
-  genBtn.disabled   = true;
-  if (cancelBtn) cancelBtn.style.display = '';
-
-  // AbortController for cancel support
-  _inpaintAbort = new AbortController();
-  const signal = _inpaintAbort.signal;
-
+  let imageB64, maskB64;
   try {
-    // ── Crop from CLEAN base image (no colored mask strokes) ──
-    // Uses _annotateBaseB64 (the original without strokes) so the model
-    // sees the correct image, not the red/colored mask overlay.
     const cropCanv = document.createElement('canvas');
     cropCanv.width = cropW; cropCanv.height = cropH;
     if (_annotateBaseB64) {
       await new Promise((res, rej) => {
         const bi = new Image();
-        const timer = setTimeout(() => rej(new Error('Image load timeout — try again')), 20000);
+        const timer = setTimeout(() => rej(new Error('Image load timeout')), 20000);
         bi.onload  = () => { clearTimeout(timer); cropCanv.getContext('2d').drawImage(bi, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH); res(); };
         bi.onerror = () => { clearTimeout(timer); rej(new Error('Failed to load base image')); };
         bi.src = `data:image/png;base64,${_annotateBaseB64}`;
       });
     } else {
-      // Fallback: draw from display canvas (less ideal — may include mask strokes)
       cropCanv.getContext('2d').drawImage(eng.canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
     }
-    const imageB64 = cropCanv.toDataURL('image/jpeg', 0.92).split(',')[1];
+    imageB64 = cropCanv.toDataURL('image/jpeg', 0.92).split(',')[1];
 
-    // ── Extract B&W mask ──
     const maskCanv = document.createElement('canvas');
     maskCanv.width = cropW; maskCanv.height = cropH;
     const mc = maskCanv.getContext('2d');
     mc.fillStyle = '#000'; mc.fillRect(0, 0, cropW, cropH);
     const maskImgData = eng.maskCtx.getImageData(cropX, cropY, cropW, cropH);
     const outData = mc.createImageData(cropW, cropH);
-    const src = maskImgData.data, dst = outData.data;
+    const sd = maskImgData.data, dd = outData.data;
     for (let i = 0; i < cropW * cropH; i++) {
-      const v = src[i*4+3] > 10 ? 255 : 0;
-      dst[i*4] = v; dst[i*4+1] = v; dst[i*4+2] = v; dst[i*4+3] = 255;
+      const v = sd[i*4+3] > 10 ? 255 : 0;
+      dd[i*4] = v; dd[i*4+1] = v; dd[i*4+2] = v; dd[i*4+3] = 255;
     }
     mc.putImageData(outData, 0, 0);
-    const maskB64 = maskCanv.toDataURL('image/png').split(',')[1];
 
-    const modelSel  = document.getElementById('inpaintModelSel')?.value || 'flux_fill';
-    const hasCtrlNet = _inpaintCtrlMode !== 'none' && _inpaintControlNetB64 && _inpaintControlNetType === _inpaintCtrlMode;
-    const hasRef     = !!_inpaintRefB64;
-
-    let result;
-    if (modelSel === 'flux_fill' && !hasCtrlNet && !hasRef) {
-      result = await callFluxFill(falKey, imageB64, maskB64, prompt, cropW, cropH,
-        (msg) => { statusEl.textContent = msg; }, signal);
+    // ── Apply Gaussian blur to mask (soft edges) ──
+    const blurPx = parseInt(document.getElementById('inpaintMaskBlur')?.value || '0');
+    if (blurPx > 0) {
+      const blurCanvas = document.createElement('canvas');
+      blurCanvas.width = cropW; blurCanvas.height = cropH;
+      const bc = blurCanvas.getContext('2d');
+      bc.filter = `blur(${blurPx}px)`;
+      bc.drawImage(maskCanv, 0, 0);
+      bc.filter = 'none';
+      maskB64 = blurCanvas.toDataURL('image/png').split(',')[1];
     } else {
-      result = await callFluxGeneralInpaint(falKey, {
-        imageB64, maskB64, prompt, width: cropW, height: cropH,
-        steps, guidance, strength, seed,
-        controlNetB64: hasCtrlNet ? _inpaintControlNetB64 : null,
-        controlNetType: hasCtrlNet ? _inpaintCtrlMode : null,
-        ctrlScale,
-        refB64: hasRef ? _inpaintRefB64 : null,
-        refStrength,
-      }, (msg) => { statusEl.textContent = msg; }, signal);
+      maskB64 = maskCanv.toDataURL('image/png').split(',')[1];
     }
 
-    statusEl.textContent = '✓ Compositing…';
-    await _compositeInpaintResult(result.base64, result.mimeType, _inpaintCropInfo);
+    // ── Full-resolution mask (for models needing full image context, e.g. Qwen) ──
+    const W_full = eng.canvas.width, H_full = eng.canvas.height;
+    const fullMaskCanv = document.createElement('canvas');
+    fullMaskCanv.width = W_full; fullMaskCanv.height = H_full;
+    const fmc = fullMaskCanv.getContext('2d');
+    fmc.fillStyle = '#000'; fmc.fillRect(0, 0, W_full, H_full);
+    const fullMaskData = eng.maskCtx.getImageData(0, 0, W_full, H_full);
+    const fullOut = fmc.createImageData(W_full, H_full);
+    const fsd = fullMaskData.data, fdd = fullOut.data;
+    for (let i = 0; i < W_full * H_full; i++) {
+      const v = fsd[i*4+3] > 10 ? 255 : 0;
+      fdd[i*4] = v; fdd[i*4+1] = v; fdd[i*4+2] = v; fdd[i*4+3] = 255;
+    }
+    fmc.putImageData(fullOut, 0, 0);
+    // Apply same blur to full mask
+    let fullMaskB64;
+    if (blurPx > 0) {
+      const fb = document.createElement('canvas');
+      fb.width = W_full; fb.height = H_full;
+      const fbc = fb.getContext('2d');
+      fbc.filter = `blur(${blurPx}px)`; fbc.drawImage(fullMaskCanv, 0, 0); fbc.filter = 'none';
+      fullMaskB64 = fb.toDataURL('image/png').split(',')[1];
+    } else {
+      fullMaskB64 = fullMaskCanv.toDataURL('image/png').split(',')[1];
+    }
 
   } catch(e) {
-    if (e.name === 'AbortError' || e.message === 'Cancelled') {
-      statusEl.textContent = '— Cancelled';
+    if (statusEl) statusEl.textContent = '✗ ' + e.message;
+    if (genBtn) genBtn.disabled = false;
+    toast('Inpaint prepare failed: ' + e.message, 'err');
+    return;
+  }
+
+  // ── Resolve ref (lazy if from gallery) ──
+  let resolvedRefB64 = _inpaintRefB64;
+  if (!resolvedRefB64 && _inpaintRefId) {
+    try {
+      const rec = await dbGet('images', _inpaintRefId);
+      if (rec?.imageData) resolvedRefB64 = await _resizeToMaxPx(rec.imageData, 2048);
+    } catch(_) {}
+  }
+
+  const blurPx = parseInt(document.getElementById('inpaintMaskBlur')?.value || '0');
+  const isFullImageModel = (modelSel === 'qwen_inpaint');
+  const negativePrompt  = (document.getElementById('inpaintNegPrompt')?.value || '').trim();
+  const safetyTolerance = document.getElementById('inpaintSafetyTol')?.value || '2';
+
+  const job = {
+    id:            Date.now() + '_' + Math.random().toString(36).substr(2,5),
+    status:        'waiting',
+    statusMsg:     '',
+    ts:            Date.now(),
+    modelSel, prompt, steps, guidance, strength, seed, ctrlScale, refStrength,
+    maskBlur:      blurPx,
+    fullImageMode: isFullImageModel,
+    imageB64, maskB64,
+    fullImageB64:  _annotateBaseB64,
+    fullMaskB64:   (typeof fullMaskB64 !== 'undefined') ? fullMaskB64 : maskB64,
+    cropInfo:      { cropX, cropY, cropW, cropH },
+    controlNetB64: hasCtrlNet ? _inpaintControlNetB64 : null,
+    controlNetType:hasCtrlNet ? _inpaintCtrlMode : null,
+    refB64:        resolvedRefB64 || null,
+    negativePrompt,
+    safetyTolerance,
+    annotateBaseB64: _annotateBaseB64,
+    annotateBaseName: _annotateBaseName,
+    abort:         null,
+  };
+
+  inpaintQueue.push(job);
+  if (statusEl) statusEl.textContent = '';
+  if (genBtn) genBtn.disabled = false;
+  renderInpaintQueue();
+  toast(`Job #${inpaintQueue.length} queued ✓`, 'ok');
+  _processInpaintQueue();
+}
+
+// ── Background queue processor ────────────────────────────────────────────────
+async function _processInpaintQueue() {
+  if (_inpaintQueueActive) return;
+  const job = inpaintQueue.find(j => j.status === 'waiting');
+  if (!job) return;
+
+  _inpaintQueueActive = true;
+  job.status = 'running';
+  job.startedAt = Date.now();
+  job.abort  = new AbortController();
+  renderInpaintQueue();
+
+  const falKey = document.getElementById('fluxApiKey').value.trim();
+  const { modelSel, imageB64, maskB64, prompt, cropInfo, steps, guidance, strength,
+          seed, ctrlScale, refStrength, controlNetB64, controlNetType, refB64,
+          negativePrompt, safetyTolerance } = job;
+  const { cropW, cropH } = cropInfo;
+  const hasCtrl = !!(controlNetB64 && controlNetType);
+  const hasRef  = !!refB64;
+  const signal  = job.abort.signal;
+  const upd     = msg => { job.statusMsg = msg; renderInpaintQueue(); };
+
+  try {
+    let result;
+    if (modelSel === 'flux_fill' && !hasCtrl && !hasRef) {
+      result = await callFluxFill(falKey, imageB64, maskB64, prompt, cropW, cropH, upd, signal,
+        { steps, guidance, seed, safetyTolerance });
+      trackSpend('fal', 'fal-ai/flux-pro/v1/fill');
+
+    } else if (modelSel === 'flux_dev') {
+      result = await callFluxDevInpaint(falKey, { imageB64, maskB64, prompt,
+        width: cropW, height: cropH, steps, guidance, strength, seed }, upd, signal);
+      trackSpend('fal', 'fal-ai/flux-lora/inpainting');
+
+    } else if (modelSel === 'flux_krea') {
+      result = await callFluxKreaInpaint(falKey, { imageB64, maskB64, prompt,
+        width: cropW, height: cropH, steps, guidance, strength, seed }, upd, signal);
+      trackSpend('fal', 'fal-ai/flux-krea-lora/inpainting');
+
+    } else if (modelSel === 'fast_sdxl') {
+      result = await callFastSdxlInpaint(falKey, { imageB64, maskB64, prompt,
+        width: cropW, height: cropH, steps, guidance, strength, seed, negativePrompt }, upd, signal);
+      trackSpend('fal', 'fal-ai/fast-sdxl/inpainting');
+
+    } else if (modelSel === 'playground_v25') {
+      result = await callPlaygroundV25Inpaint(falKey, { imageB64, maskB64, prompt,
+        width: cropW, height: cropH, steps, guidance, strength, seed, negativePrompt }, upd, signal);
+      trackSpend('fal', 'fal-ai/playground-v25/inpainting');
+
+    } else if (modelSel === 'qwen_inpaint') {
+      // Qwen receives full image + full mask for better context
+      const qwenW = job.fullImageB64 ? await new Promise(r => { const i = new Image(); i.onload = () => r(i.naturalWidth);  i.src = `data:image/png;base64,${job.fullImageB64}`; }) : cropW;
+      const qwenH = job.fullImageB64 ? await new Promise(r => { const i = new Image(); i.onload = () => r(i.naturalHeight); i.src = `data:image/png;base64,${job.fullImageB64}`; }) : cropH;
+      result = await callQwenInpaint(falKey, {
+        imageB64: job.fullImageB64 || imageB64,
+        maskB64:  job.fullMaskB64  || maskB64,
+        prompt, width: qwenW, height: qwenH, steps, guidance, seed,
+      }, upd, signal);
+      trackSpend('fal', 'fal-ai/qwen-image-edit/inpaint');
+
     } else {
-      statusEl.textContent = '✗ ' + (e.message || 'Error');
+      // flux_fill with ControlNet/ref + flux_general → FLUX General
+      result = await callFluxGeneralInpaint(falKey, {
+        imageB64, maskB64, prompt, width: cropW, height: cropH,
+        steps, guidance, strength, seed, ctrlScale, refStrength,
+        controlNetB64: hasCtrl ? controlNetB64 : null,
+        controlNetType: hasCtrl ? controlNetType : null,
+        refB64: hasRef ? refB64 : null,
+      }, upd, signal);
+      trackSpend('fal', 'fal-ai/flux-general/inpainting');
+    }
+
+    upd('✓ Compositing…');
+    await _compositeAndSaveQueueJob(job, result);
+    job.status = 'done';
+    job.statusMsg = '✓ Saved to gallery';
+
+  } catch(e) {
+    if (e.name === 'AbortError' || signal.aborted) {
+      job.status = 'cancelled';
+      job.statusMsg = '— Cancelled';
+    } else {
+      job.status = 'error';
+      job.statusMsg = '✗ ' + (e.message || 'Unknown error');
       toast('Inpaint failed: ' + (e.message || 'Unknown error'), 'err');
     }
-    genBtn.disabled = false;
-    if (cancelBtn) cancelBtn.style.display = 'none';
   } finally {
-    _inpaintAbort = null;
+    job.abort = null;
+    _inpaintQueueActive = false;
+    renderInpaintQueue();
+    _processInpaintQueue();  // advance to next job
   }
 }
 
-function cancelInpaint() {
-  if (_inpaintAbort) {
-    _inpaintAbort.abort();
-    _inpaintAbort = null;
+// ── Cancel currently running job ──────────────────────────────────────────────
+function cancelCurrentInpaintJob() {
+  const running = inpaintQueue.find(j => j.status === 'running');
+  if (running?.abort) { running.abort.abort(); }
+  const btn = document.getElementById('inpaintCancelBtn');
+  if (btn) btn.style.display = 'none';
+}
+
+function cancelInpaintJob(id) {
+  const job = inpaintQueue.find(j => j.id === id);
+  if (!job) return;
+  if (job.abort) { job.abort.abort(); }
+  else if (job.status === 'waiting') { job.status = 'cancelled'; job.statusMsg = '— Cancelled'; }
+  renderInpaintQueue();
+}
+
+function clearInpaintQueueDone() {
+  inpaintQueue = inpaintQueue.filter(j => j.status === 'waiting' || j.status === 'running');
+  renderInpaintQueue();
+}
+
+function openInpaintFromNav() {
+  if (!_annotateBaseB64) {
+    toast('No active inpaint session — open an image from Gallery with ✏ Annotate', 'err');
+    return;
   }
+  if (_inpaintRefPendingPick) { _inpaintRefPendingPick = false; _hideInpaintPickBanner(); }
+
+  // Show annotate modal
+  document.getElementById('annotateModal').classList.add('show');
+
+  // If crop info exists → open inpaint panel directly
+  if (_inpaintCropInfo) {
+    // Show inpaint panel (already has content)
+    document.getElementById('aToolbar').style.display = 'none';
+    document.getElementById('annotateCanvasWrap').style.display = 'none';
+    document.getElementById('inpaintPanel').style.display = 'flex';
+    document.getElementById('inpaintStatus').textContent = '';
+    document.getElementById('inpaintGenerateBtn').disabled = false;
+  } else {
+    // Show canvas so user can draw mask
+    const panel = document.getElementById('inpaintPanel');
+    if (panel) panel.style.display = 'none';
+    const tb = document.getElementById('aToolbar');
+    const cw = document.getElementById('annotateCanvasWrap');
+    if (tb) tb.style.display = '';
+    if (cw) cw.style.display = '';
+  }
+
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  const tab = document.getElementById('inpaintNavTab');
+  if (tab) tab.classList.add('active');
+}
+
+function renderInpaintQueue() {
+  const list = document.getElementById('inpaintQueueList');
+  const emptyEl = document.getElementById('inpaintQueueEmpty');
+  if (!list) return;
+
+  const running = inpaintQueue.find(j => j.status === 'running');
   const cancelBtn = document.getElementById('inpaintCancelBtn');
-  if (cancelBtn) cancelBtn.style.display = 'none';
+  if (cancelBtn) cancelBtn.style.display = running ? '' : 'none';
+
+  const active = inpaintQueue.filter(j => j.status === 'waiting' || j.status === 'running').length;
+  const tab = document.getElementById('inpaintNavTab');
+  if (tab) tab.textContent = active > 0 ? `\u229b Inpaint (${active})` : '\u229b Inpaint';
+
+  if (!inpaintQueue.length) {
+    list.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = '';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const modelLabel = {
+    flux_fill:'FLUX Pro Fill', flux_general:'FLUX General',
+    flux_dev:'FLUX Dev', flux_krea:'FLUX Krea',
+    fast_sdxl:'SDXL Fast', playground_v25:'Playground 2.5',
+    qwen_inpaint:'Qwen Inpaint',
+  };
+  const statusTxt = j => {
+    const elapsed = j.startedAt ? Math.round((Date.now() - j.startedAt) / 1000) + 's' : '';
+    if (j.status === 'waiting')   return 'waiting\u2026';
+    if (j.status === 'running')   return j.statusMsg || ('generating \u00b7 ' + elapsed);
+    if (j.status === 'done')      return j.statusMsg || '\u2713 saved to gallery';
+    if (j.status === 'cancelled') return '\u2014 cancelled';
+    return j.statusMsg || '\u26a0 error';
+  };
+
+  const items = [...inpaintQueue].reverse().slice(0, 30);
+  list.innerHTML = items.map(j => {
+    const isActive = j.status === 'waiting' || j.status === 'running';
+    const model = modelLabel[j.modelSel] || j.modelSel;
+    const promptSnip = (j.prompt || '[no prompt]').slice(0, 55);
+    const cancelHtml = isActive
+      ? `<button class="qo-cancel-btn" onclick="cancelInpaintJob('${j.id}')" title="Cancel">\u2715</button>` : '';
+    return `<div class="qo-item ${j.status}">
+      <div class="qo-dot ${j.status === 'cancelled' ? 'error' : j.status}"></div>
+      <div class="qo-main">
+        <div class="qo-model ${j.status}" style="font-size:11px;">${model}</div>
+        <div class="qo-prompt">${promptSnip}</div>
+        <div class="qo-meta ${j.status === 'running' ? 'qo-elapsed' : ''}">${statusTxt(j)}</div>
+      </div>
+      ${cancelHtml}
+    </div>`;
+  }).join('');
 }
 
-async function _compositeInpaintResult(resultB64, mimeType, cropInfo) {
-  const eng = paintEngines['a'];
-  if (!eng) return;
 
-  const { cropX, cropY, cropW, cropH } = cropInfo;
-  const W = eng.canvas.width, H = eng.canvas.height;
+// ── Composite result + save to gallery (queue-safe, no global state dependency) ──
+async function _compositeAndSaveQueueJob(job, result) {
+  const { resultB64, mimeType } = { resultB64: result.base64, mimeType: result.mimeType };
+  const { cropX, cropY, cropW, cropH } = job.cropInfo;
 
-  // Build new base: clean original + result pasted at crop position
-  const compositeCanvas = document.createElement('canvas');
-  compositeCanvas.width = W; compositeCanvas.height = H;
-  const cc = compositeCanvas.getContext('2d');
+  let finalB64;
 
-  await new Promise(res => {
-    const bi = new Image();
-    bi.onload = () => { cc.drawImage(bi, 0, 0); res(); };
-    bi.src = `data:image/png;base64,${_annotateBaseB64}`;
-  });
-  await new Promise(res => {
-    const ri = new Image();
-    ri.onload = () => { cc.drawImage(ri, cropX, cropY, cropW, cropH); res(); };
-    ri.src = `data:${mimeType};base64,${resultB64}`;
-  });
+  if (job.fullImageMode) {
+    // Qwen returns full edited image — convert to PNG and save directly
+    finalB64 = await new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0);
+        res(c.toDataURL('image/png').split(',')[1]);
+      };
+      img.src = `data:${mimeType};base64,${resultB64}`;
+    });
+  } else {
+    // Crop-based models: composite result back onto original at crop position
+    const dims = await new Promise(res => {
+      const img = new Image();
+      img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight });
+      img.src = `data:image/png;base64,${job.annotateBaseB64}`;
+    });
+    const W = dims.w, H = dims.h;
 
-  const finalB64 = compositeCanvas.toDataURL('image/png').split(',')[1];
-  const promptText = (document.getElementById('inpaintPrompt')?.value || '').trim();
+    const compositeCanvas = document.createElement('canvas');
+    compositeCanvas.width = W; compositeCanvas.height = H;
+    const cc = compositeCanvas.getContext('2d');
 
-  // Auto-save to gallery
-  const dims = await getImageDimensions(finalB64);
-  const id   = Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-  const rec  = {
-    id, ts: Date.now(),
-    model:    'FLUX Inpaint',
-    modelKey: 'flux_inpaint',
-    prompt:   promptText || '[Inpainted]',
-    params:   { size: fmtDims(dims), source: _annotateBaseName },
-    imageData: finalB64,
-    folder: 'all',
-    dims: fmtDims(dims),
+    await new Promise(res => {
+      const bi = new Image(); bi.onload = () => { cc.drawImage(bi, 0, 0); res(); };
+      bi.src = `data:image/png;base64,${job.annotateBaseB64}`;
+    });
+
+    if (job.maskBlur > 0) {
+      // Soft blend: blurred mask as alpha — feathered edges
+      const resultCrop = document.createElement('canvas');
+      resultCrop.width = cropW; resultCrop.height = cropH;
+      const rc = resultCrop.getContext('2d');
+      await new Promise(res => {
+        const ri = new Image(); ri.onload = () => { rc.drawImage(ri, 0, 0); res(); };
+        ri.src = `data:${mimeType};base64,${resultB64}`;
+      });
+      rc.globalCompositeOperation = 'destination-in';
+      await new Promise(res => {
+        const mi = new Image(); mi.onload = () => { rc.drawImage(mi, 0, 0); res(); };
+        mi.src = `data:image/png;base64,${job.maskB64}`;
+      });
+      rc.globalCompositeOperation = 'source-over';
+      cc.drawImage(resultCrop, cropX, cropY);
+    } else {
+      await new Promise(res => {
+        const ri = new Image(); ri.onload = () => { cc.drawImage(ri, cropX, cropY, cropW, cropH); res(); };
+        ri.src = `data:${mimeType};base64,${resultB64}`;
+      });
+    }
+    finalB64 = compositeCanvas.toDataURL('image/png').split(',')[1];
+  }
+
+  // Save to gallery ONLY — canvas NOT updated, mask preserved for next iteration
+  const dimStr = fmtDims(await getImageDimensions(finalB64));
+  const modelLabel = { flux_fill:'FLUX Pro Fill', flux_general:'FLUX General', flux_dev:'FLUX Dev', flux_krea:'FLUX Krea', fast_sdxl:'SDXL Fast', playground_v25:'Playground 2.5', qwen_inpaint:'Qwen Inpaint' }[job.modelSel] || 'Inpaint';
+  const recId  = Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  const rec    = {
+    id: recId, ts: Date.now(),
+    model: modelLabel, modelKey: 'flux_inpaint',
+    prompt: job.prompt || '[Inpainted]',
+    params: { size: dimStr, source: job.annotateBaseName },
+    imageData: finalB64, folder: 'all', dims: dimStr,
   };
   await dbPut('images', rec);
   await dbPutMeta(rec);
   generateThumb(finalB64, 'image/png').then(t => {
     if (t) {
       const tx = db.transaction('thumbs','readwrite');
-      tx.objectStore('thumbs').put({ id, data: t });
-      thumbMemCache.set(id, t);
+      tx.objectStore('thumbs').put({ id: recId, data: t });
+      thumbMemCache.set(recId, t);
     }
   });
   refreshGalleryUI();
-
-  // New composite becomes the fresh "original" in the modal
-  _annotateBaseB64  = finalB64;
-  _annotateBaseName = 'Inpainted · ' + _annotateBaseName;
-  _paintDirty['a']  = false;  // auto-saved → no duplicate on Gallery+close
-
-  await new Promise(res => {
-    const ni = new Image();
-    ni.onload = () => {
-      eng.canvas.width = W; eng.canvas.height = H;
-      eng.ctx.drawImage(ni, 0, 0);
-      eng.maskCtx.clearRect(0, 0, W, H);  // clear mask for next iteration
-      eng.history = []; eng.maskHistory = [];
-      eng.saveHistory();
-      res();
-    };
-    ni.src = `data:image/png;base64,${finalB64}`;
-  });
-
-  document.getElementById('annotateTitle').textContent = 'Paint — ' + _annotateBaseName;
-  document.getElementById('inpaintStatus').textContent = '✓ Done!';
-  document.getElementById('inpaintGenerateBtn').disabled = false;
-  const cb = document.getElementById('inpaintCancelBtn');
-  if (cb) cb.style.display = 'none';
-  closeInpaintPanel();
-  toast('Inpainted & saved to gallery ✓', 'ok');
+  toast('Inpainted & saved to gallery \u2713', 'ok');
 }
+
+// Legacy alias kept for any remaining callers
+function runInpaint() { addToInpaintQueue(); }
+function cancelInpaint() { cancelCurrentInpaintJob(); }
+

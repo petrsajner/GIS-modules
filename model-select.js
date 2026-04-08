@@ -277,7 +277,7 @@ function selectModel(key) {
 // ═══════════════════════════════════════════════════════
 function switchView(v) {
   const tabs = document.querySelectorAll('.nav-tab');
-  const viewMap = { gen: 0, gallery: 1, video: 2, assets: 3, paint: 4, setup: 5 };
+  const viewMap = { gen: 0, gallery: 1, video: 2, assets: 3, paint: 4, setup: 6 };
   tabs.forEach((t, i) => t.classList.toggle('active', i === viewMap[v]));
   document.getElementById('genView').classList.toggle('hide', v !== 'gen');
   document.getElementById('galleryView').classList.toggle('show', v === 'gallery');

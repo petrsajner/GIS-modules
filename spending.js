@@ -25,6 +25,12 @@ const SPEND_PRICES = {
   'fal-ai/flux-2-pro':              0.050,
   'fal-ai/flux-pro/v1/fill':        0.050,   // FLUX Pro Fill inpainting $0.05/MP
   'fal-ai/flux-general/inpainting':   0.025,   // FLUX General Inpaint ~$0.025/img
+  'fal-ai/flux-lora/inpainting':      0.025,   // FLUX Dev Inpaint ~$0.025/img
+  'fal-ai/flux-krea-lora/inpainting': 0.035,   // FLUX Krea Inpaint $0.035/MP
+  'fal-ai/fast-sdxl/inpainting':      0.003,   // SDXL Fast ~$0.003/img
+  'fal-ai/playground-v25/inpainting': 0.005,   // Playground v2.5 ~$0.005/img
+  'fal-ai/qwen-image-edit/inpaint':   0.020,   // Qwen Edit Inpaint ~$0.02/img
+  'fal-ai/flux-kontext-lora/inpaint': 0.030,   // FLUX Kontext Inpaint ~$0.03/img
   'fal-ai/depth-anything/v2':         0.003,   // Depth map generation
   'fal-ai/flux-2-flex':             0.040,
   'fal-ai/flux-2-max':              0.060,

@@ -1021,17 +1021,20 @@ async function openGalleryModal(id) {
   // Actions — use proper event delegation, no inline attributes
   const actionsEl = document.getElementById('modalActions');
   const isFav = item.favorite || false;
+  const inpaintRefBtnHtml = (typeof _inpaintRefPendingPick !== 'undefined' && _inpaintRefPendingPick)
+    ? `<button class="ibtn" id="mInpaintRefBtn" style="border-color:#ff9966;color:#ff9966;font-weight:600;">⊕ Inpaint Ref</button>` : '';
   actionsEl.innerHTML = `
     <a class="ibtn" href="${src}" download="${item.model}-${item.id}.png">↓ PNG</a>
     <button class="ibtn" id="mFavBtn" style="border-color:${isFav ? '#ff4d6d' : 'var(--border)'};color:${isFav ? '#ff4d6d' : 'var(--dim)'};">${isFav ? '♥ Favorites' : '♡ Favorite'}</button>
     <button class="ibtn upscale-btn" id="mUpscaleBtn">⬆ Upscale</button>
+    ${inpaintRefBtnHtml}
     <button class="ibtn" id="mAddRefBtn" style="border-color:#4a5a8a;color:#88aaff" title="Přidat jako ref + uložit do Assets">⊕ Ref &amp; Assets</button>
     <button class="ibtn" id="mSaveAssetBtn" style="border-color:#4a7a4a;color:#aaffaa" title="Uložit pouze do Assets">📎 Assets</button>
     <button class="ibtn" id="mAnnotateBtn" style="border-color:#6a4a3a;color:#ff9966">✏ Annotate</button>
     <button class="ibtn reuse-btn" id="mReuseBtn">↺ Reuse params</button>
     <button class="ibtn danger" id="mDeleteBtn">✕ Delete</button>
   `;
-  actionsEl.querySelector('#mFavBtn').onclick = async () => {
+  if (inpaintRefBtnHtml) { actionsEl.querySelector('#mInpaintRefBtn').onclick = () => setInpaintRefFromGallery(id); }  actionsEl.querySelector('#mFavBtn').onclick = async () => {
     await toggleFavoriteItem(id);
     openGalleryModal(id);
   };
@@ -1063,6 +1066,7 @@ async function openGalleryModal(id) {
   await updateGalleryIds();
   updateModalNavButtons();
   modalOpenedAt = Date.now();
+  resetModalZoom();
   document.getElementById('modal').classList.add('show');
 }
 
@@ -1896,3 +1900,96 @@ async function folderDrop(e, folderId) {
   toast('Moved ✓', 'ok');
 }
 
+
+// ══════════════════════════════════════════════════════
+// MODAL IMAGE ZOOM — mouse wheel + drag to pan
+// ══════════════════════════════════════════════════════
+let _mzScale = 1;
+let _mzTX = 0, _mzTY = 0;
+let _mzDragging = false, _mzDragOriginX = 0, _mzDragOriginY = 0;
+let _mzDragTX0 = 0, _mzDragTY0 = 0;
+
+function _mzApply() {
+  const img = document.getElementById('modalImg');
+  if (!img) return;
+  img.style.transform = `translate(${_mzTX}px,${_mzTY}px) scale(${_mzScale})`;
+  const pct = document.getElementById('modalZoomPct');
+  if (pct) pct.textContent = _mzScale === 1 ? 'fit' : Math.round(_mzScale * 100) + '%';
+}
+
+function resetModalZoom() {
+  _mzScale = 1; _mzTX = 0; _mzTY = 0; _mzApply();
+}
+
+function setModal100pct() {
+  const img = document.getElementById('modalImg');
+  if (!img || !img.naturalWidth) return;
+  // Compute scale factor so image renders at natural pixel size
+  // img is currently at scale=1, so its rendered width = img.getBoundingClientRect().width / _mzScale
+  const renderedW = img.getBoundingClientRect().width / _mzScale;
+  if (renderedW > 0) {
+    _mzScale = img.naturalWidth / renderedW;
+    _mzTX = 0; _mzTY = 0;
+    _mzApply();
+  }
+}
+
+// Initialise zoom listeners once DOM is ready
+function _initModalZoom() {
+  const vp = document.getElementById('modalImgViewport');
+  if (!vp || vp._zoomInited) return;
+  vp._zoomInited = true;
+
+  // ── Wheel zoom toward cursor ──
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = vp.getBoundingClientRect();
+    // Mouse position relative to viewport center
+    const mx = e.clientX - rect.left - rect.width  / 2;
+    const my = e.clientY - rect.top  - rect.height / 2;
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(0.1, Math.min(12, _mzScale * factor));
+    const ratio = newScale / _mzScale;
+    // Shift translation so zoom is anchored to cursor
+    _mzTX = mx + (_mzTX - mx) * ratio;
+    _mzTY = my + (_mzTY - my) * ratio;
+    _mzScale = newScale;
+    _mzApply();
+    vp.style.cursor = _mzScale > 1 ? 'grab' : 'crosshair';
+  }, { passive: false });
+
+  // ── Drag to pan ──
+  vp.addEventListener('mousedown', e => {
+    if (e.button !== 0 || _mzScale <= 1) return;
+    _mzDragging = true;
+    _mzDragOriginX = e.clientX; _mzDragOriginY = e.clientY;
+    _mzDragTX0 = _mzTX; _mzDragTY0 = _mzTY;
+    vp.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!_mzDragging) return;
+    _mzTX = _mzDragTX0 + (e.clientX - _mzDragOriginX);
+    _mzTY = _mzDragTY0 + (e.clientY - _mzDragOriginY);
+    _mzApply();
+  });
+  document.addEventListener('mouseup', () => {
+    if (!_mzDragging) return;
+    _mzDragging = false;
+    const vp2 = document.getElementById('modalImgViewport');
+    if (vp2) vp2.style.cursor = _mzScale > 1 ? 'grab' : 'crosshair';
+  });
+
+  // Double-click → toggle fit/100%
+  vp.addEventListener('dblclick', () => {
+    if (_mzScale === 1) setModal100pct();
+    else resetModalZoom();
+  });
+}
+
+// Init on first open (DOM ready)
+document.addEventListener('DOMContentLoaded', _initModalZoom);
+// Fallback for file:// where DOMContentLoaded may have fired
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(_initModalZoom, 100);
+}

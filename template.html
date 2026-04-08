@@ -768,17 +768,22 @@ input[type=file] { display:none; }
 .ibtn.danger:hover { border-color:var(--red); color:var(--red); }
 
 /* Modal */
-#modal { position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:200; display:none; align-items:center; justify-content:center; padding:20px; pointer-events:none; }
+#modal { position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:200; display:none; align-items:center; justify-content:center; padding:8px; pointer-events:none; }
 #modal.show { display:flex; pointer-events:all; }
-.modal-box { background:var(--s1); border:1px solid var(--border); max-width:1300px; width:100%; max-height:92vh; overflow-y:auto; display:flex; flex-direction:column; }
-.modal-hdr { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+.modal-box { background:var(--s1); border:1px solid var(--border); max-width:min(1820px,98vw); width:100%; max-height:97vh; overflow:hidden; display:flex; flex-direction:column; }
+.modal-hdr { padding:10px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-shrink:0; }
 .modal-title { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; flex:1; }
 .modal-close { background:none; border:none; color:var(--dim); font-size:18px; cursor:pointer; line-height:1; }
 .modal-close:hover { color:var(--text); }
-.modal-body { padding:20px; display:flex; gap:20px; }
-.modal-img { flex:1; min-width:0; }
-.modal-img img { max-width:100%; max-height:80vh; display:block; border:1px solid var(--border); object-fit:contain; }
-.modal-info { width:300px; flex-shrink:0; display:flex; flex-direction:column; gap:12px; }
+.modal-body { padding:14px 16px; display:flex; gap:16px; flex:1; min-height:0; overflow:hidden; }
+.modal-img { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; overflow:hidden; }
+.modal-zoom-bar { display:flex; align-items:center; gap:6px; flex-shrink:0; height:22px; }
+.modal-zoom-pct { font-size:10px; font-family:'IBM Plex Mono',monospace; color:var(--dim); min-width:36px; }
+.modal-zoom-btn { background:none; border:1px solid var(--border); color:var(--dim); font-size:10px; padding:1px 7px; cursor:pointer; font-family:'IBM Plex Mono',monospace; }
+.modal-zoom-btn:hover { border-color:var(--accent); color:var(--accent); }
+#modalImgViewport { flex:1; min-height:0; overflow:hidden; position:relative; cursor:crosshair; user-select:none; display:flex; align-items:center; justify-content:center; }
+#modalImg { max-width:100%; max-height:100%; display:block; border:1px solid var(--border); object-fit:contain; transform-origin:center center; will-change:transform; pointer-events:none; }
+.modal-info { width:280px; flex-shrink:0; display:flex; flex-direction:column; gap:10px; overflow-y:auto; max-height:calc(97vh - 100px); }
 .info-row { font-size:12px; }
 .info-row .ik { color:var(--dim); text-transform:uppercase; letter-spacing:.08em; font-size:10px; margin-bottom:4px; font-weight:500; }
 .info-row .iv { color:var(--text); line-height:1.6; word-break:break-all; }
@@ -956,6 +961,7 @@ input[type=range].prange::-webkit-slider-thumb {
   border:2px solid var(--accent); padding:7px 9px;
   font-family:'IBM Plex Mono',monospace; font-size:12px;
 }
+#inpaintModelSel option { background:#fff; color:#111; }
 #inpaintModelSel:focus { outline:none; border-color:#ffcc55; }
 #inpaintPrompt {
   width:100%; background:var(--bg2); color:var(--fg);
@@ -1713,6 +1719,14 @@ input[type=range].prange::-webkit-slider-thumb {
 </head>
 <body>
 
+<!-- INPAINT REF PICK BANNER — zobrazí se při výběru reference z galerie -->
+<div id="inpaintReturnBanner" style="display:none;position:fixed;top:54px;right:16px;z-index:500;background:rgba(14,14,22,0.97);border:1px solid #ff9966;border-radius:4px;padding:8px 12px;align-items:center;gap:8px;font-size:12px;font-family:'IBM Plex Mono',monospace;box-shadow:0 2px 16px rgba(0,0,0,.6);">
+  <span style="color:#ff9966;font-weight:600;">⊛ Pick inpaint reference</span>
+  <span style="color:var(--dim);">— click image → ⊕ Inpaint Ref</span>
+  <button class="ibtn" onclick="returnToInpaintWork()" style="padding:3px 10px;border-color:#aaffaa;color:#aaffaa;white-space:nowrap;">← Return</button>
+  <button class="ibtn" onclick="cancelInpaintRefPick()" style="padding:3px 8px;">✕</button>
+</div>
+
 <!-- HEADER -->
 <div id="header">
   <div class="brand"><em>G</em>enerative Image Studio</div>
@@ -1722,8 +1736,9 @@ input[type=range].prange::-webkit-slider-thumb {
     <button class="nav-tab" onclick="switchView('video')">🎬 Video</button>
     <button class="nav-tab" onclick="switchView('assets')">📎 Assets</button>
     <button class="nav-tab" onclick="switchView('paint')">✏ Paint</button>
+    <button class="nav-tab" id="inpaintNavTab" onclick="openInpaintFromNav()" style="border-color:var(--border);">⊛ Inpaint</button>
     <button class="nav-tab" onclick="switchView('setup')">⚙ Setup</button>
-  </div>
+      </div>
   <div class="hflex"></div>
   <div class="hctrls">
 
@@ -3744,7 +3759,7 @@ input[type=range].prange::-webkit-slider-thumb {
           <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:16px;">AI Image &amp; Video Production Tool</div>
           <div style="font-size:12px;color:var(--text);font-weight:500;margin-bottom:12px;">Petr Sajner</div>
           <div style="display:flex;flex-direction:column;gap:6px;">
-            <a href="mailto:info.genimagestudio@gmail.com" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);text-decoration:none;display:inline-flex;align-items:center;gap:7px;transition:color .15s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--dim)'">
+            <a href="/cdn-cgi/l/email-protection#ed84838b82c38a888384808c8a889e9998898482ad8a808c8481c38e8280" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);text-decoration:none;display:inline-flex;align-items:center;gap:7px;transition:color .15s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--dim)'">
               <span style="opacity:.5;">✉</span> <span>info.genimagestudio&#64;gmail.com</span>
             </a>
             <a href="https://www.linkedin.com/in/sajner/" target="_blank" rel="noopener"
@@ -3989,7 +4004,8 @@ input[type=range].prange::-webkit-slider-thumb {
           <button class="ibtn" onclick="generateCannyControlNet()" style="border-color:#88aaff;color:#88aaff;">⚡ Canny</button>
           <button id="inpaintCtrlDepthBtn" class="ibtn" onclick="generateDepthControlNet()" style="border-color:#aaffcc;color:#aaffcc;">⬛ Depth</button>
           <span id="inpaintStatus"></span>
-          <button id="inpaintGenerateBtn" class="ibtn primary" onclick="runInpaint()">⊛ Generate</button>
+          <button id="inpaintGenerateBtn" class="ibtn primary" onclick="addToInpaintQueue()">⊛ Queue</button>
+          <button id="inpaintCancelBtn" class="ibtn" onclick="cancelCurrentInpaintJob()" style="display:none;border-color:#e06060;color:#e06060;">✕ Cancel</button>
         </div>
 
         <!-- Downscale warning (shown above columns when mask too large) -->
@@ -4006,11 +4022,20 @@ input[type=range].prange::-webkit-slider-thumb {
           <div id="inpaintParamsCol">
 
             <label class="inpaint-label">Model</label>
-            <select id="inpaintModelSel">
-              <option value="flux_general">FLUX General Inpaint · ~$0.025</option>
+            <select id="inpaintModelSel" onchange="onInpaintModelChange(this.value)">
+              <option value="flux_fill">FLUX Pro Fill · $0.05/MP ⚡</option>
+              <option value="flux_general">FLUX General · ~$0.025 (ControlNet/Ref)</option>
+              <option value="flux_dev">FLUX Dev Inpaint · ~$0.025 ⚡ fast</option>
+              <option value="flux_krea">FLUX Krea · ~$0.035/MP (aesthetic)</option>
             </select>
 
-            <div class="inpaint-sec">
+            <div class="inpaint-sec" style="padding-bottom:4px;">
+              <label class="inpaint-label">Mask blur <span id="inpaintMaskBlurVal" class="inpaint-acval">0 px</span></label>
+              <input type="range" class="inpaint-range" id="inpaintMaskBlur" min="0" max="30" step="1" value="0"
+                oninput="document.getElementById('inpaintMaskBlurVal').textContent=this.value+' px'">
+            </div>
+
+            <div class="inpaint-sec" id="inpaintCtrlSec">
               <label class="inpaint-label">ControlNet</label>
               <div class="inpaint-toggle-row">
                 <button class="inpaint-toggle active" id="inpaintCtrlToggle_none"  onclick="setInpaintCtrlMode('none')">None</button>
@@ -4025,13 +4050,13 @@ input[type=range].prange::-webkit-slider-thumb {
               </div>
             </div>
 
-            <div class="inpaint-sec">
+            <div class="inpaint-sec" id="inpaintRefSec">
               <label class="inpaint-label">Reference image</label>
               <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
                 <label class="ibtn" style="padding:5px 10px;font-size:11px;cursor:pointer;">
                   ↑ Upload<input type="file" accept="image/*" style="display:none;" onchange="handleInpaintRefUpload(this.files[0])">
                 </label>
-                <button class="ibtn" onclick="openInpaintRefPicker()" style="padding:5px 10px;font-size:11px;border-color:#aa88ff;color:#aa88ff;">📷 Library</button>
+                <button class="ibtn" onclick="openGalleryForInpaintRef()" style="padding:5px 10px;font-size:11px;border-color:#aa88ff;color:#aa88ff;">📷 Library</button>
                 <button class="ibtn" onclick="clearInpaintRef()" style="padding:5px 8px;font-size:11px;">✕</button>
               </div>
               <img id="inpaintRefMini" class="inpaint-mini-prev" alt="ref">
@@ -4058,7 +4083,7 @@ input[type=range].prange::-webkit-slider-thumb {
                   <input type="number" class="inpaint-num" id="inpaintGuidance" value="3.5" min="1" max="20" step="0.5">
                 </div>
               </div>
-              <div style="margin-top:8px;">
+              <div id="inpaintStrengthSec" style="margin-top:8px;">
                 <label class="inpaint-label">Strength <span id="inpaintStrengthVal" class="inpaint-acval">0.85</span></label>
                 <input type="range" class="inpaint-range" id="inpaintStrength" min="0.1" max="1" step="0.05" value="0.85"
                   oninput="document.getElementById('inpaintStrengthVal').textContent=parseFloat(this.value).toFixed(2)">
@@ -4067,6 +4092,24 @@ input[type=range].prange::-webkit-slider-thumb {
                 <label class="inpaint-label">Seed (optional)</label>
                 <input type="number" class="inpaint-num" id="inpaintSeed" placeholder="random" style="width:100%;">
               </div>
+            </div>
+
+            <!-- Negative prompt — SDXL/Playground only -->
+            <div class="inpaint-sec" id="inpaintNegPromptSec" style="display:none;">
+              <label class="inpaint-label">Negative prompt</label>
+              <textarea id="inpaintNegPrompt" rows="2" placeholder="What to avoid in the result…" style="width:100%;resize:vertical;"></textarea>
+            </div>
+
+            <!-- Safety tolerance — FLUX Pro Fill only -->
+            <div class="inpaint-sec" id="inpaintSafetySec" style="display:none;">
+              <label class="inpaint-label">Safety tolerance</label>
+              <select id="inpaintSafetyTol" class="inpaint-num" style="width:100%;">
+                <option value="1">1 — Most strict</option>
+                <option value="2" selected>2 — Default</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5 — Most permissive</option>
+              </select>
             </div>
 
           </div><!-- end inpaintParamsCol -->
@@ -4097,6 +4140,13 @@ input[type=range].prange::-webkit-slider-thumb {
             <div class="inpaint-prev-item" id="inpaintRefPreviewWrap" style="display:none;">
               <span class="inpaint-label">Reference</span>
               <img id="inpaintRefThumb" alt="ref">
+            </div>
+            <!-- Inpaint queue — always visible bottom section -->
+            <div id="inpaintQueueArea" style="flex:1;min-height:80px;display:flex;flex-direction:column;overflow:hidden;margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">
+              <div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim2);margin-bottom:4px;flex-shrink:0;">⊛ Inpaint Queue</div>
+              <div id="inpaintQueueList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:1px;min-height:0;">
+                <div style="font-size:10px;color:var(--dim2);padding:4px 0;" id="inpaintQueueEmpty">No jobs yet</div>
+              </div>
             </div>
           </div><!-- end inpaintPreviewCol -->
 
@@ -4294,7 +4344,16 @@ input[type=range].prange::-webkit-slider-thumb {
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
     <div class="modal-body">
-      <div class="modal-img"><img id="modalImg" src="" alt=""></div>
+      <div class="modal-img">
+        <div class="modal-zoom-bar">
+          <span class="modal-zoom-pct" id="modalZoomPct">fit</span>
+          <button class="modal-zoom-btn" onclick="resetModalZoom()" title="Fit to view">⊞ Fit</button>
+          <button class="modal-zoom-btn" onclick="setModal100pct()" title="100% — actual pixels">100%</button>
+        </div>
+        <div id="modalImgViewport">
+          <img id="modalImg" src="" alt="">
+        </div>
+      </div>
       <div class="modal-info">
         <div class="info-row"><div class="ik">Model</div><div class="iv" id="mModel">—</div></div>
         <div class="info-row"><div class="ik">Date</div><div class="iv" id="mDate">—</div></div>
@@ -4341,7 +4400,7 @@ input[type=range].prange::-webkit-slider-thumb {
 <!-- TOAST -->
 <div id="toast"></div>
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // __GIS_JS__
 </script>
 <div id="rubberBand"></div>
@@ -4428,6 +4487,4 @@ input[type=range].prange::-webkit-slider-thumb {
     </div>
     <button onclick="toggleVideoQueueOverlay()" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:18px;padding:2px 6px;">×</button>
   </div>
-  <div id="videoQueueOverlayList" style="flex:1;overflow-y:auto;"></div>
-  <div style="padding:10px 14px;border-top:1px solid var(--border);flex-shrink:0;">
-    <button class="ibtn" onclick="videoCancelAllPending()" s
+  <div id="videoQueueOverlayList" style="flex:1;overflow-
