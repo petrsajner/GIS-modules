@@ -1,195 +1,116 @@
 # GIS — STAV PROJEKTU
-*Aktualizováno konec session · 7. 4. 2026*
+*Aktualizováno konec session · 8. 4. 2026*
 
 ## Aktuální verze
 | Soubor | Verze | Datum |
 |--------|-------|-------|
-| Kód EN | gis_v184en.html | 7. 4. 2026 |
-| Worker | gis-proxy v2026-09 | 7. 4. 2026 |
+| Kód EN | gis_v186en.html | 8. 4. 2026 |
+| Worker | gis-proxy v2026-10 | 8. 4. 2026 |
 
-**Příští verze:** v185en
+**Příští verze:** v187en
 
-> Build: `cd /home/claude && node build.js 185en`
+> Build: `cd /home/claude && node build.js 187en`
 
 ---
 
 ## Session start — POVINNÝ první krok
 ```bash
 echo "=== VERSION CHECK ===" && \
-echo "model-select.js — switchView flex (NE block!):" && grep -c "'flex'" /mnt/project/model-select.js && \
-echo "model-select.js — rewritePromptForModel:" && grep -c "rewritePromptForModel" /mnt/project/model-select.js && \
-echo "refs.js — promptModelToUserLabels:" && grep -c "promptModelToUserLabels" /mnt/project/refs.js && \
-echo "refs.js — OR_DESCRIBE_MODEL claude:" && grep -c "claude-sonnet" /mnt/project/refs.js && \
-echo "video.js — rewriteVideoPromptForModel:" && grep -c "rewriteVideoPromptForModel" /mnt/project/video.js && \
-echo "video.js — _prevVideoModelKey:" && grep -c "_prevVideoModelKey" /mnt/project/video.js && \
-echo "video.js — friendlyVideoError:" && grep -c "friendlyVideoError" /mnt/project/video.js && \
-echo "output-placeholder.js — rerunJob:" && grep -c "function rerunJob" /mnt/project/output-placeholder.js && \
-echo "ai-prompt.js — claude-sonnet:" && grep -c "claude-sonnet" /mnt/project/ai-prompt.js && \
-echo "gemini.js — streamAccepted:" && grep -c "streamAccepted" /mnt/project/gemini.js && \
-echo "models.js — nb1:" && grep -c "nb1:" /mnt/project/models.js
+echo "paint.js — _annotateMaskCanvas:" && grep -c "_annotateMaskCanvas" /mnt/project/paint.js && \
+echo "paint.js — stale guard:" && grep -c "paintEngines\[prefix\] !== state" /mnt/project/paint.js && \
+echo "paint.js — cancelInpaint:" && grep -c "cancelInpaint" /mnt/project/paint.js && \
+echo "paint.js — _inpaintAbort:" && grep -c "_inpaintAbort" /mnt/project/paint.js && \
+echo "paint.js — openInpaintRefPicker:" && grep -c "openInpaintRefPicker" /mnt/project/paint.js && \
+echo "fal.js — _falQueueViaProxy:" && grep -c "_falQueueViaProxy" /mnt/project/fal.js && \
+echo "fal.js — callFluxFill:" && grep -c "callFluxFill" /mnt/project/fal.js && \
+echo "template.html — inpaintCanvasPreviewCol:" && grep -c "inpaintCanvasPreviewCol" /mnt/project/template.html && \
+echo "template.html — inpaintCancelBtn:" && grep -c "inpaintCancelBtn" /mnt/project/template.html && \
+echo "model-select.js — switchView flex:" && grep -c "'flex'" /mnt/project/model-select.js && \
+echo "models.js — nb1:" && grep -c "nb1:" /mnt/project/models.js && \
+echo "gemini.js — streamAccepted:" && grep -c "streamAccepted" /mnt/project/gemini.js
 ```
-Vše musí vrátit ≥ 1. Pokud `0` → zastav, informuj uživatele, požádej o re-upload modulu.
-
-**Kritické — switchView musí mít 'flex' NE 'block':**
-```bash
-grep "setupView.*display" /mnt/project/model-select.js
-# Musí obsahovat: 'flex' — NIKDY 'block'
-```
+Vše musí vrátit ≥ 1.
 
 ---
 
-## Kde jsme přestali — session ukončena čistě
+## Kde jsme přestali
 
-v184en dokončen. Worker **NENÍ deployován** — obsahuje změnu v `handlers/luma.js` (Luma keyframe upload přes R2 místo deprecated /file_uploads). **Nutno deployovat před testem Luma I2V!**
+v186en + Worker v2026-10 nasazen. Session ukončena čistě.
 
-**Stav modulů (po session 7. 4. 2026):**
-- `ai-prompt.js` — Claude Sonnet 4.6 (OR) jako primární, Gemini 3.1 Pro jako fallback; reset po Use as prompt
-- `refs.js` — Claude Sonnet 4.6 (OR) jako primární pro describe; live @mention rewriting (promptModelToUserLabels)
-- `model-select.js` — rewritePromptForModel hook na přepnutí modelu
-- `output-placeholder.js` — plný error card redesign (banner, chips, refs, Reuse + Rerun)
-- `video.js` — video error karty; live video @mention rewriting; promptOptional pro vhodné modely; _prevVideoModelKey tracking
-- `gemini.js` — streamAccepted flag + 10min stream timeout; odstraněn 20s AbortController
-- `generate.js` — withRetry respektuje streamAccepted; _updatePendingCardsStatus; oprava toast typo
-- `models.js` — NB1 (gemini-2.5-flash-image) přidán jako fallback model
-- `spending.js` — NB1 pricing
-- `template.html` — error card CSS; CF email fix; NB1 v dropdownu
-- `gemini.js` — opraveny Luma keyframe upload (R2 místo /file_uploads)
+### Stav inpaint funkce (k 8. 4. 2026):
 
-**Worker deploy files (C:\Users\Petr\Documents\gis-proxy):**
-- `handlers/luma.js` — ⚠ NOVÝ: keyframe upload přes R2 (uploadBase64ToLuma → R2 místo Luma CDN)
-- `src/index.js` — handleLumaVideoSubmit nyní přijímá `env` parametr
+**✅ FUNGUJE:**
+- Paint modal (3-sloupcový layout): levý panel parametrů, střední canvas preview, pravý panel inputů
+- Bucket fill (flood fill) — správně vyplňuje masku, ne původní obrázek
+- Race condition fix — stale guard v engine event handlerech, `paintEngines['a'] = null` před načítáním
+- Maska — offscreen `_annotateMaskCanvas`, správně oddělená od display canvas
+- Crop logika — bounding box + margin + downscale warning
+- Inpaint panel UI — Back/Canny/Depth/Generate tlačítka, Cancel button (AbortController)
+- Depth mapa — ✅ funguje přes Worker proxy (`/depth` → `fal.run/fal-ai/imageutils/depth`)
+- Gallery picker pro reference image — `dbGetAll('images')` + thumbnails
+- Reference image — upload + library + resize na max 2K
+
+**❌ NEFUNGUJE — PRIORITA PRO v187en:**
+- **FLUX Pro Fill** (`flux-pro/v1/fill`) — visí na "Submitting", žádný výsledek
+- **FLUX General Inpaint** (`flux-general/inpainting`) — Worker /fal/submit vrací 502
+- **Root cause**: `queue.fal.run/fal-ai/flux-pro/v1/fill` i `queue.fal.run/fal-ai/flux-general/inpainting` vracejí nginx 502 bez auth — endpointy pravděpodobně neexistují na queue.fal.run, nebo vyžadují jiný base URL
+- **Potřeba zjistit**: správný endpoint pro fal.ai inpaint modely (možná `fal.run` sync, nebo jiná queue URL)
+
+### Worker v2026-10 stav:
+- `src/handlers/depth.js` — ✅ nasazen a funkční (fal-ai/imageutils/depth)
+- `src/handlers/fal-inpaint.js` — nasazen, ale 502 z upstream queue.fal.run
+- `src/index.js` — aktualizován s `/depth` a `/fal/submit|status|result` routes
 
 ---
 
-## Opravy v184en — souhrn (7. 4. 2026)
+## Co bylo uděláno v v186en (8. 4. 2026)
 
-### AI Prompt Tool — reset po Use as prompt
-- `_resetAiModal()` — vymaže všechny output textareas, input textareas, chat history DOM
-- `openAiPromptModal()` — při fresh open (aiBuffer prázdný) vyčistí stale output aktuálního tabu
+### Inpaint systém — kompletní implementace (v185→v186)
+- Two-layer architecture: `_annotateMaskCanvas` (offscreen) + `annotateCanvas` (display)
+- Bucket tool (flood fill) — mask-based pro annotate mode, color-based pro paint tab
+- Stale guard — `paintEngines[prefix] !== state` ve všech event handlerech
+- `_annotateBaseB64` — čistý originál bez tahů, crop pro API vždy z tohoto
+- 3-sloupcový inpaint panel (levý/střed/pravý)
+- AbortController + Cancel button + auto-cancel při Close
+- Gallery ref picker (`dbGetAll('images')`)
+- `_resizeToMaxPx` — reference na max 2K
+- ControlNet: Canny (client-side Sobel) + Depth (proxy)
+- `_falQueueViaProxy` — inpaint modely přes Worker proxy (CORS fix)
 
-### CF Email obfuscation fix
-- 3 místa v template.html: CF-encoded `[email protected]` → `info.genimagestudio@gmail.com`
-- Odstraněn CF decode script tag z template
-
-### WAN 2.7 Video Edit — response_url fix
-- `callWan27eVideo` nyní používá `submitted.response_url` jako fallback (stejný pattern jako T2V)
-
-### WAN 2.7 R2V — správné field names
-- `image_urls` → `reference_image_urls`, `video_urls` → `reference_video_urls`
-
-### AI Chat system prompts — intent-based editing
-- Chat pro image/video: "understand INTENT, integrate into prose" místo "only add what's asked"
-- `thinkingBudget: -1` (auto thinking) pro chat multi-turn
-- Describe: vyšší temperature (0.7), výraznější instrukce (evokativní, žádná klišé)
-
-### NB1 — Nano Banana gen 1 přidán
-- `nb1: { id: 'gemini-2.5-flash-image', name: 'NB', ... }` — fallback při výpadku NB2
-- Max rozlišení 1K, bez thinking mode, stejná cena $0.039
-- Deprecace 2. října 2026
-
-### Gemini retry + timeout opravy
-- Odstraněn 20s `AbortController` (způsoboval falešné timeouty)
-- `streamAccepted = true` po úspěšném HTTP response → `withRetry` neretrykuje aktivní generování
-- 10min stream deadline v `callGeminiStream` loop
-- `_updatePendingCardsStatus()` zobrazí retry stav přímo na placeholder kartě
-
-### Error karty — kompletní redesign (image + video)
-- `showErrorPlaceholder()`: červený banner, model label, param chips, full prompt, ref thumbnails
-- **▶ Rerun** — okamžitě znovu spustí job se stejnými parametry (nové ID)
-- **↺ Reuse** — načte parametry do formuláře pro review
-- `friendlyVideoError()` — video-specifická vrstva error překladů
-- `videoJobError()` — přepíše video placeholder na stejný error card styl
-
-### Live @mention rewriting — image modely
-- `promptModelToUserLabels()` — reverzní mapping: `@Image1`→`@Ref_031`, `Figure 1`→`@Ref_031`
-- `rewritePromptForModel(prevType, newType)` — přepisuje textarea při přepnutí modelu
-- `renderRefThumbs()` — hook pro přečíslování při přidání/odebrání refu
-- Mention dropdown ukazuje model-specific jméno jako primární (`@Image1`) + user label jako subtitle
-
-### Live @mention rewriting — video modely
-- `videoPromptModelToUserLabels()` + `videoPromptUserLabelsToModel()` — pro multi + wan_r2v refMode
-- `_prevVideoModelKey` tracking — správné zachování prevM před přepnutím
-- `_videoModelSwitching` guard — zabraňuje dvojitému rewrite z renderVideoRefPanel
-- `onVideoModelChange` + `onKlingVersionChange` — správně volají rewrite PO přepnutí
-
-### Video prompt bez textu
-- `promptOptional = veoFramesMode || (model.type !== 'luma_video' && model.type !== 'kling_video' && refMode ∈ {single_end, single, keyframe, wan_r2v, multi})`
-- Kling I2V payload: `prompt` pole vynecháno pokud prázdné (API odmítá empty string)
-
-### Luma keyframe upload — R2 místo deprecated endpoint
-- `uploadBase64ToLuma()` v `handlers/luma.js` přepsána — ukládá do R2 bucketu místo zrušeného `/dream-machine/v1/file_uploads` (404)
-- `handleLumaVideoSubmit(request, env)` — přidán `env` parametr pro R2 přístup
-- Nově používá `luma_kf_{ts}_{rand}.{ext}` klíče v R2
-
-### AI Prompt & Describe — Claude Sonnet 4.6 primární
-- **OR klíč vyplněn** → `anthropic/claude-sonnet-4-6` (text + vision přes OpenRouter)
-- **OR klíč chybí** → `gemini-3.1-pro-preview` (fallback — výrazně lepší než Flash)
-- Qwen 2.5 odstraněn jako fallback model
+### Worker v2026-09→v2026-10
+- Přidán `/depth` route → `fal-ai/imageutils/depth` (sync, CORS proxy)
+- Přidán `src/handlers/depth.js` (nový soubor)
+- `src/handlers/fal-inpaint.js` (přejmenováno z fal.js aby nedošlo ke konfliktu)
+- Interface: `/fal/submit` body `{endpoint, payload}`, `/fal/status` body `{status_url}`, `/fal/result` body `{response_url}`
 
 ---
 
 ## Aktivní TODO (v pořadí priority)
+- [ ] **#0 KRITICKÉ** — Opravit inpaint generate: zjistit správné fal.ai endpointy pro flux-pro/v1/fill a flux-general/inpainting (queue.fal.run vrací 502)
 - [ ] #1 Style Library "My Presets"
-- [ ] #2 FLUX Pro Fill — inpainting (`fal-ai/flux-pro/v1/fill`)
+- [ ] #3 Přidat více inpaint modelů po opravě základu
 - [ ] #4 Clarity 8×/16×
 - [ ] #5 Claid.ai
 - [ ] #6 WAN audio (DashScope)
 - [ ] #7 Vidu Q3 Turbo
-- [ ] #9 Seedance 2.0 (přes MuAPI — viz RESEARCH_MUAPI.md)
+- [ ] #9 Seedance 2.0
 - [ ] #10 Ideogram V3
 - [ ] #11 Recraft V4
 - [ ] #12 GPT Image 1.5
 - [ ] #13 Hailuo 2.3
-- [ ] WAN 2.7 R2V — ověřit endpoint, otestovat
-- [ ] MuAPI klíč do Setup — pro Seedance 2.0 a další modely
+- [ ] WAN 2.7 R2V — ověřit endpoint
+- [ ] MuAPI klíč do Setup
 
 ---
 
-## FLUX Pro Fill — implementační poznámky (research 7. 4. 2026)
-
-**Endpoint:** `fal-ai/flux-pro/v1/fill` · **Cena:** $0.05/MP (1024×1024 = $0.05)
-
-**CORS/proxy:** Nulové proxy změny — jde přes existující `/fal/submit` + `/fal/status` + `/fal/result`. Stejný fal.ai klíč.
-
-**Vstupy:**
-- `image_url` — zdrojový obrázek (data URI nebo URL)
-- `mask_url` — bílá = inpaint area, černá = zachovat (data URI funguje)
-- `prompt` — co vygenerovat do masky
-- `num_inference_steps` (def 28), `seed`, `num_images`
-
-**Plánovaná architektura:**
-
-**1. Vstup — volba rozlišení**
-- Tlačítko ✦ Fill na output kartě → dialog: "Plné rozlišení (Xpx × Ypx) / Zmenšit"
-- Při volbě zmenšení: nabídnout předvolby (50%, 25%, nebo px limit)
-- **Pokud uživatel zvolí zmenšenou kopii → uložit ji jako nový asset do knihovny** (to je nový originál, se kterým se pracuje dál)
-- Otevřít Paint tool s tímto obrázkem jako podkladem
-
-**2. Kreslení masky v Paint**
-- Přidat flood fill — uživatel nakreslí obrys tvaru, kliknutím vyplní oblast bílou barvou
-- Maska = bílá oblast na černém pozadí (stejný formát jako anotace)
-- Uložit masku jako asset (stejný systém jako anotace)
-
-**3. Rámeček kolem masky**
-- Po dokončení masky: z bílých pixelů vypočítat bounding box (min/max X, Y)
-- Kolem středu bbox vykreslit overlay rámeček přesně MODEL_MAX × MODEL_MAX px (FLUX Fill = 1024×1024)
-- Pokud vylézá za kraj → posunout ke kraji; umožnit ruční drag pro korekci pozice
-- Uživatel potvrdí rámeček → pokračovat
-
-**4. Ořez obrázku + masky**
-- `canvas.getImageData(cropX, cropY, 1024, 1024)` → base64 pro image i mask
-- Obojí jako data URI → payload do FLUX Fill
-
-**5. Generování**
-- Standardní fal.ai queue flow (submit → poll → result) přes existující proxy
-
-**6. Kompozit zpět**
-- Inpaintovaný výřez (1024×1024) vložit přes originál na přesné souřadnice: `ctx.drawImage(result, cropX, cropY)`
-- **Žádné zvětšování** — výřez sedí pixel-perfect na svém místě v obrázku
-- Uložit výsledný složený obrázek jako nový asset do IndexedDB
-- Pokud uživatel potřebuje celý obrázek ve větším rozlišení → použije standardní upscale
-
-**Poznámka k scale:** Pokud uživatel pracoval na zmenšené kopii (která je jeho novým originálem), souřadnice cropX/cropY jsou v rozlišení zmenšeného obrázku — žádný přepočet scale není potřeba. Vše je konzistentní.
+## INPAINT — RESEARCH potřeba před v187en
+```
+Otázka: Který URL funguje pro fal-ai/flux-pro/v1/fill a fal-ai/flux-general/inpainting?
+Zjistit:
+1. Zkusit fal.run (sync) místo queue.fal.run
+2. Zkusit s platným API klíčem z Petra
+3. Zkontrolovat fal.ai playground URL pro tyto modely
+```
 
 ---
 
@@ -199,4 +120,15 @@ v184en dokončen. Worker **NENÍ deployován** — obsahuje změnu v `handlers/l
 models → styles → setup → spending → model-select → assets → refs →
 generate → fal → output-placeholder → proxy → gemini →
 output-render → db → gallery → toast → paint → ai-prompt → video
+```
+
+### Worker struktura (gis-proxy)
+```
+src/
+  index.js              — main entry (v2026-10)
+  handlers/
+    xai.js luma.js magnific.js topaz.js topaz-image.js
+    replicate-wan27.js replicate-wan27v.js replicate-wan27e.js
+    fal-inpaint.js      — /fal/submit|status|result (CORS proxy pro inpaint)
+    depth.js            — /depth (fal-ai/imageutils/depth)
 ```

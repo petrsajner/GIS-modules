@@ -23,6 +23,9 @@ const SPEND_PRICES = {
 
   // ── fal.ai — image (per image) ──────────────────────
   'fal-ai/flux-2-pro':              0.050,
+  'fal-ai/flux-pro/v1/fill':        0.050,   // FLUX Pro Fill inpainting $0.05/MP
+  'fal-ai/flux-general/inpainting':   0.025,   // FLUX General Inpaint ~$0.025/img
+  'fal-ai/depth-anything/v2':         0.003,   // Depth map generation
   'fal-ai/flux-2-flex':             0.040,
   'fal-ai/flux-2-max':              0.060,
   'fal-ai/flux-2':                  0.025,   // FLUX.2 Dev

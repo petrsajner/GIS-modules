@@ -39,6 +39,7 @@ window.onload = () => {
   const proxyInput = document.getElementById('setupProxyUrl');
   if (proxyInput) { proxyInput.value = savedProxy; updateSetupDot('setupProxyDot', savedProxy.length > 10); }
   initSpendingUI();
+  _loadInpaintSettings();
   document.addEventListener('click', e => {
     if (!document.getElementById('ctxMenu').contains(e.target)) closeCtxMenu();
   });
@@ -265,3 +266,19 @@ function updateCharCount() {
   document.getElementById('charCount').textContent = n + ' ch.';
 }
 
+
+// ── Inpaint settings ──
+function onInpaintResolutionChange(val) {
+  localStorage.setItem('gis_inpaint_resolution', val);
+}
+function onInpaintMarginChange(val) {
+  localStorage.setItem('gis_inpaint_margin', val);
+}
+function _loadInpaintSettings() {
+  const res = localStorage.getItem('gis_inpaint_resolution') || '1536';
+  const mar = localStorage.getItem('gis_inpaint_margin') || '200';
+  const resEl = document.getElementById('inpaintResolution');
+  const marEl = document.getElementById('inpaintMargin');
+  if (resEl) resEl.value = res;
+  if (marEl) marEl.value = mar;
+}

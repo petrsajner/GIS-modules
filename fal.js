@@ -13,15 +13,17 @@ const FAL_QUEUE_BASE = 'https://queue.fal.run';
 // ── Shared queue helper ───────────────────────────────────────────────────────
 // Submits job to fal.ai queue, polls until complete, returns result data object.
 // endpointPath: model path WITHOUT base URL, e.g. "fal-ai/flux-2-pro/edit"
-async function _falQueue(falKey, endpointPath, payload, onStatus) {
+async function _falQueue(falKey, endpointPath, payload, onStatus, signal) {
   const queueUrl = `${FAL_QUEUE_BASE}/${endpointPath}`;
 
   // 1. Submit job
   onStatus?.('⟳ Submitting…');
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
   const submitRes = await fetch(queueUrl, {
     method:  'POST',
     headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
     body:    JSON.stringify(payload),
+    signal,
   });
   if (!submitRes.ok) {
     const errData = await submitRes.json().catch(() => ({}));
@@ -43,10 +45,12 @@ async function _falQueue(falKey, endpointPath, payload, onStatus) {
     await new Promise(r => setTimeout(r, POLL_MS));
     const elapsed = ((i + 1) * POLL_MS / 1000).toFixed(0);
 
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
     let statusData;
     try {
       const statusRes = await fetch(statusUrl, {
         headers: { 'Authorization': `Key ${falKey}` },
+        signal,
       });
       if (!statusRes.ok) continue;
       statusData = await statusRes.json();
@@ -63,12 +67,77 @@ async function _falQueue(falKey, endpointPath, payload, onStatus) {
       onStatus?.('⟳ Downloading…');
       const resultRes = await fetch(resultUrl, {
         headers: { 'Authorization': `Key ${falKey}` },
+        signal,
       });
       if (!resultRes.ok) {
         const errBody = await resultRes.text().catch(() => '');
         throw new Error(`fal.ai: result fetch failed (${resultRes.status}): ${errBody.slice(0, 200)}`);
       }
       return await resultRes.json();
+    }
+  }
+  throw new Error('fal.ai: timeout — generation did not complete within 10 minutes.');
+}
+
+// ── fal.ai queue via GIS proxy (CORS bypass for flux-pro and other restricted models) ──
+// Uses Worker routes: /fal/submit → /fal/status → /fal/result
+async function _falQueueViaProxy(falKey, endpointPath, payload, onStatus, signal) {
+  const proxyBase = (localStorage.getItem('gis_proxy_url') || 'https://gis-proxy.petr-gis.workers.dev').trim().replace(/\/$/, '');
+  const headers   = { 'X-Fal-Key': falKey, 'Content-Type': 'application/json' };
+
+  // 1. Submit
+  onStatus?.('⟳ Submitting…');
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const submitRes = await fetch(`${proxyBase}/fal/submit`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ endpoint: endpointPath, payload }),
+    signal,
+  });
+  if (!submitRes.ok) {
+    const errData = await submitRes.json().catch(() => ({}));
+    const detail  = errData.message || errData.detail?.[0]?.msg || JSON.stringify(errData).slice(0, 200);
+    throw new Error(`fal.ai proxy: submit failed (${submitRes.status}): ${detail}`);
+  }
+  const submitted = await submitRes.json();
+  const requestId  = submitted.request_id;
+  const statusUrl  = submitted.status_url  || `https://queue.fal.run/${endpointPath}/requests/${requestId}/status`;
+  const responseUrl = submitted.response_url || `https://queue.fal.run/${endpointPath}/requests/${requestId}`;
+  if (!requestId) throw new Error('fal.ai proxy: no request_id in queue response.');
+
+  // 2. Poll status via proxy
+  const MAX_POLLS = 200, POLL_MS = 3000;
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const elapsed = ((i + 1) * POLL_MS / 1000).toFixed(0);
+
+    let statusData;
+    try {
+      const sr = await fetch(`${proxyBase}/fal/status`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ status_url: statusUrl }),
+        signal,
+      });
+      if (!sr.ok) continue;
+      statusData = await sr.json();
+    } catch (_) { continue; }
+
+    const status = statusData.status;
+    if (status === 'IN_QUEUE')    { onStatus?.(`⟳ In queue… (${elapsed}s)`);    continue; }
+    if (status === 'IN_PROGRESS') { onStatus?.(`⟳ Generating… (${elapsed}s)`);  continue; }
+    if (status === 'FAILED') {
+      const detail = statusData.error || statusData.detail || 'unknown error';
+      throw new Error(`fal.ai: generation failed — ${detail}`);
+    }
+    if (status === 'COMPLETED') {
+      onStatus?.('⟳ Downloading…');
+      const rr = await fetch(`${proxyBase}/fal/result`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ response_url: responseUrl }),
+        signal,
+      });
+      if (!rr.ok) throw new Error(`fal.ai proxy: result fetch failed (${rr.status})`);
+      return await rr.json();
     }
   }
   throw new Error('fal.ai: timeout — generation did not complete within 10 minutes.');
@@ -474,4 +543,98 @@ async function renderOutput(result, prompt, galId) {
   } else {
     await renderImagenOutput(area, result, prompt, galId);
   }
+}
+
+// ── FLUX Pro Fill — inpainting (used by paint.js runInpaint) ──
+async function callFluxFill(apiKey, imageB64, maskB64, prompt, width, height, onStatus, signal) {
+  const payload = {
+    image_url: `data:image/jpeg;base64,${imageB64}`,
+    mask_url:  `data:image/png;base64,${maskB64}`,
+    prompt:    prompt || '',
+    num_inference_steps: 28,
+  };
+
+  const data = await _falQueueViaProxy(apiKey, 'fal-ai/flux-pro/v1/fill', payload, onStatus, signal);
+
+  const imageObj = data.images?.[0];
+  if (!imageObj?.url) throw new Error('FLUX Fill: no image in result.');
+  const actualW = imageObj.width  || width;
+  const actualH = imageObj.height || height;
+
+  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
+  return { base64, mimeType, width: actualW, height: actualH };
+}
+
+// ── FLUX General Inpainting (fal-ai/flux-general/inpainting) ──
+async function callFluxGeneralInpaint(apiKey, params, onStatus, signal) {
+  const {
+    imageB64, maskB64, prompt, width, height,
+    steps = 28, guidance = 3.5, strength = 0.85, seed = null,
+    controlNetB64 = null, controlNetType = null, ctrlScale = 0.5,
+    refB64 = null, refStrength = 0.65,
+  } = params;
+
+  const payload = {
+    image_url:          `data:image/jpeg;base64,${imageB64}`,
+    mask_url:           `data:image/png;base64,${maskB64}`,
+    prompt:             prompt || '',
+    image_size:         { width, height },
+    num_inference_steps: steps,
+    guidance_scale:     guidance,
+    strength,
+    num_images:         1,
+  };
+  if (seed !== null)   payload.seed = seed;
+
+  // ControlNet
+  if (controlNetB64 && controlNetType) {
+    const cnPath = controlNetType === 'depth'
+      ? 'jasperai/Flux.1-dev-Controlnet-Depth'
+      : 'InstantX/FLUX.1-dev-Controlnet-Canny';
+    payload.controlnets = [{
+      path:               cnPath,
+      control_image_url:  `data:image/png;base64,${controlNetB64}`,
+      conditioning_scale: ctrlScale,
+      start_percentage:   0,
+      end_percentage:     1,
+    }];
+  }
+
+  // Reference image
+  if (refB64) {
+    payload.reference_image_url = `data:image/jpeg;base64,${refB64}`;
+    payload.reference_strength  = refStrength;
+  }
+
+  const data = await _falQueueViaProxy(apiKey, 'fal-ai/flux-general/inpainting', payload, onStatus, signal);
+
+  const imageObj = data.images?.[0];
+  if (!imageObj?.url) throw new Error('FLUX Inpaint: no image in result.');
+  const actualW = imageObj.width  || width;
+  const actualH = imageObj.height || height;
+  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
+  return { base64, mimeType, width: actualW, height: actualH };
+}
+
+// ── Depth Anything v2 — for ControlNet depth maps ──
+async function callDepthAnything(apiKey, imageB64, onStatus, signal) {
+  // depth-anything is sync → routed through GIS proxy (CORS bypass)
+  if (onStatus) onStatus('⏳ Generating depth map…');
+  const proxyBase = (localStorage.getItem('gis_proxy_url') || 'https://gis-proxy.petr-gis.workers.dev').trim().replace(/\/$/, '');
+  const res = await fetch(`${proxyBase}/depth`, {
+    method: 'POST',
+    headers: { 'X-Fal-Key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_url: `data:image/jpeg;base64,${imageB64}` }),
+    signal,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Depth: ${res.status} ${txt.slice(0,120)}`);
+  }
+  const data = await res.json();
+  const depthUrl = data.image?.url || data.depth_map_url || data.images?.[0]?.url;
+  if (!depthUrl) throw new Error('DepthAnything: no depth URL in result.');
+  if (onStatus) onStatus('⬇ Downloading depth map…');
+  const { base64, mimeType } = await _downloadFalImage(depthUrl, onStatus, 'depth');
+  return { base64, mimeType };
 }

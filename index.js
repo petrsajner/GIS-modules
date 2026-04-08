@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════
 // GIS Proxy — Cloudflare Worker
-// Verze: 2026-09 (R2 bucket: Magnific video + generický /r2/upload pro Kling V2V a další)
+// Verze: 2026-10 (R2 bucket: Magnific video + generický /r2/upload pro Kling V2V a další)
 //
 // Slouží jako CORS proxy pro providery, kteří blokují přímé
 // browser requesty z file:// origin.
@@ -58,7 +58,7 @@ import { handleMagnific, handleMagnificStatus,
          handleR2Upload,
          handleR2Serve }                       from './handlers/magnific.js';
 import { handleFalSubmit, handleFalStatus,
-         handleFalResult }                        from './handlers/fal.js';
+         handleFalResult }                        from './handlers/fal-inpaint.js';
 import { handleTopazVideoSubmit,
          handleTopazVideoInit,
          handleTopazVideoComplete,
@@ -76,6 +76,7 @@ import { handleReplicateWan27eSubmit,
          handleReplicateFilesUpload,
          handleReplicateVideoServe,
          handleReplicateUploadVideo }             from './handlers/replicate-wan27e.js';
+import { handleDepth }                            from './handlers/depth.js';
 
 // ── CORS hlavičky — povoleno pro file:// a všechny origins ──
 const CORS_HEADERS = {
@@ -106,7 +107,7 @@ export default {
     if (path === '/health' || path === '/') {
       return corsResponse(JSON.stringify({
         status: 'ok',
-        version: '2026-08',
+        version: '2026-10',
         routes: [
           'POST /xai/generate',
           'POST /luma/generate',
@@ -142,6 +143,7 @@ export default {
           'POST /replicate/wan27v/status',
           'POST /replicate/wan27e/submit',
           'POST /replicate/wan27e/status',
+          'POST /depth',
         ],
       }));
     }
@@ -179,7 +181,7 @@ export default {
       if (path === '/luma/status')              return withCors(await handleLumaStatus(request));
 
       // ── Luma video (Ray3 / Ray3.14) ───────────────────
-      if (path === '/luma/video/submit')        return withCors(await handleLumaVideoSubmit(request, env));
+      if (path === '/luma/video/submit')        return withCors(await handleLumaVideoSubmit(request));
       if (path === '/luma/video/status')        return withCors(await handleLumaVideoStatus(request));
 
       // ── Magnific / Freepik upscale ────────────────────
@@ -222,6 +224,9 @@ export default {
       if (path === '/replicate/wan27e/status')   return withCors(await handleReplicateWan27eStatus(request));
       if (path === '/replicate/files/upload')    return withCors(await handleReplicateFilesUpload(request));
       if (path === '/replicate/upload/video')    return withCors(await handleReplicateUploadVideo(request));
+
+      // ── Depth estimation (sync fal.run proxy) ─────────
+      if (path === '/depth')                      return withCors(await handleDepth(request));
 
     } catch (err) {
       console.error(`[GIS Proxy] Uncaught error on ${path}:`, err);
