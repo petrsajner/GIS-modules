@@ -110,25 +110,27 @@ function openOutputLightbox(src) {
 function setupLikeBtn(btn, galId) {
   if (!btn) return;
   if (!galId) { btn.style.display = 'none'; return; }
-  const card = btn.closest('.img-card');
   // Read initial state from metaCache (in-memory, no DB call)
-  const _initLike = () => {
-    const meta = (typeof metaCache !== 'undefined' && metaCache)
-      ? metaCache.find(m => m.id === galId)
-      : null;
-    return !!(meta?.favorite);
-  };
-  const _apply = (liked) => {
-    btn.textContent = liked ? '♥ Liked' : '♡ Like';
-    btn.classList.toggle('liked', liked);
-    if (card) card.classList.toggle('is-liked', liked);
-  };
-  // Set initial state once metaCache is available (saveToGallery runs first)
-  _apply(_initLike());
-  btn.onclick = async () => {
-    const newFav = await toggleFavoriteItem(galId);
-    _apply(newFav);
-  };
+  const meta = (typeof metaCache !== 'undefined' && metaCache)
+    ? metaCache.find(m => m.id === galId) : null;
+  const initFav = !!(meta?.favorite);
+  btn.textContent = initFav ? '♥ Liked' : '♡ Like';
+  btn.classList.toggle('liked', initFav);
+  const card = btn.closest('.img-card');
+  if (card) card.classList.toggle('is-liked', initFav);
+  // Toggle — toggleFavoriteItem handles ALL UI sync (gallery card, output card, modal)
+  btn.onclick = () => toggleFavoriteItem(galId);
+}
+
+// ── Dispatch output rendering based on result type ─────
+async function renderOutput(result, prompt, galId) {
+  const area = document.getElementById('outputArea');
+  document.getElementById('emptyState').style.display = 'none';
+  if (result.type === 'gemini') {
+    await renderGeminiOutput(area, result, prompt, galId);
+  } else {
+    await renderImagenOutput(area, result, prompt, galId);
+  }
 }
 
 async function renderGeminiOutput(area, result, prompt, galId) {
@@ -729,7 +731,7 @@ async function upscaleWithFactor(b64data, currentDims) {
   const falKey = document.getElementById('fluxApiKey')?.value?.trim() || '';
   const freepikKey = (localStorage.getItem('gis_freepik_apikey') || '').trim();
   const topazKey   = (localStorage.getItem('gis_topaz_apikey') || '').trim();
-  const proxyUrl = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
+  const proxyUrl = getProxyUrl();
 
   if (result.mode === 'magnific') {
     if (!freepikKey) { toast('Freepik API key missing — enter it in Setup tab', 'err'); return; }
@@ -1004,7 +1006,7 @@ async function runMagnificUpscaleJob(job, placeholderEl = null) {
 
   // Step 2: poll /magnific/status until done (GIS polls, Worker just checks once per call)
   const POLL_INTERVAL = 4000;
-  const POLL_TIMEOUT  = 5 * 60 * 1000; // 5 minutes
+  const POLL_TIMEOUT  = 10 * 60 * 1000; // 10 minutes
   const deadline      = Date.now() + POLL_TIMEOUT;
   let imgData = null;
 
@@ -1166,7 +1168,7 @@ async function runMagnificPrecisionJob(job, placeholderEl = null) {
 
   // Step 2: poll
   const POLL_INTERVAL = 4000;
-  const POLL_TIMEOUT  = 5 * 60 * 1000;
+  const POLL_TIMEOUT  = 10 * 60 * 1000; // 10 minutes
   const deadline      = Date.now() + POLL_TIMEOUT;
   let imgData = null;
 
@@ -1441,7 +1443,7 @@ function showErr(msg) {
 // ═══════════════════════════════════════════════════════
 async function openEditOverlay(b64data, currentDims, sourceGalId) {
   const freepikKey = (localStorage.getItem('gis_freepik_apikey') || '').trim();
-  const proxyUrl   = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
+  const proxyUrl   = getProxyUrl();
   if (!freepikKey) { toast('Freepik API key missing — enter it in Setup tab', 'err'); return; }
   if (!proxyUrl)   { toast('Proxy URL missing — enter it in Setup tab', 'err'); return; }
 

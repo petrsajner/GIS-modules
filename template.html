@@ -682,6 +682,8 @@ input[type=file] { display:none; }
 #videoLbActions { display:flex; gap:8px; margin-top:12px; }
 .vlb-btn { background:none; border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:11px; padding:6px 14px; cursor:pointer; transition:all .15s; }
 .vlb-btn:hover { border-color:var(--accent); color:var(--accent); }
+.vlb-btn.liked { border-color:#ff4d6d !important; color:#ff4d6d !important; }
+.vlb-btn.liked:hover { border-color:#ff6b8a !important; color:#ff6b8a !important; }
 #videoFrameScrubWrap { margin-top:14px; display:flex; align-items:center; gap:10px; }
 #videoFrameScrub { width:320px; accent-color:var(--accent); }
 #videoFrameTime { font-size:11px; color:var(--dim); font-family:'IBM Plex Mono',monospace; min-width:40px; }
@@ -978,6 +980,8 @@ input[type=range].prange::-webkit-slider-thumb {
   font-family:'IBM Plex Mono',monospace; font-size:11px;
 }
 .inpaint-num:focus { outline:none; border-color:rgba(255,150,80,.4); }
+select.inpaint-num option { background:#fff; color:#111; }
+#inpaintResolution option, #inpaintMargin option, #inpaintSafetyTol option { background:#fff; color:#111; }
 .inpaint-sec { border-top:1px solid rgba(255,255,255,.07); padding-top:10px; margin-top:10px; }
 .inpaint-acval { color:var(--accent); font-family:'IBM Plex Mono',monospace; }
 /* ControlNet mode toggle */
@@ -1318,6 +1322,10 @@ input[type=range].prange::-webkit-slider-thumb {
 .error-card .err-chip {
   font-size:10px; color:var(--dim2); background:var(--s3);
   padding:2px 6px; border:1px solid var(--border); font-family:'IBM Plex Mono',monospace;
+}
+.src-chip {
+  background:var(--s2); border:1px solid var(--border); padding:2px 8px;
+  font-size:10px; border-radius:2px;
 }
 .error-card .err-prompt {
   font-size:11px; color:var(--dim); line-height:1.6;
@@ -2674,9 +2682,11 @@ input[type=range].prange::-webkit-slider-thumb {
             <option value="kling_16">Kling 1.6</option>
           </optgroup>
           <optgroup label="── Topaz ✦ ──">
-            <option value="topaz_precise25">Topaz Precise 2.5 · 1080p / 4K</option>
+            <option value="topaz_precise25">Topaz Precise 2.5 · GenAI · best quality</option>
             <option value="topaz_precise2">Topaz Precise 2 · 1×–4× upscale</option>
-            <option value="topaz_astra1">Topaz Astra 1 · Creative · 1080p / 4K</option>
+            <option value="topaz_precise1">Topaz Precise 1 · highest detail</option>
+            <option value="topaz_hq">Topaz Starlight HQ · faces · natural</option>
+            <option value="topaz_mini">Topaz Starlight Mini · fast</option>
           </optgroup>
           <optgroup label="── Magnific Video Upscaler ──">
             <option value="magnific_vid_creative">Magnific Creative · prompt-guided · 1K/2K/4K</option>
@@ -3678,13 +3688,14 @@ input[type=range].prange::-webkit-slider-thumb {
     <!-- OpenRouter API Key -->
     <div style="margin-bottom:20px;">
       <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">OpenRouter API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Fallback for AI Prompt &amp; Describe when Google is overloaded — Qwen2.5-VL vision model</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Primary for AI Prompt &amp; Describe — Claude Sonnet 4.6 · ~$0.003/prompt · ~$0.01/describe</div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupOpenRouterKey" placeholder="sk-or-v1-..." autocomplete="off"
           oninput="onSetupOpenRouterKey(this.value)"
           style="flex:1; background:var(--bg2); color:var(--fg); border:1px solid var(--border); padding:7px 10px; font-family:'IBM Plex Mono',monospace; font-size:12px; outline:none;">
         <div class="dot" id="setupOpenRouterDot"></div>
       </div>
+      <div id="spendBlock_openrouter" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
     </div>
 
     <!-- Proxy URL -->

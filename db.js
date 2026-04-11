@@ -4,7 +4,7 @@
 let db;
 async function initDB() {
   return new Promise((res, rej) => {
-    const req = indexedDB.open('GImageStudio', 6);
+    const req = indexedDB.open('GImageStudio', 7);
     req.onupgradeneeded = e => {
       const d = e.target.result;
       const oldVersion = e.oldVersion;
@@ -53,6 +53,12 @@ async function initDB() {
       if (!d.objectStoreNames.contains('videoFolders')) {
         d.createObjectStore('videoFolders', { keyPath: 'id' });
       }
+      // v7: assets_meta — metadata bez imageData pro rychlé načítání asset galerie
+      if (!d.objectStoreNames.contains('assets_meta')) {
+        const amStore = d.createObjectStore('assets_meta', { keyPath: 'id' });
+        amStore.createIndex('ts', 'ts');
+        amStore.createIndex('folder', 'folder');
+      }
     };
     // Po otevření DB: pokud images_meta prázdná ale images má záznamy → migrovat
     req.onsuccess = async e => {
@@ -86,6 +92,35 @@ async function initDB() {
         }
       } catch(migrErr) {
         console.warn('[GIS] Migrace images_meta selhala (nevadí):', migrErr);
+      }
+      // Migrace v7: naplnit assets_meta z existujících assets (bez imageData)
+      try {
+        const amCount = await new Promise(res => {
+          const tx = db.transaction('assets_meta', 'readonly');
+          const req2 = tx.objectStore('assets_meta').count();
+          req2.onsuccess = ev => res(ev.target.result);
+          req2.onerror = () => res(0);
+        });
+        if (amCount === 0) {
+          const allAssets = await new Promise(res2 => {
+            const tx2 = db.transaction('assets', 'readonly');
+            const req3 = tx2.objectStore('assets').getAll();
+            req3.onsuccess = ev => res2(ev.target.result);
+            req3.onerror = () => res2([]);
+          });
+          if (allAssets.length > 0) {
+            const tx3 = db.transaction('assets_meta', 'readwrite');
+            const amStore = tx3.objectStore('assets_meta');
+            for (const a of allAssets) {
+              const { imageData, ...meta } = a;
+              amStore.put(meta);
+            }
+            await new Promise(res3 => { tx3.oncomplete = res3; tx3.onerror = res3; });
+            console.log(`[GIS] Migrace v7: ${allAssets.length} asset meta přeneseno do assets_meta`);
+          }
+        }
+      } catch(migrErr) {
+        console.warn('[GIS] Migrace assets_meta selhala (nevadí):', migrErr);
       }
       res();
     };
@@ -394,10 +429,14 @@ async function dbPatchAssetMeta(id, patch) {
   if (!item) return;
   Object.assign(item, patch);
   await new Promise((res, rej) => {
-    const tx = db.transaction('assets', 'readwrite');
-    tx.objectStore('assets').put(item).onsuccess = () => res();
+    const tx = db.transaction(['assets', 'assets_meta'], 'readwrite');
+    tx.objectStore('assets').put(item);
+    const { imageData, ...meta } = item;
+    tx.objectStore('assets_meta').put(meta);
+    tx.oncomplete = () => res();
     tx.onerror = e => rej(e);
   });
+  assetMetaCache = null;
 }
 
 
@@ -414,6 +453,28 @@ async function dbGetAllMeta() {
   metaCache = await metaCachePromise;
   metaCachePromise = null;
   return metaCache;
+}
+
+// ── Asset meta (v7) — lightweight listing without imageData ──
+let assetMetaCache = null;
+async function dbGetAllAssetMeta() {
+  if (assetMetaCache) return assetMetaCache;
+  return new Promise((res) => {
+    const tx = db.transaction('assets_meta', 'readonly');
+    const req = tx.objectStore('assets_meta').getAll();
+    req.onsuccess = e => { assetMetaCache = e.target.result || []; res(assetMetaCache); };
+    req.onerror = () => res([]);
+  });
+}
+function dbInvalidateAssetMetaCache() { assetMetaCache = null; }
+async function dbPutAssetMeta(asset) {
+  const { imageData, ...meta } = asset;
+  await dbPut('assets_meta', meta);
+  assetMetaCache = null;
+}
+async function dbDeleteAssetMeta(id) {
+  await dbDelete('assets_meta', id);
+  assetMetaCache = null;
 }
 // Cache thumbů v paměti pro aktuální session (vyhne se opakovaným DB čtením)
 const thumbMemCache = new Map();
@@ -448,28 +509,7 @@ async function getThumbCached(id, fallbackLoader) {
 // ═══════════════════════════════════════════════════════
 async function toggleFavorite(e, id) {
   e.stopPropagation();
-  const newFav = await toggleFavoriteItem(id);
-
-  // Update gallery card DOM directly
-  const el = document.querySelector(`.gal-item[data-id="${id}"]`);
-  if (el) {
-    el.classList.toggle('favorited', newFav);
-    const heart = el.querySelector('.gal-heart');
-    if (heart) {
-      heart.className = `gal-heart ${newFav ? 'on' : 'off'}`;
-      heart.title = newFav ? 'Remove from favorites' : 'Add to favorites';
-      heart.textContent = newFav ? '♥' : '♡';
-    }
-  }
-
-  // Propagate to render card on main screen
-  const likeBtn = document.querySelector(`.like-btn[data-galid="${id}"]`);
-  if (likeBtn) {
-    likeBtn.textContent = newFav ? '♥ Liked' : '♡ Like';
-    likeBtn.classList.toggle('liked', newFav);
-    const card = likeBtn.closest('.img-card');
-    if (card) card.classList.toggle('is-liked', newFav);
-  }
+  await toggleFavoriteItem(id);
 
   // Always refresh folder counts in sidebar
   renderFolders();
@@ -487,6 +527,37 @@ async function toggleFavoriteItem(id) {
   const meta = metas.find(m => m.id === id);
   const newFav = !(meta?.favorite);
   await dbPatchMeta(id, { favorite: newFav });
+
+  // ── Sync ALL UI locations showing this image's favorite state ──
+  // 1. Gallery card
+  const galEl = document.querySelector(`.gal-item[data-id="${id}"]`);
+  if (galEl) {
+    galEl.classList.toggle('favorited', newFav);
+    const heart = galEl.querySelector('.gal-heart');
+    if (heart) {
+      heart.className = `gal-heart ${newFav ? 'on' : 'off'}`;
+      heart.title = newFav ? 'Remove from favorites' : 'Add to favorites';
+      heart.textContent = newFav ? '♥' : '♡';
+    }
+  }
+  // 2. Output/render card like button
+  const likeBtn = document.querySelector(`.like-btn[data-galid="${id}"]`);
+  if (likeBtn) {
+    likeBtn.textContent = newFav ? '♥ Liked' : '♡ Like';
+    likeBtn.classList.toggle('liked', newFav);
+    const likeCard = likeBtn.closest('.img-card');
+    if (likeCard) likeCard.classList.toggle('is-liked', newFav);
+  }
+  // 3. Gallery modal (if open for this image)
+  if (typeof currentModalId !== 'undefined' && currentModalId === id) {
+    const fb = document.getElementById('mFavBtn');
+    if (fb) {
+      fb.textContent = newFav ? '♥ Favorites' : '♡ Favorite';
+      fb.style.borderColor = newFav ? '#ff4d6d' : 'var(--border)';
+      fb.style.color = newFav ? '#ff4d6d' : 'var(--dim)';
+    }
+  }
+
   return newFav;
 }
 

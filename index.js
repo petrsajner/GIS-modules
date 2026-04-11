@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════
 // GIS Proxy — Cloudflare Worker
-// Verze: 2026-10 (R2 bucket: Magnific video + generický /r2/upload pro Kling V2V a další)
+// Verze: 2026-11 (+depth route restored)
 //
 // Slouží jako CORS proxy pro providery, kteří blokují přímé
 // browser requesty z file:// origin.
@@ -29,6 +29,7 @@
 //   POST /fal/submit             → fal.ai queue submit (CORS bypass pro Kling 2.5-turbo)
 //   POST /fal/status             → fal.ai queue status
 //   POST /fal/result             → fal.ai queue result
+//   POST /depth                  → fal.ai depth-anything (sync CORS bypass)
 //   POST /topaz/video/submit     → Topaz video: express submit → request_id
 //   POST /topaz/video/init       → Topaz video: init request + accept
 //   POST /topaz/video/complete   → Topaz video: potvrdit upload
@@ -59,6 +60,7 @@ import { handleMagnific, handleMagnificStatus,
          handleR2Serve }                       from './handlers/magnific.js';
 import { handleFalSubmit, handleFalStatus,
          handleFalResult }                        from './handlers/fal-inpaint.js';
+import { handleDepth }                            from './handlers/depth.js';
 import { handleTopazVideoSubmit,
          handleTopazVideoInit,
          handleTopazVideoComplete,
@@ -76,7 +78,6 @@ import { handleReplicateWan27eSubmit,
          handleReplicateFilesUpload,
          handleReplicateVideoServe,
          handleReplicateUploadVideo }             from './handlers/replicate-wan27e.js';
-import { handleDepth }                            from './handlers/depth.js';
 
 // ── CORS hlavičky — povoleno pro file:// a všechny origins ──
 const CORS_HEADERS = {
@@ -107,7 +108,7 @@ export default {
     if (path === '/health' || path === '/') {
       return corsResponse(JSON.stringify({
         status: 'ok',
-        version: '2026-10',
+        version: '2026-11',
         routes: [
           'POST /xai/generate',
           'POST /luma/generate',
@@ -129,6 +130,7 @@ export default {
           'POST /fal/submit',
           'POST /fal/status',
           'POST /fal/result',
+          'POST /depth',
           'POST /topaz/video/submit',
           'POST /topaz/video/init',
           'POST /topaz/video/complete',
@@ -143,7 +145,6 @@ export default {
           'POST /replicate/wan27v/status',
           'POST /replicate/wan27e/submit',
           'POST /replicate/wan27e/status',
-          'POST /depth',
         ],
       }));
     }
@@ -177,11 +178,11 @@ export default {
       if (path === '/xai/generate')             return withCors(await handleXai(request));
 
       // ── Luma image (Photon) ───────────────────────────
-      if (path === '/luma/generate')            return withCors(await handleLuma(request));
+      if (path === '/luma/generate')            return withCors(await handleLuma(request, env));
       if (path === '/luma/status')              return withCors(await handleLumaStatus(request));
 
       // ── Luma video (Ray3 / Ray3.14) ───────────────────
-      if (path === '/luma/video/submit')        return withCors(await handleLumaVideoSubmit(request));
+      if (path === '/luma/video/submit')        return withCors(await handleLumaVideoSubmit(request, env));
       if (path === '/luma/video/status')        return withCors(await handleLumaVideoStatus(request));
 
       // ── Magnific / Freepik upscale ────────────────────
@@ -200,6 +201,9 @@ export default {
       if (path === '/fal/submit')               return withCors(await handleFalSubmit(request));
       if (path === '/fal/status')               return withCors(await handleFalStatus(request));
       if (path === '/fal/result')               return withCors(await handleFalResult(request));
+
+      // ── fal.ai depth-anything (sync, CORS bypass) ────
+      if (path === '/depth')                    return withCors(await handleDepth(request));
 
       // ── Topaz Labs video upscale ──────────────────────
       if (path === '/topaz/video/submit')       return withCors(await handleTopazVideoSubmit(request));
@@ -224,9 +228,6 @@ export default {
       if (path === '/replicate/wan27e/status')   return withCors(await handleReplicateWan27eStatus(request));
       if (path === '/replicate/files/upload')    return withCors(await handleReplicateFilesUpload(request));
       if (path === '/replicate/upload/video')    return withCors(await handleReplicateUploadVideo(request));
-
-      // ── Depth estimation (sync fal.run proxy) ─────────
-      if (path === '/depth')                      return withCors(await handleDepth(request));
 
     } catch (err) {
       console.error(`[GIS Proxy] Uncaught error on ${path}:`, err);

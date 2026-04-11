@@ -177,7 +177,7 @@ const VIDEO_MODELS = {
     desc: 'I2V · Start frame · Native audio · Economy · $0.070/s',
     refMode: 'single', maxRefs: 1,
     refLabel: 'Start frame',
-    hasAudio: true, maxDur: 10,
+    hasAudio: true, maxDur: 10, durOptions: [5, 10],
   },
 
   // ── V2V / Motion Control (V3 + V2.6) ─────────────────────
@@ -493,7 +493,7 @@ const TOPAZ_MODELS = {
     apiModel:    'slp-2.5',
     desc:        'Best for AI-generated video. Reduces plastic artifacts, enhances faces, materials and text. Output: 1080p or 4K.',
     resolutions: ['1080p', '4k'],
-    hasFactor:   false,  // no scale factor — uses fixed resolution
+    hasFactor:   false,
     maxSlowmo:   16,
   },
   topaz_precise2: {
@@ -505,15 +505,32 @@ const TOPAZ_MODELS = {
     hasFactor:   true,
     maxSlowmo:   16,
   },
-  topaz_astra1: {
-    name:        'Topaz Astra 1',
+  topaz_precise1: {
+    name:        'Topaz Precise 1',
     type:        'topaz_video',
-    apiModel:    'astra-1',
-    desc:        'Creative upscaling — reimagines and enhances video with added detail. Set creativity level. Output: 1080p or 4K. Slow motion up to 8×.',
+    apiModel:    'slp-1',
+    desc:        'Original Starlight model. Highest detail but slower and more expensive. Output: 1080p or 4K.',
     resolutions: ['1080p', '4k'],
     hasFactor:   false,
-    hasCreativity: true,
-    maxSlowmo:   8,
+    maxSlowmo:   16,
+  },
+  topaz_hq: {
+    name:        'Topaz Starlight HQ',
+    type:        'topaz_video',
+    apiModel:    'slhq',
+    desc:        'High-quality diffusion upscaler. Natural detail, strong face restoration. Output: 1080p or 4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   false,
+    maxSlowmo:   16,
+  },
+  topaz_mini: {
+    name:        'Topaz Starlight Mini',
+    type:        'topaz_video',
+    apiModel:    'slm',
+    desc:        'Efficient local-class model. Fast, good for archival and motion-heavy footage. Output: 1080p or 4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   false,
+    maxSlowmo:   16,
   },
 };
 
@@ -521,9 +538,11 @@ const TOPAZ_GROUPS = {
   topaz: {
     default:  'topaz_precise25',
     variants: [
-      { key: 'topaz_precise25', label: 'Precise 2.5 · 1080p/4K · GenAI video · best quality' },
+      { key: 'topaz_precise25', label: 'Precise 2.5 · GenAI video · best quality' },
       { key: 'topaz_precise2',  label: 'Precise 2 · 1×–4× upscale · balanced' },
-      { key: 'topaz_astra1',    label: 'Astra 1 · Creative · subtle/medium/bold' },
+      { key: 'topaz_precise1',  label: 'Precise 1 · highest detail · slower' },
+      { key: 'topaz_hq',        label: 'Starlight HQ · natural detail · faces' },
+      { key: 'topaz_mini',      label: 'Starlight Mini · fast · archival' },
     ],
   },
 };
@@ -556,55 +575,193 @@ let topazSrcVideoId    = null;   // Topaz/Magnific: source video gallery ID
 let wan27eSrcVideoId   = null;   // WAN 2.7 Video Edit: source video gallery ID
 let wan27vSrcVideoId   = null;   // WAN 2.7 I2V: optional source video for extension
 
-// ── WAN 2.7 I2V extend-video helpers ─────────────────────
-function wan27vClearSource() {
-  wan27vSrcVideoId = null;
-  const info    = document.getElementById('wan27vSrcInfo');
-  const thumbDiv = document.getElementById('wan27vSrcThumb');
-  const clearBtn = document.getElementById('wan27vSrcClearBtn');
-  const descBtn  = document.getElementById('wan27vSrcDescribeBtn');
-  if (info)     info.textContent       = 'None selected';
-  if (thumbDiv) thumbDiv.style.display = 'none';
-  if (clearBtn) clearBtn.style.display = 'none';
-  if (descBtn)  descBtn.style.display  = 'none';
+// ── Shared: extract video URL from fal.ai response object ──
+function _extractFalVideoUrl(obj) {
+  return obj?.output?.video?.url || obj?.output?.url || obj?.video?.url || obj?.data?.video?.url || null;
 }
 
-async function wan27vSetSource(videoId) {
-  wan27vSrcVideoId = videoId;
-  const meta   = await dbGet('video_meta', videoId).catch(() => null);
-  const thumb  = await dbGet('video_thumbs', videoId).catch(() => null);
-  const info    = document.getElementById('wan27vSrcInfo');
-  const thumbDiv = document.getElementById('wan27vSrcThumb');
-  const imgEl   = document.getElementById('wan27vSrcImg');
-  const metaEl  = document.getElementById('wan27vSrcMeta');
-  const clearBtn = document.getElementById('wan27vSrcClearBtn');
-  const descBtn  = document.getElementById('wan27vSrcDescribeBtn');
-  if (info && meta) {
-    const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
-    info.textContent = `${meta.duration || '?'}s · ${mb}`;
+// ── Shared: save video result to DB + update UI ─────────────────────────────
+// videoArrayBuffer: raw MP4 data
+// recordFields: model-specific fields merged into the record
+//   Required: model, modelKey, prompt, params, duration
+//   Optional: cdnUrl, cdnExpiry, exrUrl, usedVideoRefs, outWidth, outHeight, folder
+// job: the video job object (for UI updates)
+// spendArgs: [provider, priceKey, count?, durationSec?] for trackSpend
+async function _saveVideoResult(videoArrayBuffer, recordFields, job, spendArgs) {
+  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
+  const thumbData = await generateVideoThumb(blob);
+  const dims = await _topazGetDims(blob).catch(() => null);
+  const detectedFps = _parseMp4Fps(videoArrayBuffer);
+
+  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+  job.status = 'done';
+  job.elapsed = `${elapsed}s`;
+
+  // Auto-merge fps into params if detected
+  const params = { ...(recordFields.params || {}) };
+  if (detectedFps && !params.fps) params.fps = detectedFps;
+
+  const videoRecord = {
+    id: videoId,
+    ts: Date.now(),
+    model: recordFields.model,
+    modelKey: recordFields.modelKey,
+    prompt: recordFields.prompt || job.prompt,
+    params,
+    videoData: videoArrayBuffer,
+    mimeType: 'video/mp4',
+    duration: recordFields.duration,
+    fileSize: videoArrayBuffer.byteLength,
+    // Dims: explicit outWidth/outHeight override auto-detected
+    ...(recordFields.outWidth ? { outWidth: recordFields.outWidth, outHeight: recordFields.outHeight }
+      : dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
+    folder: recordFields.folder ?? (job.targetFolder === 'all' ? '' : job.targetFolder),
+    favorite: false,
+    ...(recordFields.cdnUrl ? { cdnUrl: recordFields.cdnUrl, cdnExpiry: recordFields.cdnExpiry || (Date.now() + 7*24*60*60*1000) } : {}),
+    ...(recordFields.exrUrl ? { exrUrl: recordFields.exrUrl } : {}),
+    ...(recordFields.usedVideoRefs ? { usedVideoRefs: recordFields.usedVideoRefs } : { usedVideoRefs: job.videoRefsSnapshot || [] }),
+  };
+
+  await dbPut('videos', videoRecord);
+  const { videoData, ...metaOnly } = videoRecord;
+  await dbPut('video_meta', metaOnly);
+  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
+  if (spendArgs) trackSpend(...spendArgs);
+
+  renderVideoQueue();
+  removeVideoPlaceholder(job);
+  renderVideoResultCard(videoRecord, thumbData);
+  return { videoId, elapsed, thumbData };
+}
+
+// ── Shared: fal.ai video queue submit → poll → download ─────────────────────
+// Submits payload to fal.ai queue, polls until complete, downloads video.
+// Returns: videoArrayBuffer (ArrayBuffer)
+// opts: { label, timeoutMin, pollMs, progressLabel }
+async function _falVideoSubmitPollDownload(falKey, endpoint, payload, job, opts = {}) {
+  const { label = 'Video', timeoutMin = 20, pollMs = 5000, progressLabel = 'GENERATING' } = opts;
+  const queueUrl = `https://queue.fal.run/${endpoint}`;
+
+  // Submit
+  job.status = 'queued'; renderVideoQueue();
+  const submitRes = await fetch(queueUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!submitRes.ok) {
+    const errText = await submitRes.text().catch(() => '');
+    throw new Error(`${label} submit ${submitRes.status}: ${errText.slice(0, 300)}`);
   }
-  if (thumb?.data && imgEl && thumbDiv) { imgEl.src = thumb.data; thumbDiv.style.display = 'block'; }
-  if (metaEl && meta) {
-    const res = meta.outWidth && meta.outHeight ? `${meta.outWidth}x${meta.outHeight}` : (meta.params?.resolution || null);
+  const submitted = await submitRes.json();
+  const requestId = submitted.request_id;
+  if (!requestId) throw new Error(`${label}: no request_id. Response: ${JSON.stringify(submitted).slice(0, 200)}`);
+
+  job.requestId = requestId;
+  job.status = 'queued'; renderVideoQueue();
+  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
+
+  const statusUrl   = submitted.status_url   || `${queueUrl}/requests/${requestId}/status`;
+  const responseUrl = submitted.response_url || `${queueUrl}/requests/${requestId}`;
+  const TIMEOUT = timeoutMin * 60 * 1000;
+  const deadline = Date.now() + TIMEOUT;
+  let completedData = null;
+
+  // Poll
+  await new Promise((resolve, reject) => {
+    const poll = async () => {
+      if (Date.now() > deadline) { reject(new Error(`${label}: timeout after ${timeoutMin} minutes`)); return; }
+      if (job.cancelled) { reject(new Error('Cancelled')); return; }
+      try {
+        const st = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+        if (!st.ok) { setTimeout(poll, pollMs); return; }
+        const s = await st.json();
+        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+        if (s.status === 'IN_QUEUE')         { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
+        else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `${progressLabel} · ${elapsed}s`); }
+        else if (s.status === 'COMPLETED')   { completedData = s; resolve(); return; }
+        else if (s.status === 'FAILED')      { reject(new Error(s.error || 'Generation failed')); return; }
+        setTimeout(poll, pollMs);
+      } catch(e) { setTimeout(poll, pollMs); }
+    };
+    setTimeout(poll, pollMs);
+  });
+
+  // Extract video URL
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+  let videoUrl = _extractFalVideoUrl(completedData);
+
+  if (!videoUrl) {
+    try {
+      const r = await fetch(responseUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+      if (r.ok) videoUrl = _extractFalVideoUrl(await r.json());
+      else {
+        const body = await r.text().catch(() => '');
+        throw new Error(`${label} result fetch ${r.status}: ${body.slice(0, 400)}`);
+      }
+    } catch(e) { if (e.message.includes('result fetch')) throw e; }
+  }
+  if (!videoUrl) throw new Error(`${label}: no video URL in result. Job: ${requestId}`);
+
+  // Download
+  const videoRes = await fetch(videoUrl);
+  if (!videoRes.ok) throw new Error(`${label} video download ${videoRes.status}`);
+  const buffer = await videoRes.arrayBuffer();
+  return { buffer, cdnUrl: videoUrl };
+}
+
+// ═══════════════════════════════════════════════════════
+// VIDEO SOURCE SLOT — Generic helpers for source video panels
+// Used by: Topaz, WAN 2.7 Edit, WAN 2.7 I2V extend, V2V Motion
+// ═══════════════════════════════════════════════════════
+// ids: { info, thumb, img, meta, clearBtn, describeBtn }
+function _srcSlotClear(ids) {
+  const el = id => document.getElementById(id);
+  if (ids.info)        el(ids.info).textContent = 'None selected';
+  if (ids.thumb)       el(ids.thumb).style.display = 'none';
+  if (ids.clearBtn)    el(ids.clearBtn).style.display = 'none';
+  if (ids.describeBtn) el(ids.describeBtn).style.display = 'none';
+  if (ids.meta)        { const m = el(ids.meta); if (m) m.innerHTML = ''; }
+}
+
+async function _srcSlotSet(ids, videoId) {
+  const meta  = await dbGet('video_meta', videoId).catch(() => null);
+  const thumb = await dbGet('video_thumbs', videoId).catch(() => null);
+  const el = id => document.getElementById(id);
+  if (ids.info && meta) {
+    const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
+    el(ids.info).textContent = `${meta.duration || '?'}s · ${mb}`;
+  }
+  if (thumb?.data && ids.img && ids.thumb) {
+    el(ids.img).src = thumb.data;
+    el(ids.thumb).style.display = 'block';
+  }
+  if (ids.meta && meta) {
+    const res = meta.outWidth && meta.outHeight ? `${meta.outWidth}×${meta.outHeight}` : (meta.params?.resolution || null);
     const chips = [res, meta.duration ? `${meta.duration}s` : null].filter(Boolean);
-    metaEl.innerHTML = chips.map(c =>
-      `<span style="background:var(--s2);border:1px solid var(--border);padding:2px 8px;font-size:10px;border-radius:2px;">${c}</span>`
+    el(ids.meta).innerHTML = chips.map(c =>
+      `<span class="src-chip">${c}</span>`
     ).join('');
   }
-  if (clearBtn) clearBtn.style.display = '';
-  if (descBtn)  descBtn.style.display  = thumb?.data ? '' : 'none';
+  if (ids.clearBtn)    el(ids.clearBtn).style.display = '';
+  if (ids.describeBtn) el(ids.describeBtn).style.display = thumb?.data ? '' : 'none';
+  return { meta, thumb };
 }
 
-function wan27vPickFromGallery() {
-  switchView('video');
-  toast('Select a video in the gallery, then click ▷ Use', 'ok');
-}
-
-async function wan27vDescribeSource() {
-  const img = document.getElementById('wan27vSrcImg');
+function _srcSlotDescribe(imgId) {
+  const img = document.getElementById(imgId);
   if (!img?.src || img.src === window.location.href) return;
-  await _describeFromThumb(img.src);
+  _describeFromThumb(img.src);
 }
+
+// ── WAN 2.7 I2V extend-video helpers ─────────────────────
+const _wan27vIds = { info:'wan27vSrcInfo', thumb:'wan27vSrcThumb', img:'wan27vSrcImg', meta:'wan27vSrcMeta', clearBtn:'wan27vSrcClearBtn', describeBtn:'wan27vSrcDescribeBtn' };
+function wan27vClearSource() { wan27vSrcVideoId = null; _srcSlotClear(_wan27vIds); }
+async function wan27vSetSource(videoId) { wan27vSrcVideoId = videoId; await _srcSlotSet(_wan27vIds, videoId); }
+function wan27vPickFromGallery() { switchView('video'); toast('Select a video in the gallery, then click ▷ Use', 'ok'); }
+async function wan27vDescribeSource() { _srcSlotDescribe('wan27vSrcImg'); }
 
 // ── Shared: open describe modal with a thumbnail dataURL ──────
 async function _describeFromThumb(thumbDataUrl) {
@@ -623,32 +780,29 @@ async function _describeFromThumb(thumbDataUrl) {
 }
 
 // ── V2V / Motion Control helpers ─────────────────────────
+const _v2vIds = { info:'v2vSrcInfo', thumb:'v2vSrcThumb', img:'v2vSrcImg', meta:'v2vSrcMeta', clearBtn:'v2vClearBtn', describeBtn:'v2vDescribeBtn' };
+
 function _v2vSetPanel(thumbDataUrl, infoText) {
-  const info    = document.getElementById('v2vSrcInfo');
-  const thumbDiv = document.getElementById('v2vSrcThumb');
-  const img     = document.getElementById('v2vSrcImg');
-  const metaEl  = document.getElementById('v2vSrcMeta');
-  const clearBtn = document.getElementById('v2vClearBtn');
-  const descBtn  = document.getElementById('v2vDescribeBtn');
-  if (info) info.textContent = infoText || '';
-  if (thumbDataUrl && img && thumbDiv) {
-    img.src = thumbDataUrl;
-    thumbDiv.style.display = 'block';
-  } else if (thumbDiv) {
-    thumbDiv.style.display = 'none';
+  const el = id => document.getElementById(id);
+  if (_v2vIds.info) el(_v2vIds.info).textContent = infoText || '';
+  if (thumbDataUrl && el(_v2vIds.img) && el(_v2vIds.thumb)) {
+    el(_v2vIds.img).src = thumbDataUrl;
+    el(_v2vIds.thumb).style.display = 'block';
+  } else if (el(_v2vIds.thumb)) {
+    el(_v2vIds.thumb).style.display = 'none';
   }
-  if (metaEl) metaEl.innerHTML = '';
-  if (clearBtn) clearBtn.style.display = '';
-  if (descBtn)  descBtn.style.display  = thumbDataUrl ? '' : 'none';
+  if (el(_v2vIds.meta)) el(_v2vIds.meta).innerHTML = '';
+  if (el(_v2vIds.clearBtn)) el(_v2vIds.clearBtn).style.display = '';
+  if (el(_v2vIds.describeBtn)) el(_v2vIds.describeBtn).style.display = thumbDataUrl ? '' : 'none';
 }
 
 async function v2vVideoSelected(files) {
   const file = files?.[0];
   if (!file) return;
   videoMotionFile    = file;
-  videoMotionVideoId = null;  // clear gallery selection
+  videoMotionVideoId = null;
   const infoText = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
-  _v2vSetPanel(null, infoText);  // show name immediately, then load thumb async
+  _v2vSetPanel(null, infoText);
   try {
     const thumb = await generateVideoThumb(file);
     if (thumb) _v2vSetPanel(thumb, infoText);
@@ -656,95 +810,43 @@ async function v2vVideoSelected(files) {
 }
 
 async function v2vSetFromGallery(videoId) {
-  videoMotionFile    = null;
+  videoMotionFile = null;
   videoMotionVideoId = videoId;
   const meta  = await dbGet('video_meta', videoId).catch(() => null);
   const thumb = await dbGet('video_thumbs', videoId).catch(() => null);
   const mb    = meta?.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
-  const info  = `${meta?.duration || '?'}s · ${mb}`;
-  _v2vSetPanel(thumb?.data || null, info);
+  _v2vSetPanel(thumb?.data || null, `${meta?.duration || '?'}s · ${mb}`);
 }
 
 function clearV2VVideo() {
-  videoMotionFile    = null;
-  videoMotionVideoId = null;
-  const info     = document.getElementById('v2vSrcInfo');
-  const thumbDiv = document.getElementById('v2vSrcThumb');
-  const clearBtn = document.getElementById('v2vClearBtn');
-  const descBtn  = document.getElementById('v2vDescribeBtn');
-  const input    = document.getElementById('v2vVideoInput');
-  if (info)     info.textContent      = 'No video selected';
-  if (thumbDiv) thumbDiv.style.display = 'none';
-  if (clearBtn) clearBtn.style.display = 'none';
-  if (descBtn)  descBtn.style.display  = 'none';
-  if (input)    input.value            = '';
+  videoMotionFile = null; videoMotionVideoId = null;
+  _srcSlotClear(_v2vIds);
+  const input = document.getElementById('v2vVideoInput');
+  if (input) input.value = '';
 }
 
-function v2vPickFromGallery() {
-  switchView('video');
-  toast('Select a video in the gallery, then click ▷ Use', 'ok');
-}
-
-async function v2vDescribeSource() {
-  const img = document.getElementById('v2vSrcImg');
-  if (!img?.src || img.src === window.location.href) return;
-  await _describeFromThumb(img.src);
-}
+function v2vPickFromGallery() { switchView('video'); toast('Select a video in the gallery, then click ▷ Use', 'ok'); }
+async function v2vDescribeSource() { _srcSlotDescribe('v2vSrcImg'); }
 
 // ── Topaz: source video management ──────────────────────
-function topazClearSource() {
-  topazSrcVideoId = null;
-  const info    = document.getElementById('topazSrcInfo');
-  const thumb   = document.getElementById('topazSrcThumb');
-  const btn     = document.getElementById('topazSrcClearBtn');
-  const descBtn = document.getElementById('topazSrcDescribeBtn');
-  const metaEl  = document.getElementById('topazSrcMeta');
-  if (info)   info.textContent    = 'None selected';
-  if (thumb)  thumb.style.display = 'none';
-  if (btn)    btn.style.display   = 'none';
-  if (descBtn) descBtn.style.display = 'none';
-  if (metaEl) metaEl.innerHTML    = '';
-}
+const _topazIds = { info:'topazSrcInfo', thumb:'topazSrcThumb', img:'topazSrcImg', meta:'topazSrcMeta', clearBtn:'topazSrcClearBtn', describeBtn:'topazSrcDescribeBtn' };
+function topazClearSource() { topazSrcVideoId = null; _srcSlotClear(_topazIds); }
+async function topazDescribeSource() { _srcSlotDescribe('topazSrcImg'); }
 
 async function topazSetSource(videoId) {
   topazSrcVideoId = videoId;
-  const meta  = await dbGet('video_meta', videoId).catch(() => null);
-  const thumb = await dbGet('video_thumbs', videoId).catch(() => null);
-  const info     = document.getElementById('topazSrcInfo');
-  const thumbDiv = document.getElementById('topazSrcThumb');
-  const imgEl    = document.getElementById('topazSrcImg');
-  const metaEl   = document.getElementById('topazSrcMeta');
-  const btn      = document.getElementById('topazSrcClearBtn');
-  const descBtn  = document.getElementById('topazSrcDescribeBtn');
-  if (info && meta) {
-    const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
-    info.textContent = `${meta.duration || '?'}s · ${mb}`;
-  }
-  if (thumb?.data && imgEl && thumbDiv) {
-    imgEl.src = thumb.data;
-    thumbDiv.style.display = 'block';
-  }
-  // Show initial chips from stored meta
-  if (metaEl && meta) {
-    _renderTopazSrcMeta(metaEl, meta, null, null);
-  }
-  if (btn)     btn.style.display     = '';
-  if (descBtn) descBtn.style.display = thumb?.data ? '' : 'none';
-
-  // Async: load actual pixel dims + fps from video data (MP4 parser + video element)
+  const { meta } = await _srcSlotSet(_topazIds, videoId);
+  const metaEl = document.getElementById('topazSrcMeta');
+  // Initial chips
+  if (metaEl && meta) _renderTopazSrcMeta(metaEl, meta, null, null);
+  // Async: load actual pixel dims + fps from video data
   if (metaEl && meta) {
     const full = await dbGet('videos', videoId).catch(() => null);
     if (full?.videoData) {
       const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
-      // FPS from MP4 atom parser (synchronous on ArrayBuffer)
-      const fps = _parseMp4Fps(full.videoData)
-               || meta.params?.fps
-               || meta.params?.topaz?.fps
-               || null;
-      // Pixel dims from video element (async)
-      const dims = await _topazGetDimsAndFps(blob).catch(() => null);
+      const fps = _parseMp4Fps(full.videoData) || meta.params?.fps || meta.params?.topaz?.fps || null;
+      const dims = await _topazGetDims(blob).catch(() => null);
       _renderTopazSrcMeta(metaEl, meta, dims?.w || null, dims?.h || null, fps);
-      // Auto-set FPS select to match source video
       if (fps) {
         const fpsSel = document.getElementById('topazFps');
         if (fpsSel) {
@@ -757,12 +859,6 @@ async function topazSetSource(videoId) {
   }
 }
 
-async function topazDescribeSource() {
-  const img = document.getElementById('topazSrcImg');
-  if (!img?.src || img.src === window.location.href) return;
-  await _describeFromThumb(img.src);
-}
-
 function _renderTopazSrcMeta(metaEl, meta, w, h, detectedFps) {
   const resStr = w && h ? `${w}×${h}` : (meta.outWidth && meta.outHeight ? `${meta.outWidth}×${meta.outHeight}` : (meta.params?.resolution || null));
   const ar = meta.params?.aspectRatio || null;
@@ -771,7 +867,7 @@ function _renderTopazSrcMeta(metaEl, meta, w, h, detectedFps) {
   const fpsStr = fps ? `${fps}fps` : null;
   const chips = [resStr, ar, dur, fpsStr].filter(Boolean);
   metaEl.innerHTML = chips.map(c =>
-    `<span style="background:var(--s2);border:1px solid var(--border);padding:2px 8px;font-size:10px;border-radius:2px;">${c}</span>`
+    `<span class="src-chip">${c}</span>`
   ).join('');
   metaEl.style.display = chips.length ? 'flex' : 'none';
 }
@@ -782,57 +878,11 @@ async function topazPickFromGallery() {
 }
 
 // ── WAN 2.7 Video Edit: source video management ──────────
-function wan27eClearSource() {
-  wan27eSrcVideoId = null;
-  const info  = document.getElementById('wan27eSrcInfo');
-  const thumb = document.getElementById('wan27eSrcThumb');
-  const btn   = document.getElementById('wan27eSrcClearBtn');
-  const desc  = document.getElementById('wan27eSrcDescribeBtn');
-  if (info)  info.textContent    = 'None selected';
-  if (thumb) thumb.style.display = 'none';
-  if (btn)   btn.style.display   = 'none';
-  if (desc)  desc.style.display  = 'none';
-}
-
-async function wan27eSetSource(videoId) {
-  wan27eSrcVideoId = videoId;
-  const meta  = await dbGet('video_meta', videoId).catch(() => null);
-  const thumb = await dbGet('video_thumbs', videoId).catch(() => null);
-  const info    = document.getElementById('wan27eSrcInfo');
-  const thumbDiv = document.getElementById('wan27eSrcThumb');
-  const imgEl   = document.getElementById('wan27eSrcImg');
-  const metaEl  = document.getElementById('wan27eSrcMeta');
-  const btn     = document.getElementById('wan27eSrcClearBtn');
-  const desc    = document.getElementById('wan27eSrcDescribeBtn');
-  if (info && meta) {
-    const mb = meta.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
-    info.textContent = `${meta.duration || '?'}s · ${mb}`;
-  }
-  if (thumb?.data && imgEl && thumbDiv) {
-    imgEl.src = thumb.data;
-    thumbDiv.style.display = 'block';
-  }
-  if (btn)  btn.style.display  = '';
-  if (desc) desc.style.display = thumb?.data ? '' : 'none';
-  if (metaEl && meta) {
-    const res = meta.outWidth && meta.outHeight ? `${meta.outWidth}×${meta.outHeight}` : (meta.params?.resolution || null);
-    const chips = [res, meta.duration ? `${meta.duration}s` : null].filter(Boolean);
-    metaEl.innerHTML = chips.map(c =>
-      `<span style="background:var(--s2);border:1px solid var(--border);padding:2px 8px;font-size:10px;border-radius:2px;">${c}</span>`
-    ).join('');
-  }
-}
-
-async function wan27eDescribeSource() {
-  const img = document.getElementById('wan27eSrcImg');
-  if (!img?.src || img.src === window.location.href) return;
-  await _describeFromThumb(img.src);
-}
-
-async function wan27ePickFromGallery() {
-  switchView('video');
-  toast('Select a video, then click ▷ Use on it', 'ok');
-}
+const _wan27eIds = { info:'wan27eSrcInfo', thumb:'wan27eSrcThumb', img:'wan27eSrcImg', meta:'wan27eSrcMeta', clearBtn:'wan27eSrcClearBtn', describeBtn:'wan27eSrcDescribeBtn' };
+function wan27eClearSource() { wan27eSrcVideoId = null; _srcSlotClear(_wan27eIds); }
+async function wan27eSetSource(videoId) { wan27eSrcVideoId = videoId; await _srcSlotSet(_wan27eIds, videoId); }
+async function wan27eDescribeSource() { _srcSlotDescribe('wan27eSrcImg'); }
+async function wan27ePickFromGallery() { switchView('video'); toast('Select a video, then click ▷ Use on it', 'ok'); }
 
 // Called from ✦ Topaz card button — selects source + switches to Topaz model in panel
 async function openTopazFromGallery(videoId) {
@@ -887,7 +937,7 @@ async function useVideoFromGallery(videoId) {
 async function uploadVideoToFal(file, falKey) {
   // Upload via Worker R2 proxy — storage.fal.run is CORS-blocked from file:// protocol
   // falKey param kept for API compatibility but not used (R2 needs no external key)
-  const proxyUrl = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
+  const proxyUrl = getProxyUrl();
   if (!proxyUrl) throw new Error('Proxy URL missing. Add it in Setup tab.');
   const res = await fetch(`${proxyUrl}/r2/upload`, {
     method: 'POST',
@@ -1275,6 +1325,8 @@ function _applyVideoModel(key) {
     // Restore previous selection if still valid, else default to 1080p
     if (m.resolutions?.includes(curRes)) veoResSel.value = curRes;
     else veoResSel.value = '1080p';
+    // Sync duration radio states for current resolution (enables/disables 4s/6s)
+    onVeoResolutionChange();
   }
 
   // Veo ref mode selector
@@ -1392,7 +1444,21 @@ function onVeoRefModeChange(mode) {
 function onVeoResolutionChange() {
   const sel = document.getElementById('veoResolution');
   const note = document.getElementById('veoResNote');
-  if (note) note.style.display = sel?.value === '4k' ? 'block' : 'none';
+  const res = sel?.value || '720p';
+  if (note) note.style.display = res === '4k' ? 'block' : 'none';
+  // 1080p and 4K require 8s duration — disable shorter options, force 8s
+  const needsForce8 = (res === '1080p' || res === '4k');
+  document.querySelectorAll('input[name="videoDurFixed"]').forEach(r => {
+    const v = parseInt(r.value);
+    r.disabled = needsForce8 && v < 8;
+    if (r.disabled && r.checked) {
+      r.checked = false;
+      const r8 = document.querySelector('input[name="videoDurFixed"][value="8"]');
+      if (r8) { r8.checked = true; r8.dispatchEvent(new Event('change')); }
+    }
+    const lbl = r.closest('label');
+    if (lbl) lbl.style.opacity = r.disabled ? '0.35' : '1';
+  });
   updateVideoResInfo();
 }
 
@@ -1565,6 +1631,7 @@ function startVideoRefRename(idx, labelEl) {
       if (asset) {
         asset.userLabel = val === asset.autoName ? '' : val;
         await dbPut('assets', asset);
+        await dbPutAssetMeta(asset);
         // Sync back to any image refs using the same asset
         refs?.forEach(imgRef => { if (imgRef.assetId === r.assetId) imgRef.userLabel = asset.userLabel; });
       }
@@ -1686,7 +1753,7 @@ async function generateVideo() {
   const falKey = document.getElementById('fluxApiKey')?.value?.trim() || '';
   const googleKey = document.getElementById('apiKey')?.value?.trim() || localStorage.getItem('gis_apikey') || '';
   const lumaKey  = (localStorage.getItem('gis_luma_apikey') || '').trim();
-  const proxyUrl = localStorage.getItem('gis_proxy_url')?.trim() || '';
+  const proxyUrl = getProxyUrl();
 
   // ── Topaz dispatch ──────────────────────────────────────
   const activeKey = getActiveVideoModelKey();
@@ -1863,26 +1930,9 @@ async function generateVideo() {
 
 
 // ── Compress image for upload (max 10MB limit on fal.ai) ─
+// Delegates to _compressRefToJpeg (fal.js) — same logic, single implementation
 async function compressImageForUpload(base64, mimeType) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      const MAX = 2560;
-      let w = img.width, h = img.height;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-        else       { w = Math.round(w * MAX / h); h = MAX; }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      // JPEG 100% quality — preserve detail for video render
-      const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
-      const compressed = dataUrl.split(',')[1];
-      resolve({ data: compressed, mimeType: 'image/jpeg' });
-    };
-    img.src = `data:${mimeType};base64,${base64}`;
-  });
+  return _compressRefToJpeg({ data: base64, mimeType }, 2560);
 }
 
 // ── Google Veo video generation ──────────────────────────
@@ -1934,9 +1984,11 @@ async function callVeoVideo(job) {
   }
 
   // Parameters — NO generateAudio (unsupported, Veo always generates audio automatically)
+  // Constraint: 1080p and 4K require 8s duration (API returns 400 otherwise)
+  const effectiveDuration = (veoResolution === '1080p' || veoResolution === '4k') ? 8 : veoDuration;
   const parameters = {
     aspectRatio,
-    durationSeconds: veoDuration,
+    durationSeconds: effectiveDuration,
     resolution: veoResolution,
     sampleCount: 1,
   };
@@ -2000,36 +2052,13 @@ async function callVeoVideo(job) {
   if (!videoRes.ok) throw new Error(`Veo video download failed: ${videoRes.status}`);
   const videoArrayBuffer = await videoRes.arrayBuffer();
 
-  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-  job.status = 'done'; job.elapsed = `${elapsed}s`;
-
-  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-  const thumbData = await generateVideoThumb(blob);
-  const veoDims = await _topazGetDims(blob).catch(() => null);
-
-  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  const veoFps = _parseMp4Fps(videoArrayBuffer);
-  const videoRecord = {
-    id: videoId, ts: Date.now(), model: model.name, modelKey: job.modelKey, prompt: job.prompt,
-    params: { duration: veoDuration, aspectRatio: job.aspectRatio, resolution: veoResolution, veoRefMode, ...(veoFps ? { fps: veoFps } : {}) },
-    videoData: videoArrayBuffer, mimeType: 'video/mp4', duration: veoDuration,
-    fileSize: videoArrayBuffer.byteLength,
-    ...(veoDims?.w ? { outWidth: veoDims.w, outHeight: veoDims.h } : {}),
-    folder: job.targetFolder === 'all' ? '' : job.targetFolder,
-    favorite: false, cdnUrl: videoUri, cdnExpiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
-    usedVideoRefs: job.videoRefsSnapshot || [],
-  };
-
-  await dbPut('videos', videoRecord);
-  const { videoData, ...metaOnly } = videoRecord;
-  await dbPut('video_meta', metaOnly);
-  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-  trackSpend('google', model.modelId, 1, veoDuration);
-
-  renderVideoQueue();
-  removeVideoPlaceholder(job);
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey: job.modelKey, prompt: job.prompt,
+    params: { duration: effectiveDuration, aspectRatio: job.aspectRatio, resolution: veoResolution, veoRefMode },
+    duration: effectiveDuration,
+    cdnUrl: videoUri,
+  }, job, ['google', model.modelId, 1, effectiveDuration]);
   toast(`Veo video generated · ${elapsed}s`, 'ok');
-  renderVideoResultCard(videoRecord, thumbData);
 }
 
 // ── fal.ai async queue for video ─────────────────────────
@@ -2137,157 +2166,21 @@ async function runVideoJob(job) {
     payload.image_url = `data:${videoRefsSnap[0].mimeType};base64,${videoRefsSnap[0].data}`;
   }
 
-  // Submit to queue
+  // Submit, poll, download via shared helper
   const logPayload = {...payload};
   ['start_image_url','image_url','end_image_url','start_frame_image_url','end_frame_image_url'].forEach(k => {
     if (logPayload[k]) logPayload[k] = logPayload[k].slice(0, 40) + '…';
   });
   console.log('[GIS Video] Submitting payload:', JSON.stringify(logPayload));
-  const queueUrl = `https://queue.fal.run/${model.endpoint}`;
-  const submitRes = await fetch(queueUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!submitRes.ok) {
-    let errText = '';
-    try { errText = await submitRes.text(); } catch(e) {}
-    throw new Error(`Submit ${submitRes.status}: ${errText.slice(0,300) || 'unknown error'}`);
-  }
-  const submitted = await submitRes.json();
-  const requestId = submitted.request_id;
-  if (!requestId) {
-    const err = JSON.stringify(submitted).slice(0, 200);
-    throw new Error(`No request_id. Response: ${err}`);
-  }
+  const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(falKey, model.endpoint, payload, job, { label: model.name, timeoutMin: 20 });
 
-  job.requestId = requestId;
-  job.status = 'queued';
-  renderVideoQueue();
-  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
-
-  // Poll for completion — use URLs from submit response (most reliable)
-  const statusUrl = submitted.status_url || `${queueUrl}/requests/${requestId}/status`;
-  const resultUrl = submitted.response_url || `${queueUrl}/requests/${requestId}`;
-  const POLL_INTERVAL = 5000;
-  const TIMEOUT = 20 * 60 * 1000;
-  const deadline = Date.now() + TIMEOUT;
-
-  await new Promise((resolve, reject) => {
-    const poll = async () => {
-      if (Date.now() > deadline) { reject(new Error('Timeout after 20 minutes')); return; }
-      if (job.cancelled) { reject(new Error('Cancelled')); return; }
-      try {
-        const statusRes = await fetch(statusUrl, {
-          headers: { 'Authorization': `Key ${falKey}` },
-        });
-        if (!statusRes.ok) { setTimeout(poll, POLL_INTERVAL); return; }
-        const statusData = await statusRes.json();
-        const status = statusData.status;
-        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-
-        if (status === 'IN_QUEUE') {
-          updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`);
-        } else if (status === 'IN_PROGRESS') {
-          job.status = 'running';
-          renderVideoQueue();
-          updateVideoPlaceholderStatus(job, `GENERATING · ${elapsed}s`);
-        } else if (status === 'COMPLETED') {
-          resolve();
-          return;
-        } else if (status === 'FAILED') {
-          reject(new Error(statusData.error || 'Generation failed'));
-          return;
-        }
-        setTimeout(poll, POLL_INTERVAL);
-      } catch(e) {
-        setTimeout(poll, POLL_INTERVAL);
-      }
-    };
-    setTimeout(poll, POLL_INTERVAL);
-  });
-
-  // Fetch result — check status response for embedded output first
-  job.status = 'fetching';
-  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
-
-  let videoUrl = null;
-  // Try getting output from a fresh status check (COMPLETED status may include output)
-  try {
-    const finalStatusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-    if (finalStatusRes.ok) {
-      const finalStatus = await finalStatusRes.json();
-      videoUrl = finalStatus.output?.video?.url || finalStatus.video?.url;
-    }
-  } catch(e) { /* fall through to result URL */ }
-
-  // Fall back to result URL
-  if (!videoUrl) {
-    const resultRes = await fetch(resultUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-    if (!resultRes.ok) {
-      // Try to get error details from response body
-      let errBody = '';
-      try { errBody = await resultRes.text(); } catch(e) {}
-      const errDetail = errBody.slice(0, 600);
-      const errMsg = `Result fetch failed (${resultRes.status}): ${errDetail || 'no details'}`;
-      console.error(errMsg, '\nPayload:', JSON.stringify(payload));
-      throw new Error(errMsg);
-    }
-    const result = await resultRes.json();
-    videoUrl = result.video?.url || result.output?.video?.url;
-  }
-
-  if (!videoUrl) throw new Error('No video URL in fal.ai result');
-
-  // Download video as ArrayBuffer
-  const videoRes = await fetch(videoUrl);
-  if (!videoRes.ok) throw new Error(`Video download failed: ${videoRes.status}`);
-  const videoArrayBuffer = await videoRes.arrayBuffer();
-
-  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-  job.status = 'done';
-  job.elapsed = `${elapsed}s`;
-
-  // Generate thumbnail from first frame
-  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-  const thumbData = await generateVideoThumb(blob);
-  const dims = await _topazGetDims(blob).catch(() => null);
-
-  // Save to DB
-  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-  const fileSize = videoArrayBuffer.byteLength;
-  const detectedFps = _parseMp4Fps(videoArrayBuffer);
-  const videoRecord = {
-    id: videoId,
-    ts: Date.now(),
-    model: job.model.name,
-    modelKey: job.modelKey,
-    prompt: job.prompt,
-    params: { duration: job.duration, aspectRatio: job.aspectRatio, enableAudio: job.enableAudio, cfgScale: job.cfgScale, ...(detectedFps ? { fps: detectedFps } : {}) },
-    videoData: videoArrayBuffer,
-    mimeType: 'video/mp4',
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: job.model.name, modelKey: job.modelKey, prompt: job.prompt,
+    params: { duration: job.duration, aspectRatio: job.aspectRatio, enableAudio: job.enableAudio, cfgScale: job.cfgScale },
     duration: job.duration,
-    fileSize,
-    ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
-    folder: job.targetFolder === 'all' ? '' : job.targetFolder,
-    favorite: false,
     cdnUrl: videoUrl,
-    cdnExpiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
-    usedVideoRefs: job.videoRefsSnapshot || [],  // snapshot from submit time, not live global
-  };
-
-  await dbPut('videos', videoRecord);
-  const { videoData, ...metaOnly } = videoRecord;
-  await dbPut('video_meta', metaOnly);
-  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-  trackSpend('fal', '_fal_video', 1, job.duration || 5);
-
-  renderVideoQueue();
-  removeVideoPlaceholder(job);
+  }, job, ['fal', '_fal_video', 1, job.duration || 5]);
   toast(`Video generated · ${elapsed}s`, 'ok');
-
-  // Render result card in video output area
-  renderVideoResultCard(videoRecord, thumbData);
 }
 
 // ── Luma Ray3 / Ray3.14 video generation ─────────────────
@@ -2389,52 +2282,18 @@ async function callLumaVideo(job) {
       const videoRes = await fetch(status.video_url);
       if (!videoRes.ok) throw new Error(`Luma video download failed (${videoRes.status})`);
       const videoArrayBuffer = await videoRes.arrayBuffer();
-
-      const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-      job.status = 'done';
-      job.elapsed = `${elapsed}s`;
-
-      const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-      const thumbData = await generateVideoThumb(blob);
-      const lumaDims = await _topazGetDims(blob).catch(() => null);
-
-      // Build duration numeric value for DB (strip 's' suffix)
       const durSec = parseInt(lumaDurationSel || '5');
 
-      const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      const lumaFps = _parseMp4Fps(videoArrayBuffer);
-      const videoRecord = {
-        id: videoId, ts: Date.now(),
-        model: model.name, modelKey,
-        prompt,
-        params: {
-          aspectRatio, resolution: lumaResolution, duration: lumaDurationSel,
-          loop: lumaLoop, colorMode: lumaColorMode, ...(lumaFps ? { fps: lumaFps } : {}),
-        },
-        videoData: videoArrayBuffer, mimeType: 'video/mp4',
-        duration: durSec, fileSize: videoArrayBuffer.byteLength,
-        ...(lumaDims?.w ? { outWidth: lumaDims.w, outHeight: lumaDims.h } : {}),
-        folder: targetFolder === 'all' ? '' : targetFolder,
-        favorite: false,
+      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+        model: model.name, modelKey, prompt,
+        params: { aspectRatio, resolution: lumaResolution, duration: lumaDurationSel, loop: lumaLoop, colorMode: lumaColorMode },
+        duration: durSec,
         cdnUrl: status.video_url,
-        cdnExpiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
-        // EXR URL stored for later download (if HDR+EXR was requested)
         exrUrl: status.exr_url || null,
         usedVideoRefs: videoRefsSnapshot || [],
-      };
-
-      await dbPut('videos', videoRecord);
-      const { videoData: _vd, ...metaOnly } = videoRecord;
-      await dbPut('video_meta', metaOnly);
-      if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-      trackSpend('luma', model.modelId, 1, durSec);
-
-      renderVideoQueue();
-      removeVideoPlaceholder(job);
-
+      }, job, ['luma', model.modelId, 1, durSec]);
       const exrNote = status.exr_url ? ' · EXR ↓' : '';
       toast(`Ray3 video generated · ${elapsed}s${exrNote}`, 'ok');
-      renderVideoResultCard(videoRecord, thumbData);
       return;
     }
     // status === 'pending' → continue polling
@@ -2446,23 +2305,47 @@ async function callLumaVideo(job) {
 // ── Thumbnail generation ─────────────────────────────────
 async function generateVideoThumb(blob) {
   return new Promise(resolve => {
+    const TIMEOUT = 8000;
+    const timer = setTimeout(() => { cleanup(); resolve(null); }, TIMEOUT);
     const url = URL.createObjectURL(blob);
     const video = document.createElement('video');
     video.muted = true;
-    video.preload = 'metadata';
-    video.onloadeddata = () => {
-      video.currentTime = 0.1;
-    };
-    video.onseeked = () => {
+    video.preload = 'auto';
+    let seekAttempt = 0;
+    const seekTimes = [0.5, 1.0, 0.1]; // try multiple seek points
+
+    function cleanup() {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+    }
+
+    function captureFrame() {
       try {
         const canvas = document.createElement('canvas');
         canvas.width = 320; canvas.height = 180;
-        canvas.getContext('2d').drawImage(video, 0, 0, 320, 180);
-        URL.revokeObjectURL(url);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 320, 180);
+        // Black-frame detection: sample center pixels
+        const sample = ctx.getImageData(140, 70, 40, 40).data;
+        let bright = 0;
+        for (let i = 0; i < sample.length; i += 4) bright += sample[i] + sample[i+1] + sample[i+2];
+        const avgBright = bright / (sample.length / 4 * 3);
+        if (avgBright < 8 && seekAttempt < seekTimes.length - 1) {
+          // Too dark — try next seek point
+          seekAttempt++;
+          video.currentTime = Math.min(seekTimes[seekAttempt], video.duration * 0.5);
+          return; // onseeked will fire again
+        }
+        cleanup();
         resolve(canvas.toDataURL('image/jpeg', 0.8));
-      } catch(e) { URL.revokeObjectURL(url); resolve(null); }
+      } catch(e) { cleanup(); resolve(null); }
+    }
+
+    video.onloadeddata = () => {
+      video.currentTime = Math.min(seekTimes[0], video.duration * 0.5);
     };
-    video.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    video.onseeked = captureFrame;
+    video.onerror = () => { cleanup(); resolve(null); };
     video.src = url;
   });
 }
@@ -2547,7 +2430,8 @@ function renderVideoResultCard(rec, thumbData) {
   if (emptyState) emptyState.style.display = 'none';
 
   const div = document.createElement('div');
-  div.className = 'img-card';
+  div.className = 'img-card vid-result-card';
+  div.dataset.vid = rec.id;
   const thumbSrc = thumbData || '';
   div.innerHTML = `
     <div class="img-card-top-spacer"></div>
@@ -2923,23 +2807,38 @@ async function renderVideoGallery(items) {
       </div>`;
     card.onclick = e => { if (e.target.closest('button,span.video-sel,span.video-liked-badge')) return; videoCardClick(e, item.id); };
     // Hover playback: 2s delay → play video mini in thumbnail
-    if (item.cdnUrl) {
+    // Hover playback — always from local DB data (no CDN dependency)
+    {
       let hoverTimer = null;
       card.addEventListener('mouseenter', () => {
-        hoverTimer = setTimeout(() => {
+        hoverTimer = setTimeout(async () => {
           const wrap = card.querySelector('.video-thumb-wrap');
           if (!wrap || wrap.querySelector('video')) return;
-          const vid = document.createElement('video');
-          vid.src = item.cdnUrl;
-          vid.autoplay = true; vid.muted = true; vid.loop = true; vid.playsInline = true;
-          vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;';
-          wrap.appendChild(vid);
+          try {
+            const rec = await dbGet('videos', item.id);
+            if (!rec?.videoData) return;
+            const blob = new Blob([rec.videoData], { type: 'video/mp4' });
+            const blobUrl = URL.createObjectURL(blob);
+            // Check card is still hovered (user may have left during DB load)
+            if (!card.matches(':hover')) { URL.revokeObjectURL(blobUrl); return; }
+            const vid = document.createElement('video');
+            vid.src = blobUrl;
+            vid._blobUrl = blobUrl;
+            vid.autoplay = true; vid.muted = true; vid.loop = true; vid.playsInline = true;
+            vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;';
+            vid.onerror = () => { URL.revokeObjectURL(blobUrl); vid.remove(); };
+            wrap.appendChild(vid);
+          } catch { /* DB error — skip hover */ }
         }, 2000);
       });
       card.addEventListener('mouseleave', () => {
         clearTimeout(hoverTimer);
         const vid = card.querySelector('.video-thumb-wrap video');
-        if (vid) { vid.pause(); vid.remove(); }
+        if (vid) {
+          vid.pause();
+          if (vid._blobUrl) URL.revokeObjectURL(vid._blobUrl);
+          vid.remove();
+        }
       });
     }
     grid.appendChild(card);
@@ -3054,14 +2953,20 @@ async function videoToggleLike(id) {
   if (outCard) {
     outCard.classList.toggle('is-liked', newFav);
     const likeBtn = outCard.querySelector('.like-btn');
-    if (likeBtn) likeBtn.textContent = newFav ? '♥ Unlike' : '♡ Like';
+    if (likeBtn) {
+      likeBtn.textContent = newFav ? '♥ Unlike' : '♡ Like';
+      likeBtn.classList.toggle('liked', newFav);
+    }
   }
   return newFav;
 }
 
 async function videoLikeById(id, btn) {
   const newState = await videoToggleLike(id);
-  if (btn) btn.textContent = newState ? '♥ Unlike' : '♡ Like';
+  if (btn) {
+    btn.textContent = newState ? '♥ Unlike' : '♡ Like';
+    btn.classList.toggle('liked', newState);
+  }
 }
 
 // ── Download ─────────────────────────────────────────────
@@ -3303,8 +3208,13 @@ async function openVideoLightboxById(id) {
   const sizeMB = (rec.fileSize/1024/1024).toFixed(1);
   const infoLine = _videoInfoLine(rec);
   meta.textContent = `${rec.model} · ${sizeMB}MB · ${dateFmt} · ${infoLine}`;
-  // Like button state
-  if (likeBtn) likeBtn.textContent = rec.favorite ? '♥ Unlike' : '♡ Like';
+  // Like button state — read from video_meta (source of truth for favorite)
+  const metaRec = await dbGet('video_meta', id).catch(()=>null);
+  const isLiked = !!(metaRec?.favorite);
+  if (likeBtn) {
+    likeBtn.textContent = isLiked ? '♥ Unlike' : '♡ Like';
+    likeBtn.classList.toggle('liked', isLiked);
+  }
 
   lb.classList.add('open');
 
@@ -3371,8 +3281,8 @@ async function videoSaveFrame(which) {
   await createAsset(base64, 'image/png', 'video_frame', videoLbCurrentId);
 
   // Visual flash feedback on the button
-  const btn = document.querySelector('#videoLightbox .vlb-btn[onclick*="saveFrame"]');
-  if (btn) { btn.classList.add('flashed'); setTimeout(() => btn.classList.remove('flashed'), 600); }
+  const btn = document.querySelector('#videoFrameScrubWrap .vlb-btn');
+  if (btn) { btn.classList.remove('flashed'); void btn.offsetWidth; btn.classList.add('flashed'); setTimeout(() => btn.classList.remove('flashed'), 600); }
   toast(`Frame ${timeLabel} saved to Assets ✓`, 'ok');
 }
 
@@ -3387,7 +3297,10 @@ async function videoLbToggleLike() {
   if (!meta) return;
   const newState = await videoToggleLike(videoLbCurrentId);
   const btn = document.getElementById('videoLbLikeBtn');
-  if (btn) btn.textContent = newState ? '♥ Unlike' : '♡ Like';
+  if (btn) {
+    btn.textContent = newState ? '♥ Unlike' : '♡ Like';
+    btn.classList.toggle('liked', newState);
+  }
 }
 
 // ── Keyboard: Escape closes video lightbox ───────────────
@@ -3476,133 +3389,21 @@ async function callWan27Video(job) {
     if (extendVideoId) {
       const extFull = await dbGet('videos', extendVideoId).catch(() => null);
       if (extFull?.videoData) {
-        const extBytes = new Uint8Array(extFull.videoData);
-        let extBin = '';
-        for (let i = 0; i < extBytes.length; i += 8192)
-          extBin += String.fromCharCode(...extBytes.subarray(i, i + 8192));
-        payload.video_url = `data:video/mp4;base64,${btoa(extBin)}`;
+        payload.video_url = `data:video/mp4;base64,${_arrayBufferToBase64(extFull.videoData)}`;
       }
     }
   }
 
-  // Submit to fal.ai queue (same as Kling, WAN 2.6)
-  job.status = 'queued'; renderVideoQueue();
-  const queueUrl = `https://queue.fal.run/${endpoint}`;
+  // Submit, poll, download via shared helper
   console.log('[wan27] submit →', endpoint, '| resolution:', resolution, '| duration:', duration);
-  const submitRes = await fetch(queueUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!submitRes.ok) {
-    const errText = await submitRes.text().catch(() => '');
-    throw new Error(`WAN 2.7 submit ${submitRes.status}: ${errText.slice(0,300)}`);
-  }
-  const submitted = await submitRes.json();
-  const requestId = submitted.request_id;
-  if (!requestId) throw new Error(`WAN 2.7: no request_id. Response: ${JSON.stringify(submitted).slice(0,200)}`);
+  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7', timeoutMin: 25 });
 
-  job.requestId = requestId;
-  job.status = 'queued';
-  renderVideoQueue();
-  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
-
-  const statusUrl  = submitted.status_url  || `${queueUrl}/requests/${requestId}/status`;
-  const responseUrl = submitted.response_url || null;
-  const POLL_MS = 5000;
-  const TIMEOUT = 25 * 60 * 1000;
-  const deadline = Date.now() + TIMEOUT;
-
-  // Capture COMPLETED response directly — fal.ai includes output in the status response
-  let completedData = null;
-
-  await new Promise((resolve, reject) => {
-    const poll = async () => {
-      if (Date.now() > deadline) { reject(new Error('WAN 2.7: timeout after 25 minutes')); return; }
-      if (job.cancelled) { reject(new Error('Cancelled')); return; }
-      try {
-        const st = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-        if (!st.ok) { setTimeout(poll, POLL_MS); return; }
-        const s = await st.json();
-        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-        if (s.status === 'IN_QUEUE')    { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
-        else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `GENERATING · ${elapsed}s`); }
-        else if (s.status === 'COMPLETED') { completedData = s; resolve(); return; }
-        else if (s.status === 'FAILED')  { reject(new Error(s.error || 'Generation failed')); return; }
-        setTimeout(poll, POLL_MS);
-      } catch(e) { setTimeout(poll, POLL_MS); }
-    };
-    setTimeout(poll, POLL_MS);
-  });
-
-  job.status = 'fetching';
-  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
-
-  // fal.ai output extraction — output is in the COMPLETED status response
-  const _extractVideoUrl = (obj) =>
-    obj?.output?.video?.url   // standard: {status:COMPLETED, output:{video:{url}}}
-    || obj?.output?.url       // direct: {output:{url}}
-    || obj?.video?.url        // top-level
-    || obj?.data?.video?.url  // wrapped
-    || null;
-
-  // response_url returns 200+video on success, 422+error on job failure
-  // (fal.ai WAN 2.7 returns result synchronously at response_url after COMPLETED)
-  let videoUrl = _extractVideoUrl(completedData);
-
-  if (!videoUrl && responseUrl) {
-    try {
-      const r = await fetch(responseUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-      if (r.ok) {
-        videoUrl = _extractVideoUrl(await r.json());
-      } else {
-        const body = await r.text().catch(() => '');
-        throw new Error(`WAN 2.7 result fetch ${r.status}: ${body.slice(0, 400)}`);
-      }
-    } catch(e) {
-      if (e.message.startsWith('WAN 2.7 result fetch')) throw e;
-    }
-  }
-
-  if (!videoUrl) throw new Error('WAN 2.7: no video URL in result. Job: ' + requestId);
-
-  const videoRes = await fetch(videoUrl);
-  if (!videoRes.ok) throw new Error(`WAN 2.7 video download ${videoRes.status}`);
-  const videoArrayBuffer = await videoRes.arrayBuffer();
-
-  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-  job.status = 'done'; job.elapsed = `${elapsed}s`;
-
-  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-  const thumbData = await generateVideoThumb(blob);
-  const dims = await _topazGetDims(blob).catch(() => null);
-  const detectedFps = _parseMp4Fps(videoArrayBuffer);
-
-  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-  const videoRecord = {
-    id: videoId, ts: Date.now(),
-    model: model.name, modelKey,
-    prompt: job.prompt,
-    params: { duration, resolution, seed: seed || null, negPrompt, promptExpand,
-              ...(detectedFps ? { fps: detectedFps } : {}) },
-    videoData: videoArrayBuffer, mimeType: 'video/mp4',
-    duration, fileSize: videoArrayBuffer.byteLength,
-    ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
-    folder: targetFolder === 'all' ? '' : targetFolder,
-    favorite: false,
-    usedVideoRefs: job.videoRefsSnapshot || [],
-  };
-  await dbPut('videos', videoRecord);
-  const { videoData, ...metaOnly } = videoRecord;
-  await dbPut('video_meta', metaOnly);
-  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-
-  trackSpend('fal', resolution === '1080p' ? '_wan27_1080p' : '_wan27_720p', 1, duration);
-
-  renderVideoQueue();
-  removeVideoPlaceholder(job);
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt: job.prompt,
+    params: { duration, resolution, seed: seed || null, negPrompt, promptExpand },
+    duration,
+  }, job, ['fal', resolution === '1080p' ? '_wan27_1080p' : '_wan27_720p', 1, duration]);
   toast(`WAN 2.7 done · ${elapsed}s`, 'ok');
-  renderVideoResultCard(videoRecord, thumbData);
 }
 
 // ── WAN 2.7 Video Edit — fal.ai queue (přímé, bez proxy) ──
@@ -3639,12 +3440,7 @@ async function callWan27eVideo(job) {
   const actualDuration = srcMeta?.duration || 5;
 
   // Encode source video as base64 data URI (fal.ai accepts data URIs natively)
-  const srcBytes = new Uint8Array(srcFull.videoData);
-  let srcBin = '';
-  for (let i = 0; i < srcBytes.length; i += 8192)
-    srcBin += String.fromCharCode(...srcBytes.subarray(i, i + 8192));
-  const srcB64 = btoa(srcBin);
-  const videoUri = `data:video/mp4;base64,${srcB64}`;
+  const videoUri = `data:video/mp4;base64,${_arrayBufferToBase64(srcFull.videoData)}`;
 
   const payload = {
     prompt,
@@ -3671,117 +3467,16 @@ async function callWan27eVideo(job) {
     }
   }
 
-  // Submit to fal.ai queue
-  job.status = 'queued'; renderVideoQueue();
-  const queueUrl = `https://queue.fal.run/${endpoint}`;
+  // Submit, poll, download via shared helper
   console.log('[wan27e] submit → fal.ai | resolution:', effectiveRes, '| duration:', duration, '| audio:', audioSetting);
-  const submitRes = await fetch(queueUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!submitRes.ok) {
-    const errText = await submitRes.text().catch(() => '');
-    throw new Error(`WAN 2.7 Edit submit ${submitRes.status}: ${errText.slice(0,300)}`);
-  }
-  const submitted = await submitRes.json();
-  const requestId = submitted.request_id;
-  if (!requestId) throw new Error(`WAN 2.7 Edit: no request_id. Response: ${JSON.stringify(submitted).slice(0,200)}`);
+  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7 Edit', timeoutMin: 30, progressLabel: 'EDITING' });
 
-  job.requestId = requestId;
-  job.status = 'queued';
-  renderVideoQueue();
-  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
-
-  const statusUrl   = submitted.status_url   || `${queueUrl}/requests/${requestId}/status`;
-  const responseUrl = submitted.response_url || null;
-  const POLL_MS = 5000;
-  const TIMEOUT = 30 * 60 * 1000; // Video Edit can be slow
-  const deadline = Date.now() + TIMEOUT;
-
-  let completedData = null;
-
-  await new Promise((resolve, reject) => {
-    const poll = async () => {
-      if (Date.now() > deadline) { reject(new Error('WAN 2.7 Edit: timeout after 30 minutes')); return; }
-      if (job.cancelled) { reject(new Error('Cancelled')); return; }
-      try {
-        const st = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-        if (!st.ok) { setTimeout(poll, POLL_MS); return; }
-        const s = await st.json();
-        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-        if (s.status === 'IN_QUEUE')         { updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`); }
-        else if (s.status === 'IN_PROGRESS') { job.status = 'running'; renderVideoQueue(); updateVideoPlaceholderStatus(job, `EDITING · ${elapsed}s`); }
-        else if (s.status === 'COMPLETED')   { completedData = s; resolve(); return; }
-        else if (s.status === 'FAILED')      { reject(new Error(s.error || 'Edit failed')); return; }
-        setTimeout(poll, POLL_MS);
-      } catch(e) { setTimeout(poll, POLL_MS); }
-    };
-    setTimeout(poll, POLL_MS);
-  });
-
-  job.status = 'fetching';
-  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
-
-  const _extractVidUrl = (obj) =>
-    obj?.output?.video?.url || obj?.output?.url || obj?.video?.url || obj?.data?.video?.url || null;
-
-  let videoUrl = _extractVidUrl(completedData);
-
-  // Fallback: fetch result from response_url (same pattern as callWan27Video)
-  if (!videoUrl && responseUrl) {
-    try {
-      const r = await fetch(responseUrl, { headers: { 'Authorization': `Key ${falKey}` } });
-      if (r.ok) {
-        videoUrl = _extractVidUrl(await r.json());
-      } else {
-        const body = await r.text().catch(() => '');
-        throw new Error(`WAN 2.7 Edit result fetch ${r.status}: ${body.slice(0, 400)}`);
-      }
-    } catch(e) {
-      if (e.message.startsWith('WAN 2.7 Edit result fetch')) throw e;
-    }
-  }
-
-  if (!videoUrl) throw new Error('WAN 2.7 Edit: no video URL in result. Check fal.ai dashboard for job ' + requestId);
-
-  const videoRes = await fetch(videoUrl);
-  if (!videoRes.ok) throw new Error(`WAN 2.7 Edit video download ${videoRes.status}`);
-  const videoArrayBuffer = await videoRes.arrayBuffer();
-
-  const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-  job.status = 'done'; job.elapsed = `${elapsed}s`;
-
-  const blob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-  const thumbData = await generateVideoThumb(blob);
-  const dims = await _topazGetDims(blob).catch(() => null);
-  const detectedFps = _parseMp4Fps(videoArrayBuffer);
-
-  const videoId = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-  const videoRecord = {
-    id: videoId, ts: Date.now(),
-    model: model.name, modelKey,
-    prompt: job.prompt,
-    params: { resolution: effectiveRes, audioSetting, aspectRatio, seed: seed || null,
-              srcVideoId: wan27eSnap.srcVideoId, ...(detectedFps ? { fps: detectedFps } : {}) },
-    videoData: videoArrayBuffer, mimeType: 'video/mp4',
-    duration: actualDuration, fileSize: videoArrayBuffer.byteLength,
-    ...(dims?.w ? { outWidth: dims.w, outHeight: dims.h } : {}),
-    folder: targetFolder === 'all' ? '' : targetFolder,
-    favorite: false,
-    usedVideoRefs: job.videoRefsSnapshot || [],
-  };
-  await dbPut('videos', videoRecord);
-  const { videoData, ...metaOnly } = videoRecord;
-  await dbPut('video_meta', metaOnly);
-  if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-
-  trackSpend('fal', effectiveRes === '1080p' ? '_wan27e_1080p' : '_wan27e_720p', 1, actualDuration);
-
-  renderVideoQueue();
-  removeVideoPlaceholder(job);
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt: job.prompt,
+    params: { resolution: effectiveRes, audioSetting, aspectRatio, seed: seed || null, srcVideoId: wan27eSnap.srcVideoId },
+    duration: actualDuration,
+  }, job, ['fal', effectiveRes === '1080p' ? '_wan27e_1080p' : '_wan27e_720p', 1, actualDuration]);
   toast(`WAN 2.7 Edit done · ${elapsed}s`, 'ok');
-  renderVideoResultCard(videoRecord, thumbData);
 }
 
 // ── Describe video ref image ──────────────────────────────
@@ -4167,7 +3862,7 @@ function initVideoRubberBand() {
 
 const TOPAZ_MODEL_NAMES = {
   'slp-2.5': 'Precise 2.5', 'slp-2': 'Precise 2', 'slp-1': 'Precise 1',
-  'slhq': 'Starlight HQ', 'slm': 'Starlight Mini', 'astra-1': 'Astra 1',
+  'slhq': 'Starlight HQ', 'slm': 'Starlight Mini',
 };
 
 // ══════════════════════════════════════════════════════════
@@ -4225,12 +3920,7 @@ async function runMagnificVideoUpscaleJob(job) {
 
   // Base64 encode video
   updateVideoPlaceholderStatus(job, 'encoding…');
-  const videoBytes = new Uint8Array(rec.videoData);
-  let videoBin = '';
-  const CHUNK = 8192;
-  for (let i = 0; i < videoBytes.length; i += CHUNK)
-    videoBin += String.fromCharCode(...videoBytes.subarray(i, i + CHUNK));
-  const videoB64 = btoa(videoBin);
+  const videoB64 = _arrayBufferToBase64(rec.videoData);
 
   // Submit to proxy
   updateVideoPlaceholderStatus(job, 'uploading…');
@@ -4281,32 +3971,15 @@ async function runMagnificVideoUpscaleJob(job) {
       const vidResp = await fetch(pollData.url);
       if (!vidResp.ok) throw new Error(`Download failed: ${vidResp.status}`);
       const videoArrayBuffer = await vidResp.arrayBuffer();
-
-      // Save to gallery — same pattern as Topaz
-      const thumbBlob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-      const thumbData = await generateVideoThumb(thumbBlob);
-      const videoId   = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-      const resLabel  = job.resolution.toUpperCase();
       const modelLabel = job.model.name;
-      const videoRecord = {
-        id: videoId, ts: Date.now(), model: modelLabel,
-        modelKey: `magnific_video_${job.magnificMode}`, prompt: job.prompt,
-        params: { magnific: { mode: job.magnificMode, resolution: job.resolution, fps_boost: job.fpsBost, sharpen: job.sharpen, smart_grain: job.smartGrain }, srcId: job.srcId },
-        videoData: videoArrayBuffer, mimeType: 'video/mp4',
-        duration: job.srcDuration, fileSize: videoArrayBuffer.byteLength,
-        folder: job.targetFolder || '', favorite: false,
-      };
-      await dbPut('videos', videoRecord);
-      const { videoData: _, ...metaOnly } = videoRecord;
-      await dbPut('video_meta', metaOnly);
-      if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
 
-      trackSpend('freepik', '_magnific_vid');
-      job.status = 'done';
-      removeVideoPlaceholder(job);
-      renderVideoResultCard(videoRecord, thumbData);
+      await _saveVideoResult(videoArrayBuffer, {
+        model: modelLabel, modelKey: `magnific_video_${job.magnificMode}`, prompt: job.prompt,
+        params: { magnific: { mode: job.magnificMode, resolution: job.resolution, fps_boost: job.fpsBost, sharpen: job.sharpen, smart_grain: job.smartGrain }, srcId: job.srcId },
+        duration: job.srcDuration,
+        folder: job.targetFolder || '',
+      }, job, ['freepik', '_magnific_vid']);
       await refreshVideoGalleryUI();
-      renderVideoQueue();
       toast(`✦ Magnific Video done · ${modelLabel} · ${(videoArrayBuffer.byteLength/1024/1024).toFixed(1)}MB`, 'ok');
       return;
     }
@@ -4453,24 +4126,6 @@ function _topazGetDims(blob) {
   });
 }
 
-// Extended dims helper — also tries to detect fps via requestVideoFrameCallback
-function _topazGetDimsAndFps(blob) {
-  return new Promise(resolve => {
-    const url = URL.createObjectURL(blob);
-    const el  = document.createElement('video');
-    el.preload = 'metadata';
-    el.muted = true;
-    el.onloadedmetadata = () => {
-      const w = el.videoWidth, h = el.videoHeight;
-      URL.revokeObjectURL(url);
-      el.src = '';
-      resolve({ w, h });
-    };
-    el.onerror = () => { URL.revokeObjectURL(url); resolve({ w: 0, h: 0 }); };
-    el.src = url;
-  });
-}
-
 async function runTopazQueueJob(job) {
   updateVideoPlaceholderStatus(job, 'loading…');
   renderVideoQueue();
@@ -4478,17 +4133,9 @@ async function runTopazQueueJob(job) {
   const rec = await dbGet('videos', job.srcId).catch(() => null);
   if (!rec?.videoData) throw new Error('Source video not found in gallery');
 
-  const videoBlob  = new Blob([rec.videoData], { type: rec.mimeType || 'video/mp4' });
-  const videoBytes = new Uint8Array(await videoBlob.arrayBuffer());
-
-  // Base64 encode in chunks (spread operator overflows for large arrays)
+  // Base64 encode video
   updateVideoPlaceholderStatus(job, 'encoding…');
-  let videoBin = '';
-  const CHUNK = 8192;
-  for (let i = 0; i < videoBytes.length; i += CHUNK) {
-    videoBin += String.fromCharCode(...videoBytes.subarray(i, i + CHUNK));
-  }
-  const videoB64 = btoa(videoBin);
+  const videoB64 = _arrayBufferToBase64(rec.videoData);
 
   updateVideoPlaceholderStatus(job, 'uploading…');
   renderVideoQueue();
@@ -4585,34 +4232,17 @@ async function runTopazQueueJob(job) {
         updateVideoPlaceholderStatus(job, `↓ ${mb}${tot}MB`);
       }
       const videoArrayBuffer = await new Blob(chunks).arrayBuffer();
-
-      // Save
-      const thumbBlob = new Blob([videoArrayBuffer], { type: 'video/mp4' });
-      const thumbData = await generateVideoThumb(thumbBlob);
-      const videoId   = `vid_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
       const modelLabel = `✦ Topaz ${TOPAZ_MODEL_NAMES[job.topazModel] || job.topazModel}`;
-      const videoRecord = {
-        id: videoId, ts: Date.now(), model: modelLabel,
-        modelKey: `topaz_${job.topazModel}`, prompt: job.prompt,
-        params: { topaz: { model: job.topazModel, fps: job.fps, slowmo: job.slowmo, creativity: job.creativity, factor: job.factor }, srcId: job.srcId },
-        videoData: videoArrayBuffer, mimeType: 'video/mp4',
-        duration: job.srcDuration, fileSize: videoArrayBuffer.byteLength,
-        folder: job.targetFolder || '', favorite: false,
-        outWidth: job.out_width, outHeight: job.out_height,
-      };
-      await dbPut('videos', videoRecord);
-      const { videoData: _, ...metaOnly } = videoRecord;
-      await dbPut('video_meta', metaOnly);
-      if (thumbData) await dbPut('video_thumbs', { id: videoId, data: thumbData });
-
       const spendKey = { 'slp-2.5':'_topaz_slp25','slp-2':'_topaz_slp2','slp-1':'_topaz_slp1','slhq':'_topaz_slhq','slm':'_topaz_slm' }[job.topazModel] || '_topaz_slp25';
-      trackSpend('topaz', spendKey, 1, job.srcDuration);
 
-      job.status = 'done';
-      removeVideoPlaceholder(job);
-      renderVideoResultCard(videoRecord, thumbData);
+      await _saveVideoResult(videoArrayBuffer, {
+        model: modelLabel, modelKey: `topaz_${job.topazModel}`, prompt: job.prompt,
+        params: { topaz: { model: job.topazModel, fps: job.fps, slowmo: job.slowmo, creativity: job.creativity, factor: job.factor }, srcId: job.srcId },
+        duration: job.srcDuration,
+        outWidth: job.out_width, outHeight: job.out_height,
+        folder: job.targetFolder || '',
+      }, job, ['topaz', spendKey, 1, job.srcDuration]);
       await refreshVideoGalleryUI();
-      renderVideoQueue();
       toast(`✦ Topaz done · ${modelLabel} · ${(videoArrayBuffer.byteLength/1024/1024).toFixed(1)}MB`, 'ok');
       return;
     }

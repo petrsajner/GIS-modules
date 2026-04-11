@@ -1020,7 +1020,9 @@ async function openGalleryModal(id) {
 
   // Actions — use proper event delegation, no inline attributes
   const actionsEl = document.getElementById('modalActions');
-  const isFav = item.favorite || false;
+  // Read favorite from images_meta (source of truth), not images store
+  const metaItem = (typeof metaCache !== 'undefined' && metaCache) ? metaCache.find(m => m.id === id) : null;
+  const isFav = metaItem ? !!metaItem.favorite : (item.favorite || false);
   const inpaintRefBtnHtml = (typeof _inpaintRefPendingPick !== 'undefined' && _inpaintRefPendingPick)
     ? `<button class="ibtn" id="mInpaintRefBtn" style="border-color:#ff9966;color:#ff9966;font-weight:600;">⊕ Inpaint Ref</button>` : '';
   actionsEl.innerHTML = `
@@ -1036,7 +1038,6 @@ async function openGalleryModal(id) {
   `;
   if (inpaintRefBtnHtml) { actionsEl.querySelector('#mInpaintRefBtn').onclick = () => setInpaintRefFromGallery(id); }  actionsEl.querySelector('#mFavBtn').onclick = async () => {
     await toggleFavoriteItem(id);
-    openGalleryModal(id);
   };
   actionsEl.querySelector('#mDeleteBtn').onclick = () => deleteGalItem(id);
   actionsEl.querySelector('#mAddRefBtn').onclick = () => {

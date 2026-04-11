@@ -113,11 +113,16 @@ async function addRefFromBase64(b64data, name) {
   const assetMsg = alreadyExists ? `Already in Assets (${asset.autoName})` : `→ Assets (${asset.autoName})`;
 
   if (window.aiPromptContext === 'video') {
-    // ── Video mód: přidat do refs[] (image gen) — Ref+Assets vždy cílí na image gen
-    // Video refs se přidávají přes useVideoFromGallery nebo assets panel
-  }
-  // ── Image mód: přidat do refs[] ──
-  {
+    // ── Video mód: přidat do videoRefs[] ──
+    const alreadyInVideoRefs = videoRefs.some(r => r.assetId === asset.id);
+    if (alreadyInVideoRefs) {
+      toast(`${asset.autoName} is already a video reference`, 'ok');
+    } else {
+      addVideoRef(asset);
+      toast(`Saved ${assetMsg} + added as video ref`, 'ok');
+    }
+  } else {
+    // ── Image mód: přidat do refs[] ──
     const m = MODELS[currentModel];
     const max = getRefMax();
     const alreadyInRefs = refs.some(r => r.assetId === asset.id);
@@ -141,9 +146,9 @@ async function addRefFromBase64(b64data, name) {
     renderAssetFolders();
   }
 
-  // Vždy přepnout na image gen panel (Ref+Assets vždy cílí na image generaci)
-  if (typeof setGenMode === 'function') setGenMode('image');
+  // Přepnout na gen panel — respektuj aktuální mód (image vs video)
   switchView('gen');
+  if (typeof setGenMode === 'function') setGenMode(window.aiPromptContext === 'video' ? 'video' : 'image');
 }
 
 // Renderování ref panelu (Varianta C — expanded inline scroll)
@@ -329,6 +334,7 @@ async function startImageRefRename(idx, labelEl) {
       if (asset) {
         asset.userLabel = val === asset.autoName ? '' : val;
         await dbPut('assets', asset);
+        await dbPutAssetMeta(asset);
         // Synchronizuj zpět do všech refs a videoRefs se stejným assetem
         refs.forEach(imgRef => { if (imgRef.assetId === r.assetId) imgRef.userLabel = asset.userLabel; });
         videoRefs?.forEach(vRef => { if (vRef.assetId === r.assetId) vRef.userLabel = asset.userLabel; });
@@ -723,7 +729,9 @@ async function callGeminiDescribe(apiKey, imageData, mimeType, mode, source, sig
   if (orKey) {
     // ── Primary: Claude Sonnet via OpenRouter (vision) ──────────────────
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    return await _callOpenRouterVision(orKey, imageData, mimeType, instruction, signal);
+    const result = await _callOpenRouterVision(orKey, imageData, mimeType, instruction, signal);
+    trackSpend('openrouter', '_or_describe', 1);
+    return result;
   }
 
   // ── Fallback: Gemini 3.1 Pro ─────────────────────────────────────

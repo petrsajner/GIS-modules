@@ -17,20 +17,15 @@ import { errorResponse, jsonResponse } from '../utils/cors.js';
 
 const LUMA_BASE = 'https://api.lumalabs.ai/dream-machine/v1';
 
-// ── Shared helper: upload base64 image to R2 bucket, return public URL ──
-// Replaces the old Luma /file_uploads endpoint which returned 404
-async function uploadBase64ToLuma(b64, mimeType, _lumaKey, env, origin) {
-  if (!env?.VIDEOS) throw new Error('R2 VIDEOS binding missing — check wrangler.toml');
-
+// ── Shared helper: upload base64 image to R2, return public HTTPS URL ──
+// Luma's /file_uploads endpoint is dead (404). Use R2 as intermediary.
+async function uploadToR2(b64, mimeType, env, requestUrl) {
   const binary = atob(b64);
   const bytes  = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-  const ext = mimeType?.includes('png') ? 'png' : mimeType?.includes('webp') ? 'webp' : 'jpg';
-  const key = `luma_kf_${Date.now()}_${Math.random().toString(36).substr(2,6)}.${ext}`;
-
-  await env.VIDEOS.put(key, bytes.buffer, { httpMetadata: { contentType: mimeType || 'image/jpeg' } });
-
+  const key = `luma-ref-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  await env.VIDEOS.put(key, bytes, { httpMetadata: { contentType: mimeType || 'image/jpeg' } });
+  const origin = new URL(requestUrl).origin;
   return `${origin}/r2/serve/${encodeURIComponent(key)}`;
 }
 
@@ -48,7 +43,7 @@ async function urlToBase64(url) {
 // ════════════════════════════════════════════════════════════
 // IMAGE: POST /luma/generate
 // ════════════════════════════════════════════════════════════
-export async function handleLuma(request) {
+export async function handleLuma(request, env) {
   let body;
   try { body = await request.json(); } catch { return errorResponse('Invalid JSON body', 400); }
 
@@ -62,22 +57,22 @@ export async function handleLuma(request) {
   let lumaImageRefs, lumaStyleRefs, lumaCharacterRef, lumaModifyRef;
   try {
     if (Array.isArray(image_refs) && image_refs.length > 0) {
-      const urls = await Promise.all(image_refs.map(r => uploadBase64ToLuma(r.b64_data, r.mime_type || 'image/jpeg', luma_key)));
+      const urls = await Promise.all(image_refs.map(r => uploadToR2(r.b64_data, r.mime_type || 'image/jpeg', env, request.url)));
       lumaImageRefs = urls.map((url, i) => ({ url, weight: image_refs[i].weight ?? 0.85 }));
     }
     if (Array.isArray(style_refs) && style_refs.length > 0) {
-      const urls = await Promise.all(style_refs.map(r => uploadBase64ToLuma(r.b64_data, r.mime_type || 'image/jpeg', luma_key)));
+      const urls = await Promise.all(style_refs.map(r => uploadToR2(r.b64_data, r.mime_type || 'image/jpeg', env, request.url)));
       lumaStyleRefs = urls.map((url, i) => ({ url, weight: style_refs[i].weight ?? 0.8 }));
     }
     if (Array.isArray(character_ref) && character_ref.length > 0) {
-      const urls = await Promise.all(character_ref.slice(0, 4).map(r => uploadBase64ToLuma(r.b64_data, r.mime_type || 'image/jpeg', luma_key)));
+      const urls = await Promise.all(character_ref.slice(0, 4).map(r => uploadToR2(r.b64_data, r.mime_type || 'image/jpeg', env, request.url)));
       lumaCharacterRef = { identity0: { images: urls } };
     } else if (character_ref?.b64_data) {
-      const url = await uploadBase64ToLuma(character_ref.b64_data, character_ref.mime_type || 'image/jpeg', luma_key);
+      const url = await uploadToR2(character_ref.b64_data, character_ref.mime_type || 'image/jpeg', env, request.url);
       lumaCharacterRef = { identity0: { images: [url] } };
     }
     if (modify_ref?.b64_data) {
-      const url = await uploadBase64ToLuma(modify_ref.b64_data, modify_ref.mime_type || 'image/jpeg', luma_key);
+      const url = await uploadToR2(modify_ref.b64_data, modify_ref.mime_type || 'image/jpeg', env, request.url);
       lumaModifyRef = { url, weight: modify_ref.weight ?? 1.0 };
     }
   } catch (e) {
@@ -191,17 +186,15 @@ export async function handleLumaVideoSubmit(request, env) {
   if (!luma_key) return errorResponse('Missing luma_key', 400);
   if (!prompt)   return errorResponse('Missing prompt', 400);
 
-  const origin = new URL(request.url).origin;
-
-  // Build keyframes — upload images to R2 first (Luma requires public HTTPS URLs)
+  // Build keyframes — upload images to R2 first (Luma API rejects base64 directly)
   const keyframes = {};
   try {
     if (frame0_b64) {
-      const url = await uploadBase64ToLuma(frame0_b64, frame0_mime || 'image/jpeg', luma_key, env, origin);
+      const url = await uploadToR2(frame0_b64, frame0_mime || 'image/jpeg', env, request.url);
       keyframes.frame0 = { type: 'image', url };
     }
     if (frame1_b64) {
-      const url = await uploadBase64ToLuma(frame1_b64, frame1_mime || 'image/jpeg', luma_key, env, origin);
+      const url = await uploadToR2(frame1_b64, frame1_mime || 'image/jpeg', env, request.url);
       keyframes.frame1 = { type: 'image', url };
     }
   } catch (e) {
@@ -212,7 +205,7 @@ export async function handleLumaVideoSubmit(request, env) {
   let charRefPayload;
   if (char_ref_b64) {
     try {
-      const url = await uploadBase64ToLuma(char_ref_b64, char_ref_mime || 'image/jpeg', luma_key, env, origin);
+      const url = await uploadToR2(char_ref_b64, char_ref_mime || 'image/jpeg', env, request.url);
       charRefPayload = { identity0: { images: [url] } };
     } catch (e) {
       return errorResponse(`Character ref upload failed: ${e.message}`, 502);

@@ -90,6 +90,11 @@ const SPEND_PRICES = {
   '_replicate_wan27v_1080p': 0.15,   // WAN 2.7 I2V 1080p via Replicate (legacy)
   '_replicate_wan27e_720p':  0.10,   // WAN 2.7 Edit 720p via Replicate (legacy)
   '_replicate_wan27e_1080p': 0.15,   // WAN 2.7 Edit 1080p via Replicate (legacy)
+
+  // ── OpenRouter — Claude Sonnet 4.6 (per call) ──────
+  '_or_prompt':   0.003,   // AI Prompt text (~500 in + 500 out tokens)
+  '_or_describe': 0.010,   // Describe image (~1000 in + 500 out tokens)
+
   // WAN 2.7 via fal.ai (current) — pricing TBD, estimated ~same as WAN 2.6
   '_wan27_720p':   0.10,   // WAN 2.7 I2V/T2V 720p via fal.ai (estimate)
   '_wan27_1080p':  0.15,   // WAN 2.7 I2V/T2V 1080p via fal.ai (estimate)
@@ -97,7 +102,7 @@ const SPEND_PRICES = {
   '_wan27e_1080p': 0.15,   // WAN 2.7 Video Edit 1080p via fal.ai (estimate)
 };
 
-const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'replicate'];
+const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'replicate', 'openrouter'];
 
 function _spendKey(provider) {
   return `gis_spend_${provider}`;

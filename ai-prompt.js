@@ -553,14 +553,20 @@ async function callGeminiTextMultiTurn(apiKey, systemPrompt, history) {
   const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
   if (orKey) {
     const lastUserMsg = [...history].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
-    return await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
+    const result = await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
+    trackSpend('openrouter', '_or_prompt', 1);
+    return result;
   }
   return await _callGeminiMultiTurnFallback(apiKey, systemPrompt, history, 0.85, 2048);
 }
 
 async function callGeminiText(apiKey, systemPrompt, userMsg) {
   const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
-  if (orKey) return await _callOpenRouterText(systemPrompt, userMsg, 0.9, 8192);
+  if (orKey) {
+    const result = await _callOpenRouterText(systemPrompt, userMsg, 0.9, 8192);
+    trackSpend('openrouter', '_or_prompt', 1);
+    return result;
+  }
   return await _callGeminiTextFallback(apiKey, systemPrompt, userMsg, 0.9, 8192);
 }
 // ── Init chips ────────────────────────────────────────

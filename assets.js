@@ -58,7 +58,7 @@ function assetAddRef(id) {
 
 // ── Generátor Ref_XXX čísel — první volné jméno (1–999) ──
 async function nextRefAutoName() {
-  const all = await dbGetAll('assets');
+  const all = await dbGetAllAssetMeta();
   const used = new Set(all.map(a => a.autoName));
   for (let n = 1; n <= 999; n++) {
     const name = 'Ref_' + String(n).padStart(3, '0');
@@ -104,6 +104,7 @@ async function createAsset(imageData, mimeType, sourceType, sourceJobId) {
     dims: dims || null,
   };
   await dbPut('assets', asset);
+  await dbPutAssetMeta(asset);
   return asset;
 }
 
@@ -207,7 +208,7 @@ async function addSelectedAssetsToRefs() {
 
 // ── Renderování assetů — galerie-style ──
 async function renderAssets() {
-  const all = await dbGetAll('assets');
+  const all = await dbGetAllAssetMeta();
   const q = (document.getElementById('assetSearch')?.value || '').toLowerCase();
   const sort = document.getElementById('assetSort')?.value || 'newest';
 
@@ -272,12 +273,12 @@ async function renderAssets() {
     // Pillarbox for square/portrait images
     const isPortrait = a.dims && (a.dims.w <= a.dims.h * 1.15);
     const thumbClass = isPortrait ? 'ai-thumb pillarbox' : 'ai-thumb';
-    const src = `data:${a.mimeType||'image/png'};base64,${a.thumb || a.imageData}`;
+    const src = a.thumb ? `data:${a.mimeType||'image/png'};base64,${a.thumb}` : '';
     const refTag = isActive ? `<span style="font-size:9px;background:rgba(136,170,255,.9);color:#000;padding:1px 5px;font-weight:700;margin-right:5px;flex-shrink:0;">REF</span>` : '';
     const srcTag = `<span style="font-size:9px;color:var(--dim2);margin-left:auto;flex-shrink:0;">${a.sourceType==='generated'?'⚡':'↑'}</span>`;
     return `
     <div class="asset-item ${isSel?'selected':''} ${inFolder?'in-folder':''} ${isFav?'favorited':''}" data-id="${a.id}" draggable="true" ondragstart="assetDragStart(event,'${a.id}')">
-      <img class="${thumbClass}" src="${src}" alt="${escHtml(label)}" data-needs-regen="${isPortrait && a.thumbVersion !== 2 ? '1' : '0'}">
+      ${src ? `<img class="${thumbClass}" src="${src}" alt="${escHtml(label)}" data-needs-regen="${isPortrait && a.thumbVersion !== 2 ? '1' : '0'}">` : `<div class="${thumbClass}" style="background:#222;display:flex;align-items:center;justify-content:center;color:#555;font-size:20px;">⊞</div>`}
       <div class="ai-badge ${hasLabel?'':'auto-name'}">${refTag}${escHtml(label)}${srcTag}</div>
       <div class="ai-sel" onclick="event.stopPropagation();toggleAssetSel('${a.id}')"></div>
       <div class="gal-heart ${isFav?'on':'off'}" onclick="event.stopPropagation();toggleAssetFavorite(event,'${a.id}')" title="${isFav?'Remove from favorites':'Add to favorites'}">${isFav?'♥':'♡'}</div>
@@ -299,14 +300,18 @@ async function renderAssets() {
   // Lazy regen: portrait/square assets with old center-crop thumbs
   const toRegen = items.filter(a => a.dims && (a.dims.w <= a.dims.h * 1.15) && a.thumbVersion !== 2);
   if (toRegen.length > 0) {
-    for (const a of toRegen) {
-      generateThumb(a.imageData, a.mimeType || 'image/png').then(newThumb => {
-        if (!newThumb) return;
-        a.thumb = newThumb;
-        a.thumbVersion = 2;
-        dbPut('assets', a);
-        const imgEl = grid.querySelector(`.asset-item[data-id="${a.id}"] .ai-thumb`);
-        if (imgEl) imgEl.src = `data:${a.mimeType||'image/png'};base64,${newThumb}`;
+    for (const meta of toRegen) {
+      dbGet('assets', meta.id).then(fullAsset => {
+        if (!fullAsset?.imageData) return;
+        generateThumb(fullAsset.imageData, fullAsset.mimeType || 'image/png').then(newThumb => {
+          if (!newThumb) return;
+          fullAsset.thumb = newThumb;
+          fullAsset.thumbVersion = 2;
+          dbPut('assets', fullAsset);
+          dbPutAssetMeta(fullAsset);
+          const imgEl = grid.querySelector(`.asset-item[data-id="${meta.id}"] img.ai-thumb`);
+          if (imgEl) imgEl.src = `data:${fullAsset.mimeType||'image/png'};base64,${newThumb}`;
+        });
       });
     }
   }
@@ -359,6 +364,7 @@ function startAssetRename(assetId, cardEl) {
     if (!asset) return;
     asset.userLabel = newVal === asset.autoName ? '' : newVal;
     await dbPut('assets', asset);
+    await dbPutAssetMeta(asset);
     // Aktualizovat label v aktivních refs
     refs.forEach(r => { if (r.assetId === assetId) r.userLabel = asset.userLabel; });
     renderRefThumbs();
@@ -401,7 +407,7 @@ function closeAssetLightbox(e) {
 
 // ── Select all assets ──
 async function selectAllAssets() {
-  const all = await dbGetAll('assets');
+  const all = await dbGetAllAssetMeta();
   const q = (document.getElementById('assetSearch')?.value || '').toLowerCase();
   let items = all;
   if (currentAssetFolder !== 'all') items = items.filter(a => a.folder === currentAssetFolder);
@@ -469,6 +475,7 @@ function clearAssetSelection() {
 async function deleteAsset(id) {
   if (!confirm('Delete asset?')) return;
   await dbDelete('assets', id);
+  await dbDeleteAssetMeta(id);
   // Odebrat z aktivních refs
   const idx = refs.findIndex(r => r.assetId === id);
   if (idx !== -1) { refs.splice(idx, 1); renderRefThumbs(); }
@@ -482,6 +489,7 @@ async function deleteSelectedAssets() {
   if (!confirm(`Delete ${selectedAssets.size} assets?`)) return;
   for (const id of selectedAssets) {
     await dbDelete('assets', id);
+    await dbDeleteAssetMeta(id);
     const idx = refs.findIndex(r => r.assetId === id);
     if (idx !== -1) refs.splice(idx, 1);
   }
@@ -498,6 +506,7 @@ async function toggleAssetFavorite(e, id) {
   if (!asset) return;
   asset.favorite = !asset.favorite;
   await dbPut('assets', asset);
+  await dbPutAssetMeta(asset);
 
   // Update card DOM directly
   const el = document.querySelector(`.asset-item[data-id="${id}"]`);
@@ -538,7 +547,7 @@ async function openAssetAnnotate(id) {
 // ── Asset složky ──
 async function renderAssetFolders() {
   const folders = await dbGetAll('assetFolders');
-  const all = await dbGetAll('assets');
+  const all = await dbGetAllAssetMeta();
   const list = document.getElementById('assetFolderList');
   const allActive = currentAssetFolder === 'all';
   const favActive = currentAssetFolder === 'fav';
@@ -584,7 +593,7 @@ async function deleteAssetFolder(e, id) {
     folderEl.style.pointerEvents = 'none';
   }
 
-  const items = await dbGetAll('assets');
+  const items = await dbGetAllAssetMeta();
   await Promise.all(
     items.filter(a => a.folder === id).map(a => dbPatchAssetMeta(a.id, { folder: 'all' }))
   );
