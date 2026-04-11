@@ -1256,10 +1256,23 @@ function useEditPrompt() {
 }
 
 // ═══════════════════════════════════════════════════════
-// SPECIAL TOOL (placeholder)
+// SPECIAL TOOL — Character Sheet
 // ═══════════════════════════════════════════════════════
 
+let _csCharDesc = '';
+let _csPromptA = '';
+let _csPromptB = '';
+let _csHasSession = false;
+
 function openSpecialTool() {
+  // Always show tool list first
+  document.getElementById('spmToolList').style.display = '';
+  document.getElementById('csView')?.classList.remove('show');
+  document.getElementById('ccView')?.classList.remove('show');
+  document.getElementById('ecView')?.classList.remove('show');
+  document.getElementById('spmTitle').textContent = '◆ Special Tools';
+  document.getElementById('spmTitle').style.fontSize = '18px';
+  document.getElementById('csResetBtn').style.display = 'none';
   document.getElementById('specialToolModal')?.classList.add('show');
 }
 
@@ -1269,6 +1282,683 @@ function closeSpecialTool() {
 
 function specialToolBgClick(e) {
   if (e.target.id === 'specialToolModal') closeSpecialTool();
+}
+
+function resetActiveSpmTool() {
+  if (_ccActiveTool === 'cc') resetCharacterCoverage();
+  else if (_ccActiveTool === 'ec') resetEnvCoverage();
+  else resetCharacterSheet();
+}
+
+async function openCharacterSheet() {
+  // Switch to character sheet sub-view
+  document.getElementById('spmToolList').style.display = 'none';
+  document.getElementById('ccView')?.classList.remove('show');
+  document.getElementById('ecView')?.classList.remove('show');
+  document.getElementById('spmTitle').textContent = '◆ Character Sheet';
+  document.getElementById('csResetBtn').style.display = '';
+  _ccActiveTool = 'cs';
+  const csView = document.getElementById('csView');
+  csView.classList.add('show');
+
+  // If session already exists, just show it (don't re-analyze)
+  if (_csHasSession) return;
+
+  await _csRunAnalysis();
+}
+
+async function resetCharacterSheet() {
+  _csHasSession = false;
+  _csCharDesc = '';
+  _csPromptA = '';
+  _csPromptB = '';
+  document.getElementById('csPrompts').style.display = 'none';
+  document.getElementById('csPromptA').textContent = '';
+  document.getElementById('csPromptB').textContent = '';
+  await _csRunAnalysis();
+}
+
+async function _csRunAnalysis() {
+  // Reset state
+  document.getElementById('csPrompts').style.display = 'none';
+
+  // Check refs
+  const hasRef = typeof refs !== 'undefined' && refs.length > 0;
+  document.getElementById('csNoRef').style.display = hasRef ? 'none' : 'block';
+  document.getElementById('csRefRow').style.display = hasRef ? 'flex' : 'none';
+  if (!hasRef) return;
+
+  _csHasSession = true;
+
+  // Show ref thumbnail
+  const ref = refs[0];
+  const thumbEl = document.getElementById('csRefThumb');
+  const statusEl = document.getElementById('csRefStatus');
+  statusEl.className = 'cs-ref-status analyzing';
+  statusEl.textContent = 'Analyzing character…';
+
+  // Load thumbnail
+  let thumbSrc = '';
+  if (ref.thumb) thumbSrc = `data:${ref.mimeType || 'image/jpeg'};base64,${ref.thumb}`;
+  if (!thumbSrc && ref.assetId) {
+    try { const meta = await dbGet('assets_meta', ref.assetId); if (meta?.thumb) thumbSrc = `data:${meta.mimeType || 'image/jpeg'};base64,${meta.thumb}`; } catch(_) {}
+  }
+  if (thumbSrc) { thumbEl.src = thumbSrc; thumbEl.style.display = 'block'; }
+  else thumbEl.style.display = 'none';
+
+  // Load full image data for analysis
+  let imageData = null, mimeType = 'image/jpeg';
+  if (ref.assetId) {
+    try { const asset = await dbGet('assets', ref.assetId); if (asset?.imageData) { imageData = asset.imageData; mimeType = asset.mimeType || 'image/jpeg'; } } catch(_) {}
+  }
+  if (!imageData) { statusEl.className = 'cs-ref-status'; statusEl.textContent = 'Could not load image data.'; return; }
+
+  // Resize for analysis
+  try {
+    const resized = await resizeImageToCanvas(`data:${mimeType};base64,${imageData}`, 1024);
+    const comma = resized.indexOf(',');
+    if (comma !== -1) { mimeType = resized.slice(5, resized.indexOf(';')); imageData = resized.slice(comma + 1); }
+  } catch (_) {}
+
+  // Analyze character via OpenRouter (primary) or Gemini (fallback)
+  const instruction = `Describe this person for use in an AI image generation character sheet prompt.
+Focus ONLY on physical appearance:
+1) Gender, approximate age, ethnicity
+2) Face: shape, features, skin texture, any asymmetry or distinctive marks
+3) Hair: color, length, style, texture
+4) Build: height impression, body type
+5) Clothing: what they're wearing in detail
+6) Expression and posture
+
+Be precise and factual. Use plain English. 100-150 words. Do NOT describe the background or scene.`;
+
+  try {
+    const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+    if (orKey) {
+      _csCharDesc = await _callOpenRouterVision(orKey, imageData, mimeType, instruction);
+      trackSpend('openrouter', '_or_describe', 1);
+    } else {
+      const apiKey = document.getElementById('apiKey')?.value?.trim();
+      if (!apiKey) { statusEl.className = 'cs-ref-status'; statusEl.textContent = 'No OpenRouter or Google API key found.'; return; }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_DESCRIBE_MODEL}:generateContent?key=${apiKey}`;
+      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [
+          { inlineData: { mimeType, data: imageData } }, { text: instruction }
+        ]}], generationConfig: { temperature: 0.5, maxOutputTokens: 512 } }) });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || resp.status);
+      _csCharDesc = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      trackSpend('google', '_gemini_describe', 1);
+    }
+  } catch (err) {
+    statusEl.className = 'cs-ref-status';
+    statusEl.textContent = 'Analysis failed: ' + (err.message || err);
+    return;
+  }
+
+  if (!_csCharDesc) { statusEl.className = 'cs-ref-status'; statusEl.textContent = 'No description returned.'; return; }
+
+  // Show description
+  statusEl.className = 'cs-ref-status';
+  statusEl.textContent = _csCharDesc;
+
+  // Generate prompts
+  _csGeneratePrompts(_csCharDesc);
+}
+
+function _csGeneratePrompts(charDesc) {
+  const profileRule = `CRITICAL PROFILE RULE: In each row, portrait 2 and portrait 3 MUST face OPPOSITE directions — portrait 2 faces right, portrait 3 faces left. Never two profiles facing the same direction next to each other.`;
+
+  const layoutBlock = `LAYOUT — two-column contact sheet:
+LEFT COLUMN — one full-body photograph spanning the full height of the sheet:
+  Subject standing, facing the camera, natural relaxed posture
+
+RIGHT COLUMN — two rows of close-up portraits:
+  Top row (3 portraits):
+    1. Front face, looking directly at camera
+    2. Right-facing profile (subject faces RIGHT)
+    3. Left-facing profile (subject faces LEFT)
+  Bottom row (3 portraits):
+    1. Front face, looking directly at camera
+    2. Right-facing profile (subject faces RIGHT)
+    3. Left-facing profile (subject faces LEFT)
+
+${profileRule}`;
+
+  const technicals = `POSE — natural stance, relaxed posture, arms at sides, subtle weight distribution. Not a T-pose, not a rigid stance.
+
+LIGHTING — soft neutral studio light, no dramatic cinematic grade, consistent across all panels.
+
+BACKGROUND — clean neutral studio backdrop, no distracting elements.
+
+FORMAT — single-image contact sheet, all panels in one frame, no borders between panels.
+Photorealistic, studio photography, 35mm, no CGI, no illustration.`;
+
+  // Method A — with reference
+  _csPromptA = `Create a photorealistic photographic identity sheet based strictly on the uploaded reference image.
+
+Match the exact appearance: facial structure, proportions, skin texture, age, asymmetry, and natural imperfections. Real photography of a real human — not CGI, not a digital character.
+
+${layoutBlock}
+
+${technicals}`;
+
+  // Method B — description only, no reference
+  _csPromptB = `Create a photorealistic photographic identity sheet of the following character:
+
+${charDesc}
+
+${layoutBlock}
+
+${technicals}`;
+
+  document.getElementById('csPromptA').textContent = _csPromptA;
+  document.getElementById('csPromptB').textContent = _csPromptB;
+  document.getElementById('csPrompts').style.display = 'flex';
+}
+
+function csUsePrompt(method) {
+  const prompt = method === 'a' ? _csPromptA : _csPromptB;
+  if (!prompt) return;
+  const isVideo = window.aiPromptContext === 'video';
+  const ta = document.getElementById(isVideo ? 'videoPrompt' : 'prompt');
+  if (ta) { ta.value = prompt; ta.dispatchEvent(new Event('input')); }
+
+  // Method B = remove refs (prompt is self-contained)
+  if (method === 'b' && typeof refs !== 'undefined' && refs.length > 0) {
+    toast('Method B — remove references before generating (description only, no ref needed)', 'info');
+  }
+
+  closeSpecialTool();
+  if (!isVideo && typeof switchView === 'function') switchView('gen');
+  toast('Character sheet prompt set', 'ok');
+}
+
+// ═══════════════════════════════════════════════════════
+// SPECIAL TOOL — Character Coverage (10 shots)
+// ═══════════════════════════════════════════════════════
+
+let _ccCharDesc = '';
+let _ccPrompts = [];
+let _ccHasSession = false;
+let _ccActiveTool = ''; // 'cs' or 'cc' — tracks which reset button targets
+
+const CC_SHOTS = [
+  { num: 1, size: 'Wide Shot',   label: 'Frontal — establish',
+    tpl: `Wide shot, frontal view: the subject stands facing the camera, full body visible from head to feet, arms relaxed at sides. Camera at standing eye level, looking straight ahead. Clean neutral studio backdrop.` },
+  { num: 2, size: 'Medium Shot', label: '3/4 front right',
+    tpl: `Medium shot, three-quarter front view from the right: the subject is slightly turned, their right shoulder closer to camera, left side partially visible. Framed from head to mid-thigh. Camera at eye level. Clean neutral studio backdrop.` },
+  { num: 3, size: 'Medium Shot', label: '3/4 front left',
+    tpl: `Medium shot, three-quarter front view from the left: the subject is slightly turned, their left shoulder closer to camera, right side partially visible. Framed from head to mid-thigh. Camera at eye level. Clean neutral studio backdrop.` },
+  { num: 4, size: 'MCU',         label: 'Right profile',
+    tpl: `Medium close-up, clean right profile: the subject faces directly to the left of frame, showing only the right side of their face. Framed from chest up. Camera at eye level. Clean neutral studio backdrop.` },
+  { num: 5, size: 'MCU',         label: 'Left profile',
+    tpl: `Medium close-up, clean left profile: the subject faces directly to the right of frame, showing only the left side of their face. Framed from chest up. Camera at eye level. Clean neutral studio backdrop.` },
+  { num: 6, size: 'Medium Shot', label: '3/4 back right',
+    tpl: `Medium shot, three-quarter rear view from the right: the subject's back is mostly toward camera, head turned slightly so a sliver of cheek and jawline is visible on the right. Framed from head to mid-thigh. Camera at eye level. Clean neutral studio backdrop.` },
+  { num: 7, size: 'Wide Shot',   label: 'Directly behind',
+    tpl: `Wide shot, rear view: the subject faces directly away from camera, full body visible from head to feet, back of head and shoulders prominent. Camera at eye level. Clean neutral studio backdrop.` },
+  { num: 8, size: 'Medium Shot', label: '3/4 front right — low angle',
+    tpl: `Medium shot, three-quarter front from the right, low angle: camera positioned low near the ground, looking upward at the subject. The subject appears above center of frame, chin and jawline prominent. Framed from knees up. Clean neutral studio backdrop.` },
+  { num: 9, size: 'Close-Up',    label: '3/4 front right — high angle',
+    tpl: `Close-up, three-quarter front from the right, high angle: camera positioned above the subject, looking down. The face fills the frame, top of head and forehead prominent, eyes looking up toward camera. Framed from shoulders up. Clean neutral studio backdrop.` },
+  { num: 10, size: 'Wide Shot',  label: 'Overhead — top down',
+    tpl: `Wide shot, overhead view: camera positioned directly above, looking straight down at the subject. Full body visible from head to feet, foreshortened perspective. Arms slightly away from body for clear silhouette separation. Clean neutral studio backdrop visible around the figure.` },
+];
+
+async function openCharacterCoverage() {
+  document.getElementById('spmToolList').style.display = 'none';
+  document.getElementById('csView')?.classList.remove('show');
+  document.getElementById('ecView')?.classList.remove('show');
+  document.getElementById('spmTitle').textContent = '◆ Character Coverage';
+  document.getElementById('csResetBtn').style.display = '';
+  _ccActiveTool = 'cc';
+  const ccView = document.getElementById('ccView');
+  ccView.classList.add('show');
+
+  if (_ccHasSession) {
+    // Refresh prompts with current model mentions + batch info
+    if (_ccCharDesc) ccRegeneratePrompts();
+    return;
+  }
+  await _ccRunAnalysis();
+}
+
+async function resetCharacterCoverage() {
+  _ccHasSession = false;
+  _ccCharDesc = '';
+  _ccPrompts = [];
+  document.getElementById('ccPromptsWrap').innerHTML = '';
+  document.getElementById('ccPromptsWrap').style.display = 'none';
+  document.getElementById('ccBatchBar').style.display = 'none';
+  await _ccRunAnalysis();
+}
+
+async function _ccRunAnalysis() {
+  const hasRef = typeof refs !== 'undefined' && refs.length > 0;
+  document.getElementById('ccNoRef').style.display = hasRef ? 'none' : 'block';
+  document.getElementById('ccRefRow').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('ccStatusRow').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('ccToggleRow').style.display = 'none';
+  document.getElementById('ccPromptsWrap').style.display = 'none';
+  document.getElementById('ccBatchBar').style.display = 'none';
+  if (!hasRef) return;
+
+  _ccHasSession = true;
+
+  // Show all ref thumbnails
+  const thumbsWrap = document.getElementById('ccRefThumbs');
+  thumbsWrap.innerHTML = '';
+  for (let i = 0; i < refs.length; i++) {
+    const img = document.createElement('img');
+    img.className = 'cc-ref-thumb';
+    let src = '';
+    if (refs[i].thumb) src = `data:${refs[i].mimeType || 'image/jpeg'};base64,${refs[i].thumb}`;
+    if (!src && refs[i].assetId) {
+      try { const meta = await dbGet('assets_meta', refs[i].assetId); if (meta?.thumb) src = `data:${meta.mimeType || 'image/jpeg'};base64,${meta.thumb}`; } catch(_) {}
+    }
+    if (src) { img.src = src; thumbsWrap.appendChild(img); }
+  }
+
+  // Analyze first ref
+  const statusEl = document.getElementById('ccStatusText');
+  statusEl.className = 'cc-status-text analyzing';
+  statusEl.textContent = 'Analyzing character…';
+
+  const ref = refs[0];
+  let imageData = null, mimeType = 'image/jpeg';
+  if (ref.assetId) {
+    try { const asset = await dbGet('assets', ref.assetId); if (asset?.imageData) { imageData = asset.imageData; mimeType = asset.mimeType || 'image/jpeg'; } } catch(_) {}
+  }
+  if (!imageData) { statusEl.className = 'cc-status-text'; statusEl.textContent = 'Could not load image data.'; return; }
+
+  try {
+    const resized = await resizeImageToCanvas(`data:${mimeType};base64,${imageData}`, 1024);
+    const comma = resized.indexOf(',');
+    if (comma !== -1) { mimeType = resized.slice(5, resized.indexOf(';')); imageData = resized.slice(comma + 1); }
+  } catch (_) {}
+
+  const instruction = `Describe this person for use in AI image generation prompts.
+Focus ONLY on physical appearance:
+1) Gender, approximate age, ethnicity
+2) Face: shape, features, skin texture, distinctive marks
+3) Hair: color, length, style
+4) Build: body type, height impression
+5) Clothing: what they're wearing
+Be precise and factual. Plain English. 80-120 words. Do NOT describe the background.`;
+
+  try {
+    const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+    if (orKey) {
+      _ccCharDesc = await _callOpenRouterVision(orKey, imageData, mimeType, instruction);
+      trackSpend('openrouter', '_or_describe', 1);
+    } else {
+      const apiKey = document.getElementById('apiKey')?.value?.trim();
+      if (!apiKey) { statusEl.className = 'cc-status-text'; statusEl.textContent = 'No OpenRouter or Google API key found.'; return; }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_DESCRIBE_MODEL}:generateContent?key=${apiKey}`;
+      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [
+          { inlineData: { mimeType, data: imageData } }, { text: instruction }
+        ]}], generationConfig: { temperature: 0.5, maxOutputTokens: 512 } }) });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || resp.status);
+      _ccCharDesc = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      trackSpend('google', '_gemini_describe', 1);
+    }
+  } catch (err) {
+    statusEl.className = 'cc-status-text';
+    statusEl.textContent = 'Analysis failed: ' + (err.message || err);
+    return;
+  }
+
+  if (!_ccCharDesc) { statusEl.className = 'cc-status-text'; statusEl.textContent = 'No description returned.'; return; }
+
+  statusEl.className = 'cc-status-text';
+  statusEl.textContent = _ccCharDesc;
+
+  document.getElementById('ccToggleRow').style.display = 'flex';
+  ccRegeneratePrompts();
+}
+
+function _ccRefLabel(idx) {
+  // Return the ref mention format for the current image model
+  const m = typeof MODELS !== 'undefined' && typeof currentModel !== 'undefined' ? MODELS[currentModel] : null;
+  const t = m?.type || '';
+  if (t === 'seedream') return `Figure ${idx + 1}`;
+  if (t === 'gemini') return `image ${idx + 1}`;
+  return `@Image${idx + 1}`; // flux, kling, zimage, proxy_xai, proxy_luma, etc.
+}
+
+function ccRegeneratePrompts() {
+  const useDesc = document.getElementById('ccUseDesc')?.checked;
+  const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+  const hasSheet = refCount >= 2;
+
+  const ref1 = _ccRefLabel(0);
+  const ref2 = hasSheet ? _ccRefLabel(1) : null;
+
+  _ccPrompts = CC_SHOTS.map(shot => {
+    let lines = [];
+    if (useDesc && _ccCharDesc) {
+      lines.push(`The reference ${ref1} shows: ${_ccCharDesc}`);
+    } else {
+      lines.push(`The reference ${ref1} shows the character.`);
+    }
+    if (ref2) lines.push(`Reference ${ref2} is a character sheet — use it for identity consistency.`);
+    lines.push('Keep the character\'s appearance, clothing, and proportions identical to the reference.');
+    lines.push('');
+    lines.push(shot.tpl);
+    lines.push('Photorealistic, cinematic, 35mm, film grain.');
+    return { ...shot, prompt: lines.join('\n') };
+  });
+
+  // Render prompt cards
+  const wrap = document.getElementById('ccPromptsWrap');
+  wrap.innerHTML = '';
+  _ccPrompts.forEach((s, i) => {
+    const card = document.createElement('div');
+    card.className = 'cc-shot-card';
+    card.innerHTML = `<div class="cc-shot-hdr"><span class="cc-shot-num">#${s.num}</span><span class="cc-shot-label">${s.size} — ${s.label}</span><button class="cc-shot-btn" onclick="ccUsePrompt(${i})">↗ Use</button></div><div class="cc-shot-prompt">${s.prompt.replace(/</g,'&lt;')}</div>`;
+    wrap.appendChild(card);
+  });
+  wrap.style.display = 'flex';
+
+  // Update batch bar
+  _ccUpdateBatchInfo();
+  document.getElementById('ccBatchBar').style.display = 'flex';
+}
+
+function _ccUpdateBatchInfo() {
+  const m = typeof MODELS !== 'undefined' && typeof currentModel !== 'undefined' ? MODELS[currentModel] : null;
+  const ar = document.getElementById('aspectRatio')?.value || '—';
+  const info = document.getElementById('ccBatchInfo');
+  if (!info) return;
+  const modelName = m ? m.name : '—';
+  info.innerHTML = `Batch will use current settings: <span>${modelName}</span> · aspect <span>${ar}</span> · <span>1 snap each</span>`;
+}
+
+function ccUsePrompt(idx) {
+  const p = _ccPrompts[idx];
+  if (!p) return;
+  const isVideo = window.aiPromptContext === 'video';
+  const ta = document.getElementById(isVideo ? 'videoPrompt' : 'prompt');
+  if (ta) { ta.value = p.prompt; ta.dispatchEvent(new Event('input')); }
+  closeSpecialTool();
+  if (!isVideo && typeof switchView === 'function') switchView('gen');
+  toast(`Shot #${p.num} prompt set`, 'ok');
+}
+
+function ccBatchRender() {
+  if (!_ccPrompts.length) return;
+  const ta = document.getElementById('prompt');
+  if (!ta) return;
+  closeSpecialTool();
+  if (typeof switchView === 'function') switchView('gen');
+
+  // Queue all 10 prompts with current settings
+  let queued = 0;
+  for (const shot of _ccPrompts) {
+    ta.value = shot.prompt;
+    ta.dispatchEvent(new Event('input'));
+    try {
+      generate();
+      queued++;
+    } catch (e) {
+      console.warn('CC batch: shot #' + shot.num + ' failed to queue:', e);
+    }
+  }
+  toast(`Batch: ${queued} shots queued`, 'ok');
+}
+
+// ═══════════════════════════════════════════════════════
+// SPECIAL TOOL — Environment Coverage (10 views, AI-generated)
+// ═══════════════════════════════════════════════════════
+
+let _ecEnvDesc = '';
+let _ecPrompts = []; // [{num, label, prompt}]
+let _ecHasSession = false;
+
+const EC_SYSTEM_PROMPT = `You are an expert cinematographer creating 10 camera positions for comprehensive environment coverage.
+
+RULES:
+- You receive an environment analysis. Based on it, create 10 camera setups that cover the ENTIRE space with NO blind spots.
+- Shots 1↔2, 3↔4, 5↔6 must be COUNTER-VIEWS (camera at opposite ends, looking back at each other).
+- Shot 7: center of space, focusing on a dominant feature (window, fireplace, table, etc.)
+- Shot 8: low angle from floor level
+- Shot 9: overhead/bird's-eye looking straight down
+- Shot 10: from outside looking in (through window, doorway, from threshold)
+- Describe camera position using VISIBLE OBJECTS as landmarks ("with the bookshelf on the left and door in the background"), NEVER compass directions or numeric angles.
+- Each prompt must reference the environment from the analysis.
+- No people in any shot.
+- Keep each prompt 40-60 words.
+
+OUTPUT FORMAT — exactly 10 shots, each in this format:
+=== SHOT 1: [Shot Size] — [short label] ===
+[prompt text]
+
+=== SHOT 2: [Shot Size] — [short label] ===
+[prompt text]
+
+...continue through SHOT 10.
+
+Shot sizes to use: Wide Shot, Medium Shot, MCU (medium close-up), or EWS (extreme wide shot).
+End each prompt with: No people. Photorealistic, cinematic, 35mm, film grain.`;
+
+async function openEnvCoverage() {
+  document.getElementById('spmToolList').style.display = 'none';
+  document.getElementById('csView')?.classList.remove('show');
+  document.getElementById('ccView')?.classList.remove('show');
+  document.getElementById('spmTitle').textContent = '◆ Environment Coverage';
+  document.getElementById('csResetBtn').style.display = '';
+  _ccActiveTool = 'ec';
+  const ecView = document.getElementById('ecView');
+  ecView.classList.add('show');
+
+  if (_ecHasSession) {
+    _ecUpdateBatchInfo();
+    return;
+  }
+  await _ecRunAnalysis();
+}
+
+async function resetEnvCoverage() {
+  _ecHasSession = false;
+  _ecEnvDesc = '';
+  _ecPrompts = [];
+  document.getElementById('ecPromptsWrap').innerHTML = '';
+  document.getElementById('ecPromptsWrap').style.display = 'none';
+  document.getElementById('ecBatchBar').style.display = 'none';
+  await _ecRunAnalysis();
+}
+
+async function _ecRunAnalysis() {
+  const hasRef = typeof refs !== 'undefined' && refs.length > 0;
+  document.getElementById('ecNoRef').style.display = hasRef ? 'none' : 'block';
+  document.getElementById('ecRefRow').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('ecStatusRow').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('ecPromptsWrap').style.display = 'none';
+  document.getElementById('ecBatchBar').style.display = 'none';
+  if (!hasRef) return;
+
+  _ecHasSession = true;
+
+  // Show all ref thumbnails
+  const thumbsWrap = document.getElementById('ecRefThumbs');
+  thumbsWrap.innerHTML = '';
+  for (let i = 0; i < refs.length; i++) {
+    const img = document.createElement('img');
+    img.className = 'cc-ref-thumb';
+    let src = '';
+    if (refs[i].thumb) src = `data:${refs[i].mimeType || 'image/jpeg'};base64,${refs[i].thumb}`;
+    if (!src && refs[i].assetId) {
+      try { const meta = await dbGet('assets_meta', refs[i].assetId); if (meta?.thumb) src = `data:${meta.mimeType || 'image/jpeg'};base64,${meta.thumb}`; } catch(_) {}
+    }
+    if (src) { img.src = src; thumbsWrap.appendChild(img); }
+  }
+
+  // Step 1: Analyze environment via vision
+  const statusEl = document.getElementById('ecStatusText');
+  statusEl.className = 'cc-status-text analyzing';
+  statusEl.textContent = 'Analyzing environment…';
+
+  const ref = refs[0];
+  let imageData = null, mimeType = 'image/jpeg';
+  if (ref.assetId) {
+    try { const asset = await dbGet('assets', ref.assetId); if (asset?.imageData) { imageData = asset.imageData; mimeType = asset.mimeType || 'image/jpeg'; } } catch(_) {}
+  }
+  if (!imageData) { statusEl.className = 'cc-status-text'; statusEl.textContent = 'Could not load image data.'; return; }
+
+  try {
+    const resized = await resizeImageToCanvas(`data:${mimeType};base64,${imageData}`, 1024);
+    const comma = resized.indexOf(',');
+    if (comma !== -1) { mimeType = resized.slice(5, resized.indexOf(';')); imageData = resized.slice(comma + 1); }
+  } catch (_) {}
+
+  const analyzeInstruction = `Analyze this environment image for a cinematographer planning 10 camera positions.
+Describe precisely:
+1) Type of space (interior/exterior, room type, setting, era/style)
+2) ALL visible objects and their positions (left/right/center/foreground/background)
+3) Walls, corners, doorways, windows — potential camera positions
+4) Lighting: sources, direction, quality, shadows
+5) Floor/ceiling materials and textures
+6) Overall dimensions impression (small/medium/large space)
+
+Be precise and factual. Use positional language (left, right, center, foreground, background). 150-200 words.`;
+
+  try {
+    const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+    if (orKey) {
+      _ecEnvDesc = await _callOpenRouterVision(orKey, imageData, mimeType, analyzeInstruction);
+      trackSpend('openrouter', '_or_describe', 1);
+    } else {
+      const apiKey = document.getElementById('apiKey')?.value?.trim();
+      if (!apiKey) { statusEl.className = 'cc-status-text'; statusEl.textContent = 'No OpenRouter or Google API key found.'; return; }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_DESCRIBE_MODEL}:generateContent?key=${apiKey}`;
+      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [
+          { inlineData: { mimeType, data: imageData } }, { text: analyzeInstruction }
+        ]}], generationConfig: { temperature: 0.5, maxOutputTokens: 1024 } }) });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || resp.status);
+      _ecEnvDesc = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      trackSpend('google', '_gemini_describe', 1);
+    }
+  } catch (err) {
+    statusEl.className = 'cc-status-text';
+    statusEl.textContent = 'Analysis failed: ' + (err.message || err);
+    return;
+  }
+
+  if (!_ecEnvDesc) { statusEl.className = 'cc-status-text'; statusEl.textContent = 'No description returned.'; return; }
+
+  statusEl.className = 'cc-status-text';
+  statusEl.textContent = _ecEnvDesc;
+
+  // Step 2: Generate 10 prompts via text AI
+  statusEl.textContent += '\n\nGenerating 10 camera positions…';
+  statusEl.className = 'cc-status-text analyzing';
+
+  const refLabel = _ccRefLabel(0);
+  const userMsg = `Environment analysis:\n${_ecEnvDesc}\n\nGenerate 10 camera positions covering this space. Each prompt must start with: "The reference ${refLabel} shows [brief env description]. Keep all furniture, objects, lighting, and materials identical.\\nChange only this: reframe the shot to show..."`;
+
+  try {
+    const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+    let aiResult;
+    if (orKey) {
+      aiResult = await _callOpenRouterText(EC_SYSTEM_PROMPT, userMsg, 0.8, 4096);
+      trackSpend('openrouter', '_or_prompt', 1);
+    } else {
+      const apiKey = document.getElementById('apiKey')?.value?.trim();
+      aiResult = await _callGeminiTextFallback(apiKey, EC_SYSTEM_PROMPT, userMsg, 0.8, 4096);
+      trackSpend('google', '_gemini_prompt', 1);
+    }
+
+    if (!aiResult) { statusEl.className = 'cc-status-text'; statusEl.textContent = _ecEnvDesc + '\n\nPrompt generation returned empty.'; return; }
+
+    // Parse shots
+    _ecPrompts = _ecParseShots(aiResult);
+    if (!_ecPrompts.length) {
+      statusEl.className = 'cc-status-text';
+      statusEl.textContent = _ecEnvDesc + '\n\nCould not parse prompts from AI output.';
+      return;
+    }
+
+    statusEl.className = 'cc-status-text';
+    statusEl.textContent = _ecEnvDesc;
+
+    _ecRenderPrompts();
+  } catch (err) {
+    statusEl.className = 'cc-status-text';
+    statusEl.textContent = _ecEnvDesc + '\n\nPrompt generation failed: ' + (err.message || err);
+  }
+}
+
+function _ecParseShots(text) {
+  const shots = [];
+  const regex = /===\s*SHOT\s*(\d+)\s*:\s*(.+?)\s*===\s*\n([\s\S]*?)(?=\n===\s*SHOT|\s*$)/gi;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    shots.push({
+      num: parseInt(match[1]),
+      label: match[2].trim(),
+      prompt: match[3].trim(),
+    });
+  }
+  return shots;
+}
+
+function _ecRenderPrompts() {
+  const wrap = document.getElementById('ecPromptsWrap');
+  wrap.innerHTML = '';
+  _ecPrompts.forEach((s, i) => {
+    const card = document.createElement('div');
+    card.className = 'cc-shot-card';
+    card.innerHTML = `<div class="cc-shot-hdr"><span class="cc-shot-num">#${s.num}</span><span class="cc-shot-label">${s.label}</span><button class="cc-shot-btn" onclick="ecUsePrompt(${i})">↗ Use</button></div><div class="cc-shot-prompt">${s.prompt.replace(/</g,'&lt;')}</div>`;
+    wrap.appendChild(card);
+  });
+  wrap.style.display = 'flex';
+  _ecUpdateBatchInfo();
+  document.getElementById('ecBatchBar').style.display = 'flex';
+}
+
+function _ecUpdateBatchInfo() {
+  const m = typeof MODELS !== 'undefined' && typeof currentModel !== 'undefined' ? MODELS[currentModel] : null;
+  const ar = document.getElementById('aspectRatio')?.value || '—';
+  const info = document.getElementById('ecBatchInfo');
+  if (!info) return;
+  info.innerHTML = `Batch will use current settings: <span>${m ? m.name : '—'}</span> · aspect <span>${ar}</span> · <span>1 snap each</span>`;
+}
+
+function ecUsePrompt(idx) {
+  const p = _ecPrompts[idx];
+  if (!p) return;
+  const isVideo = window.aiPromptContext === 'video';
+  const ta = document.getElementById(isVideo ? 'videoPrompt' : 'prompt');
+  if (ta) { ta.value = p.prompt; ta.dispatchEvent(new Event('input')); }
+  closeSpecialTool();
+  if (!isVideo && typeof switchView === 'function') switchView('gen');
+  toast(`View #${p.num} prompt set`, 'ok');
+}
+
+function ecBatchRender() {
+  if (!_ecPrompts.length) return;
+  const ta = document.getElementById('prompt');
+  if (!ta) return;
+  closeSpecialTool();
+  if (typeof switchView === 'function') switchView('gen');
+
+  let queued = 0;
+  for (const shot of _ecPrompts) {
+    ta.value = shot.prompt;
+    ta.dispatchEvent(new Event('input'));
+    try {
+      generate();
+      queued++;
+    } catch (e) {
+      console.warn('EC batch: view #' + shot.num + ' failed to queue:', e);
+    }
+  }
+  toast(`Batch: ${queued} views queued`, 'ok');
 }
 
 // ── Init chips ────────────────────────────────────────

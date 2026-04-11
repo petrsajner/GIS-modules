@@ -1,5 +1,5 @@
 # GIS — ARCHITEKTURA
-*Aktuální pro v184en · 7. 4. 2026*
+*Aktuální pro v194en · 11. 4. 2026*
 
 ---
 
@@ -14,7 +14,7 @@ Standalone HTML single-file app. Žádný server, žádná instalace. Otevírá 
 - fal.ai queue endpoint pro Kling Video a ostatní async modely
 - fal.ai synchronní endpoint pro image modely a upscale
 - Cloudflare Workers proxy pro xAI, Luma, Magnific, Topaz, Replicate — CORS bloky obejity
-- **Modularizace:** 20 modulů + `build.js` → single-file HTML výstup
+- **Modularizace:** 19 modulů + `build.js` → single-file HTML výstup
 
 ---
 
@@ -23,28 +23,39 @@ Standalone HTML single-file app. Žádný server, žádná instalace. Otevírá 
 ```
 src/
 ├── template.html          ← HTML + CSS + placeholder // __GIS_JS__
-├── models.js              ← MODELS, MODEL_DESCS, FAL_PRESETS, helpers
+├── models.js              ← MODELS, MODEL_DESCS, FAL_PRESETS, helpers, GIS_COPYRIGHT
 ├── styles.js              ← STYLES systém, 80+ stylů
-├── setup.js               ← API klíče (Google/fal/xAI/Luma/Freepik/Topaz/Replicate/OpenRouter)
+├── setup.js               ← API klíče, getProxyUrl(), _arrayBufferToBase64() utilities
 ├── spending.js            ← SPEND_PRICES, trackSpend, spending UI
 ├── model-select.js        ← selectModel(), switchView(), setGenMode(), rewritePromptForModel()
 ├── assets.js              ← asset library, pillarbox thumbs, assetFilters
 ├── refs.js                ← refs management, @mention (live rewriting), describe modal
 ├── generate.js            ← generate(), queue, runJob dispatch, withRetry
-├── fal.js                 ← FLUX/Kling Image/SeeDream/ZImage/Qwen2
+├── fal.js                 ← FLUX/Kling Image/SeeDream/ZImage/Qwen2, _runSimpleInpaint, inpaint
 ├── output-placeholder.js  ← placeholder karty, error karty (Reuse + Rerun)
 ├── proxy.js               ← xAI + Luma Photon + Replicate WAN 2.7 image
 ├── gemini.js              ← Gemini SSE streaming, Imagen, streamAccepted timeout
-├── output-render.js       ← result renderers, upscale dialog (Creative + Precision)
+├── output-render.js       ← renderOutput(), result renderers, upscale dialog (Creative + Precision)
 ├── db.js                  ← IndexedDB (obrazky + videa + assets)
 ├── gallery.js             ← image gallery, filtry, rubber band, drag-to-folder
 ├── toast.js               ← notifikace
-├── paint.js               ← Paint + Annotate
+├── paint.js               ← Paint + Annotate + Inpaint (queue, models, composite)
 ├── ai-prompt.js           ← AI Prompt Tool — Claude Sonnet (OR) primární, Gemini 3.1 Pro fallback
-└── video.js               ← Video modely, fronta, galerie, Topaz, video @mention rewriting
+└── video.js               ← Video modely, fronta, galerie, Topaz, Magnific, @mention rewriting
 ```
 
-Build: `node build.js 184en` → `dist/gis_v184en.html`
+Build: `node build.js 190en` → `dist/gis_v190en.html`
+
+---
+
+## Sdílené utility (setup.js, v190+)
+
+```javascript
+getProxyUrl()                      // → proxy base URL (z localStorage, s fallback)
+_arrayBufferToBase64(buffer)       // → base64 string (chunk-safe pro velká videa)
+```
+
+Používáno napříč: fal.js, video.js, output-render.js — nahrazuje 6× opakovanou proxy konstrukci a 4× chunk-encoding pattern.
 
 ---
 
@@ -53,28 +64,32 @@ Build: `node build.js 184en` → `dist/gis_v184en.html`
 Ukládány do localStorage, načítány v setup.js při `window.onload`:
 
 ```javascript
-localStorage.getItem('gis_apikey')             // Google API key — NB2/NB1/NB Pro, Imagen, Veo
-localStorage.getItem('gis_flux_apikey')        // fal.ai key — FLUX, Kling, SeeDream, Z-Image, Qwen2, Seedance, Vidu, Wan
-localStorage.getItem('gis_xai_apikey')         // xAI key — Grok Imagine (přes proxy)
-localStorage.getItem('gis_luma_apikey')        // Luma key — Photon, Photon Flash, Ray video (přes proxy)
-localStorage.getItem('gis_freepik_apikey')     // Freepik key — Magnific Creative + Precision (přes proxy)
-localStorage.getItem('gis_topaz_apikey')       // Topaz key — Starlight video/image upscale (přes proxy)
-localStorage.getItem('gis_replicate_apikey')   // Replicate key — WAN 2.7 image (přes proxy)
-localStorage.getItem('gis_openrouter_apikey')  // OpenRouter key — AI Prompt + Describe (Claude Sonnet 4.6)
-localStorage.getItem('gis_proxy_url')          // Cloudflare Worker URL (default: gis-proxy.petr-gis.workers.dev)
+localStorage.getItem('gis_apikey')             // Google API key
+localStorage.getItem('gis_flux_apikey')        // fal.ai key
+localStorage.getItem('gis_xai_apikey')         // xAI key
+localStorage.getItem('gis_luma_apikey')        // Luma key
+localStorage.getItem('gis_freepik_apikey')     // Freepik key
+localStorage.getItem('gis_topaz_apikey')       // Topaz key
+localStorage.getItem('gis_replicate_apikey')   // Replicate key
+localStorage.getItem('gis_openrouter_apikey')  // OpenRouter key — Claude Sonnet 4.6
+localStorage.getItem('gis_proxy_url')          // Cloudflare Worker URL (accessed via getProxyUrl())
 ```
 
 ---
 
-## AI Prompt & Describe — model priorita (v184+)
+## ⚠ AI Agent Architecture — FUNDAMENTAL RULE (v184+)
+
+**OpenRouter (Claude Sonnet 4.6) is the PRIMARY AI agent for ALL tool features.**
+Gemini Flash/Pro is ONLY a fallback when OpenRouter API key is missing.
+
+This applies to: Edit Tool, Describe, AI Prompt, Special Tools (Character Sheet, etc.).
+
+**Never default to Gemini when implementing new agent features.** Always use `_callOpenRouterVision` / `_callOpenRouterText` as primary, with Gemini as `else` fallback.
 
 ```
-OR klíč přítomen → anthropic/claude-sonnet-4-6 (OpenRouter) — primární
+OR klíč přítomen → anthropic/claude-sonnet-4-6 (OpenRouter) — PRIMÁRNÍ
 OR klíč chybí   → gemini-3.1-pro-preview (Google API)        — fallback
 ```
-
-- **AI Prompt Tool** (Enhance, Chat, Variants, Random, Translate): `callGeminiText()` / `callGeminiTextMultiTurn()`
-- **Describe** (✦ na referenci): `callGeminiDescribe()` + `_callOpenRouterVision()` — Claude podporuje vision
 
 ---
 
@@ -94,6 +109,8 @@ else if (model.type === 'qwen2')         → callQwen2()            // Qwen2 T2I
 else if (model.type === 'wan27r')        → callReplicateWan27()   // WAN 2.7 image přes Replicate proxy
 else if (model.type === 'proxy_xai')     → callProxyXaiMulti()    // Grok Imagine přes Worker
 else if (model.type === 'proxy_luma')    → callProxyLuma()        // Luma Photon přes Worker
+else if (model.type === 'proxy_mystic')  → callProxyMystic()      // Freepik Mystic přes Worker
+else if (model.type === 'proxy_freepik_edit') → callProxyFreepikEdit() // Freepik Edit přes Worker
 ```
 
 ### Upscale dispatch (output-render.js)
@@ -101,15 +118,14 @@ else if (model.type === 'proxy_luma')    → callProxyLuma()        // Luma Phot
 if (mode === 'magnific' && magMode === 'precision') → runMagnificPrecisionJob()
 else if (mode === 'magnific')                       → runMagnificUpscaleJob()
 else if (mode === 'topaz_gigapixel'/'topaz_bloom')  → runTopazImageUpscaleJob()
-else                                                → runFalUpscaleJob()        // Crisp/SeedVR2/Clarity
+else                                                → runFalUpscaleJob()  // Crisp/SeedVR2/Clarity
 ```
 
-### Gemini retry logika (v184+)
+### renderOutput dispatch (output-render.js, v190+)
 ```javascript
-// withRetry: 3× pro 503/529/429, 3s delay
-// job.streamAccepted = true → po přijetí HTTP response → neretrykuje
-// 10min stream deadline v callGeminiStream while loop
-// _updatePendingCardsStatus() — zobrazí retry stav na placeholder kartě
+// Přesunut z fal.js do output-render.js v v190en
+if (result.type === 'gemini') → renderGeminiOutput()
+else                          → renderImagenOutput()
 ```
 
 ---
@@ -119,26 +135,91 @@ else                                                → runFalUpscaleJob()      
 ```javascript
 // video.js: generateVideo() → runVideoJob(job)
 
-if (TOPAZ_MODELS[activeKey])  → _generateTopazJob()
-model.type === 'veo'          → callVeoVideo()
-model.type === 'luma_video'   → callLumaVideo()         // přes proxy
-model.type === 'wan27_video'  → callWan27Video()        // fal.ai queue
-model.type === 'wan27e_video' → callWan27eVideo()       // fal.ai queue (Video Edit)
-model.type === 'kling_video'  → fal.ai queue submit + poll
-model.type === 'seedance_video' → fal.ai queue
-model.type === 'vidu_video'   → fal.ai queue
-model.type === 'wan_video'    → fal.ai queue            // WAN 2.6
-model.type === 'topaz_video'  → runTopazQueueJob()
+if (TOPAZ_MODELS[activeKey])    → _generateTopazJob()      → runTopazQueueJob()
+if (MAGNIFIC_VIDEO_MODELS[key]) → _generateMagnificVideoJob() → runMagnificVideoUpscaleJob()
+model.type === 'veo'            → callVeoVideo()            // Google API polling
+model.type === 'luma_video'     → callLumaVideo()           // Worker proxy polling
+model.type === 'wan27_video'    → callWan27Video()          // fal.ai queue via _falVideoSubmitPollDownload
+model.type === 'wan27e_video'   → callWan27eVideo()         // fal.ai queue via _falVideoSubmitPollDownload
+model.type === 'kling_video'    → runVideoJob() inline      // fal.ai queue via _falVideoSubmitPollDownload
+model.type === 'seedance_video' → runVideoJob() inline      // fal.ai queue via _falVideoSubmitPollDownload
+model.type === 'vidu_video'     → runVideoJob() inline      // fal.ai queue via _falVideoSubmitPollDownload
+model.type === 'wan_video'      → runVideoJob() inline      // fal.ai queue via _falVideoSubmitPollDownload
+model.type === 'topaz_video'    → runTopazQueueJob()        // Topaz via proxy polling
 ```
 
-### Video prompt optional (v184+)
+---
+
+## Video shared helpers (v190+)
+
+### _falVideoSubmitPollDownload (video.js)
 ```javascript
-// promptOptional = true pokud:
-veoFramesMode  // Veo v "frames" módu
-|| (model.type !== 'luma_video' && model.type !== 'kling_video' &&
-    refMode ∈ {single_end, single, keyframe, wan_r2v, multi})
-// Luma a Kling vždy vyžadují prompt
-// Kling payload: prompt field vynechán pokud prázdný (API odmítá "" empty string)
+// Sdílený submit→poll→download pro fal.ai video queue
+// Používáno: runVideoJob, callWan27Video, callWan27eVideo
+async function _falVideoSubmitPollDownload(falKey, endpoint, payload, job, opts)
+// opts: { label, timeoutMin, pollMs, progressLabel }
+// Returns: videoArrayBuffer (ArrayBuffer)
+```
+
+### _saveVideoResult (video.js)
+```javascript
+// Sdílený save-to-DB + UI cleanup pro všechny video handlery
+// Používáno: callVeoVideo, runVideoJob, callLumaVideo, callWan27Video,
+//            callWan27eVideo, runMagnificVideoUpscaleJob, runTopazQueueJob
+async function _saveVideoResult(videoArrayBuffer, recordFields, job, spendArgs)
+// Automaticky: generateVideoThumb, _topazGetDims, _parseMp4Fps
+//              dbPut(videos + video_meta + video_thumbs), trackSpend
+//              renderVideoQueue, removeVideoPlaceholder, renderVideoResultCard
+// Returns: { videoId, elapsed, thumbData }
+```
+
+### _extractFalVideoUrl (video.js)
+```javascript
+// Extrahuje video URL z různých fal.ai response formátů
+function _extractFalVideoUrl(obj)
+// Zkouší: obj.output.video.url, obj.output.url, obj.video.url, obj.data.video.url
+```
+
+### Video source slot system (video.js, v190+)
+```javascript
+// Generické helpery pro source video panely (Topaz, WAN27e, WAN27v, V2V)
+_srcSlotClear(ids)                    // Reset panel — hide thumb/buttons, set "None selected"
+_srcSlotSet(ids, videoId)             // Load meta+thumb from DB, show info+chips+buttons
+_srcSlotDescribe(imgId)               // Open describe modal from thumbnail
+
+// ID config objekty (DOM element ID mapy):
+_topazIds  = { info, thumb, img, meta, clearBtn, describeBtn }
+_wan27eIds = { ... }
+_wan27vIds = { ... }
+_v2vIds    = { ... }
+
+// Pojmenované funkce = thin wrappers (voláno z template.html onclick):
+topazClearSource() → _srcSlotClear(_topazIds)
+topazSetSource(id) → _srcSlotSet(_topazIds, id) + FPS detekce
+wan27eClearSource() → _srcSlotClear(_wan27eIds)
+// ... atd.
+```
+
+---
+
+## Inpaint architektura (v190+)
+
+### Aktivní modely + dispatch (paint.js)
+```javascript
+// paint.js: addToInpaintQueue() → _processInpaintQueue()
+if (modelSel === 'flux_fill')    → callFluxFill()              // fal.js — unique signature
+else if (modelSel === 'flux_dev')  → callFluxDevInpaint()      // fal.js → _runSimpleInpaint wrapper
+else if (modelSel === 'flux_krea') → callFluxKreaInpaint()     // fal.js → _runSimpleInpaint wrapper
+else                               → callFluxGeneralInpaint()  // fal.js — ControlNet/ref, via proxy
+```
+
+### _runSimpleInpaint (fal.js, v190+)
+```javascript
+// Generická inpaint funkce — sdílená logika pro jednoduché modely
+async function _runSimpleInpaint(apiKey, endpoint, label, params, onStatus, signal, extraPayload)
+// Vstup: image_url + mask_url + prompt + steps/guidance/strength/seed
+// Výstup: { base64, mimeType, width, height }
+// callFluxDevInpaint a callFluxKreaInpaint jsou 1-řádkové wrappery
 ```
 
 ---
@@ -147,34 +228,16 @@ veoFramesMode  // Veo v "frames" módu
 
 ### Image modely (refs.js + model-select.js)
 ```javascript
-// Canonical forma: @UserLabel (@Ref_031, @Ref_030)
-// Model-specific forma: @Image1 (Kling/FLUX), Figure 1 (SeeDream), image 1 (Gemini)
-
 preprocessPromptForModel(prompt, refs, modelType)    // canonical → model
-promptModelToUserLabels(prompt, refs, modelType)     // model → canonical (reverzní)
-rewritePromptForModel(prevType, newType)             // přepíše textarea při přepnutí
-
-// Hooky:
-// - selectModel() → rewritePromptForModel(prevType, newType)
-// - renderRefThumbs() → rewritePromptForModel(m.type, m.type) [re-číslování]
-
-// Mention dropdown: model-specific jméno jako primární, user label jako subtitle
+promptModelToUserLabels(prompt, refs, modelType)     // model → canonical
+rewritePromptForModel(prevType, newType)             // přepíše textarea
 ```
 
 ### Video modely (video.js)
 ```javascript
-// refModes s @mentions: 'multi' (@Element1, @Element2) | 'wan_r2v' (Character1, bez @)
-videoPromptModelToUserLabels(prompt, refs, prevM)
-videoPromptUserLabelsToModel(prompt, refs, newM)
-rewriteVideoPromptForModel(prevM, newM)
-
-// _prevVideoModelKey — ukládá key před přepnutím (onchange vrátí nový)
-// _videoModelSwitching — guard zabraňuje dvojitému rewrite z renderVideoRefPanel
-
-// Hooky:
-// - onVideoModelChange() → rewriteVideoPromptForModel(prevM, newM)
-// - onKlingVersionChange() → rewriteVideoPromptForModel(prevM, newM)
-// - renderVideoRefPanel() → rewriteVideoPromptForModel(m, m) [re-číslování, pouze !_videoModelSwitching]
+videoPromptModelToUserLabels(prompt, refs, prevM)    // model → canonical
+videoPromptUserLabelsToModel(prompt, refs, newM)     // canonical → model
+rewriteVideoPromptForModel(prevM, newM)              // přepíše textarea
 ```
 
 ---
@@ -184,29 +247,17 @@ rewriteVideoPromptForModel(prevM, newM)
 ### Image error karty (output-placeholder.js)
 ```javascript
 showErrorPlaceholder(cardEl, job, msg)
-// → přepíše placeholder na error kartu:
-//    - červený banner: icon + friendlyError(msg)
-//    - err-meta-row: modelName + param chips (AR, resolution, tier, count, seed)
-//    - err-prompt: job.rawPrompt || job.prompt (plný text)
-//    - err-refs: ref thumbnails (data:mimeType;base64,thumb)
-//    - err-btns: [↺ Reuse] + [▶ Rerun]
-
-rerunJob(cardKey)         // okamžitě re-queue se stejnými parametry, nové ID
-reuseTimedOutJob(cardKey) // loadJobParamsToForm() → formulář pro review
-
-friendlyError(raw)        // přeloží technické chyby na čitelné zprávy
+rerunJob(cardKey)         // okamžitě re-queue
+reuseTimedOutJob(cardKey) // loadJobParamsToForm()
+friendlyError(raw)        // přeloží technické chyby
 ```
 
 ### Video error karty (video.js)
 ```javascript
 videoJobError(job, msg)
-// → přepíše video placeholder na error kartu (stejný styl)
-//    - friendlyVideoError(msg) — video-specifické překlady + deleguje na friendlyError
-//    - chips: duration + resolution
-//    - ref thumbnails z job.videoRefsSnapshot
-
 rerunVideoJob(jobId)       // okamžitý rerun
-reuseVideoJob_err(jobId)   // obnoví prompt + model do formuláře
+reuseVideoJob_err(jobId)   // obnoví prompt + model
+friendlyVideoError(msg)    // video-specifické překlady + deleguje na friendlyError
 ```
 
 ---
@@ -217,15 +268,16 @@ reuseVideoJob_err(jobId)   // obnoví prompt + model do formuláře
 GIS (browser, file://) → Cloudflare Worker (gis-proxy.petr-gis.workers.dev) → Provider API
 ```
 
-### Proxy routes (v2026-09 + luma fix)
+### Proxy routes (v2026-10)
 
 | Route | Provider | Flow |
 |-------|----------|------|
 | POST /xai/generate | xAI Grok | sync |
 | POST /luma/generate + /status | Luma Photon image | submit+poll |
-| POST /luma/video/submit + /status | Luma Ray video — **keyframes přes R2** | submit+poll |
+| POST /luma/video/submit + /status | Luma Ray video — keyframes přes R2 | submit+poll |
 | POST /magnific/upscale + /status | Magnific Creative | submit+poll |
 | POST /magnific/precision + /status | Magnific Precision V1/V2 | submit+poll |
+| POST /magnific/video-upscale + /status | Magnific Video | submit+poll |
 | POST /fal/submit + /status + /result | fal.ai queue | CORS bypass |
 | POST /topaz/video/submit + /status + /download | Topaz video | stream |
 | POST /topaz/image/submit + /status + /download | Topaz image | stream |
@@ -233,15 +285,7 @@ GIS (browser, file://) → Cloudflare Worker (gis-proxy.petr-gis.workers.dev) �
 | POST /r2/upload | R2 binary storage | store+return URL |
 | GET /r2/serve/{key} | R2 binary serving | stream |
 | POST /magnific/video-cleanup | R2 full cleanup | fire-and-forget |
-
-### Luma keyframe upload (v184+)
-```
-Starý flow (nefunkční — /file_uploads vrátí 404):
-  GIS base64 → Worker → POST /dream-machine/v1/file_uploads → Luma CDN URL → generation API
-
-Nový flow:
-  GIS base64 → Worker → R2 bucket (luma_kf_{ts}_{rand}.jpg) → /r2/serve/{key} URL → generation API
-```
+| POST /depth | Depth Anything v2 via fal.ai | CORS bypass |
 
 ---
 
@@ -254,19 +298,31 @@ Nový flow:
 |-------|------------|
 | Magnific Video Upscale | GIS base64 → JSON → Worker Buffer.from() → R2 |
 | Kling V2V Motion Control | GIS File object → raw binary → R2 |
-| Luma Ray video keyframes | Worker base64 → R2 (nový v184) |
+| Luma Ray video keyframes | Worker base64 → R2 |
 
 ---
 
-## Magnific Upscale architektura
+## Storage architektura
 
-### Creative mode
-- Endpoint: `/v1/ai/image-upscaler`
-- Engine: magnific_sparkle / magnific_sharpy / magnific_illusio
+### IndexedDB (DB v5)
+```
+images       — full image data + metadata
+images_meta  — metadata only (for fast gallery listing)
+thumbs       — image thumbnails (separate store for memory efficiency)
+assets       — ref images (full resolution)
+videos       — full video data (ArrayBuffer) + metadata
+video_meta   — video metadata only (fast listing)
+video_thumbs — video first-frame thumbnails
+videoFolders — video folder definitions
+```
 
-### Precision mode (v181+)
-- **V2**: `/v1/ai/image-upscaler-precision-v2` — flavor + scale_factor + sharpen/grain/detail
-- **V1**: `/v1/ai/image-upscaler-precision` — bez scale_factor/flavor
+### Refs architektura (v102+)
+```javascript
+// refs[] a videoRefs[] — asset linky, žádná inline data
+{ assetId, autoName, userLabel, mimeType, thumb, dims }
+
+// getRefDataForApi(ref, maxPx) — načte imageData on-demand z IndexedDB
+```
 
 ---
 
@@ -275,17 +331,6 @@ Nový flow:
 ```javascript
 trackSpend(provider, priceKey, count = 1, durationSeconds = null)
 // provider: 'google' | 'fal' | 'xai' | 'luma' | 'freepik' | 'topaz' | 'replicate'
-```
-
----
-
-## Refs architektura
-
-```javascript
-// refs[] a videoRefs[] — asset linky, žádná inline data
-{ assetId, autoName, userLabel, mimeType, thumb, dims }
-
-// getRefDataForApi(ref, maxPx) — načte imageData on-demand z IndexedDB
 ```
 
 ---
@@ -305,14 +350,30 @@ document.getElementById('fluxApiKey').value  // ✓ (ne 'falApiKey')
 // fal.ai auth header
 'Authorization': `Key ${falKey}`  // ✓ (ne Bearer)
 
+// Proxy URL — vždy přes getProxyUrl() (v190+)
+const proxyUrl = getProxyUrl();  // ✓ (ne localStorage.getItem přímo)
+
+// ArrayBuffer → base64 — vždy přes _arrayBufferToBase64() (v190+)
+const b64 = _arrayBufferToBase64(buffer);  // ✓ (ne manuální chunk loop)
+
 // Kling video — prázdný prompt VYNECHAT (ne poslat "")
 if (prompt) payload.prompt = prompt;  // ✓
 
 // addToQueue count — VŽDY přidat nový snap count
 job.wan27Snap?.count  // ← nutno přidat pro každý nový model
 
-// Gemini streamAccepted — nesmí se resetovat v retryi po přijetí response
-// Video @mention prevM — VŽDY číst _prevVideoModelKey, ne getActiveVideoModelKey() (ten vrátí nový)
+// Nový inpaint model — použij _runSimpleInpaint (v190+)
+callMyNewInpaint = (k, p, s, sig) => _runSimpleInpaint(k, 'fal-ai/new-model/inpainting', 'New Model', p, s, sig);
 
-// Luma keyframe upload — /file_uploads endpoint je 404 → použít R2 přes Worker
+// Video save — vždy přes _saveVideoResult (v190+)
+await _saveVideoResult(videoArrayBuffer, { model, modelKey, prompt, params, duration, ... }, job, spendArgs);
+
+// fal.ai video queue — vždy přes _falVideoSubmitPollDownload (v190+)
+const buf = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label, timeoutMin });
+
+// Video source slot — vždy přes _srcSlotClear/_srcSlotSet (v190+)
+// Nový source slot: definuj ID config objekt a 1-line wrappery
+
+// Proxy — Worker wall-clock limit
+// Worker free tier má ~30s limit. Polling NIKDY neběží uvnitř Workeru.
 ```

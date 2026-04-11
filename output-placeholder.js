@@ -2,6 +2,8 @@
 // PLACEHOLDER KARTY
 // ══════════════════════════════════════════════════════════
 
+let _suppressPlaceholderScroll = false;
+
 function createPlaceholderCard(job, idx) {
   const area = document.getElementById('outputArea');
   document.getElementById('emptyState').style.display = 'none';
@@ -48,7 +50,7 @@ function createPlaceholderCard(job, idx) {
     </div>`;
 
   area.appendChild(div);
-  div.scrollIntoView({ behavior: 'smooth' });
+  if (!_suppressPlaceholderScroll) div.scrollIntoView({ behavior: 'smooth' });
 
   // Elapsed time ticker
   const secEl = div.querySelector('.ph-sec');
@@ -260,7 +262,9 @@ function rerunJob(cardKey) {
   if (!job) { toast('Cannot rerun — job data lost', 'err'); return; }
   const { id, status, startedAt, elapsed, retryAttempt, retryTotal, pendingCards,
           requestId, cancelled, ...jobData } = job;
+  _suppressPlaceholderScroll = true;
   addToQueue(jobData);
+  _suppressPlaceholderScroll = false;
   // In-place: move new placeholder(s) to old error card's position, then remove old card
   const lastJob = jobQueue[jobQueue.length - 1];
   if (lastJob?.pendingCards?.length && card?.parentNode) {
@@ -316,6 +320,8 @@ async function loadJobParamsToForm(job) {
     _setRadio('thinking', s.thinkingLevel || 'minimal');
     const searchEl = document.getElementById('useSearch');
     if (searchEl) searchEl.checked = !!s.useSearch;
+    const retryEl = document.getElementById('persistentRetry');
+    if (retryEl) retryEl.checked = !!s.persistentRetry;
     _setFld(s.targetFolder);
   }
 

@@ -37,6 +37,7 @@ async function generate() {
       imageSize: nbResEl ? nbResEl.value : '1K',
       thinkingLevel: thinkEl ? thinkEl.value : 'minimal',
       useSearch: document.getElementById('useSearch').checked,
+      persistentRetry: document.getElementById('persistentRetry').checked,
       aspectRatio: document.getElementById('aspectRatio').value,
       targetFolder: document.getElementById('targetFolder').value,
     };
@@ -330,29 +331,47 @@ function _updatePendingCardsStatus(job, text) {
   }
 }
 
-// ── Retry helper: 3× pro 503/529/429, 3s delay mezi pokusy ──
+// ── Retry helper: standard 3×3s OR persistent 10× exponential backoff ──
 // Neretry-uje pokud job.streamAccepted (model přijal, generuje) — timeout řeší callGeminiStream
 const RETRY_CODES = ['503', '529', '429'];
-const RETRY_MAX = 3;
-const RETRY_DELAY_MS = 3000;
+
+// Standard profile (default)
+const RETRY_STD_DELAYS = [3000, 3000, 3000]; // 3× 3s = 9s total
+
+// Persistent profile: 5→10→20→30→60×6 = ~10 min total
+const RETRY_PERSISTENT_DELAYS = [5000, 10000, 20000, 30000, 60000, 60000, 60000, 60000, 60000, 60000];
 
 async function withRetry(fn, job) {
-  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+  const persistent = job.geminiSnap?.persistentRetry;
+  const delays = persistent ? RETRY_PERSISTENT_DELAYS : RETRY_STD_DELAYS;
+  const maxAttempts = delays.length + 1; // first attempt + retries
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       job.streamAccepted = false; // reset před každým pokusem
       return await fn();
     } catch(e) {
       const isSubmitError = RETRY_CODES.some(code => e.message.startsWith(`API ${code}`));
       const isRetryable = isSubmitError && !job.streamAccepted;
-      if (!isRetryable || attempt === RETRY_MAX) throw e;
+      if (!isRetryable || attempt === maxAttempts) throw e;
       job.retryAttempt = attempt;
-      job.retryTotal = RETRY_MAX;
+      job.retryTotal = maxAttempts - 1;
       renderQueue();
       const errCode = RETRY_CODES.find(code => e.message.startsWith(`API ${code}`)) || '';
-      const statusTxt = `⟳ ${errCode} — retry ${attempt}/${RETRY_MAX} in ${RETRY_DELAY_MS/1000}s`;
-      _updatePendingCardsStatus(job, statusTxt);
-      toast(`${errCode} — retrying in ${RETRY_DELAY_MS/1000}s (attempt ${attempt}/${RETRY_MAX})`, 'err');
-      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      const delaySec = Math.round(delays[attempt - 1] / 1000);
+
+      // Countdown on placeholder cards
+      const t0 = Date.now();
+      const target = t0 + delays[attempt - 1];
+      const updateCountdown = () => {
+        const remaining = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+        _updatePendingCardsStatus(job, `⟳ ${errCode} — retry ${attempt}/${maxAttempts - 1} — waiting ${delaySec}s (${remaining}s)`);
+      };
+      updateCountdown();
+      const interval = setInterval(updateCountdown, 1000);
+      toast(`${errCode} — retrying in ${delaySec}s (attempt ${attempt}/${maxAttempts - 1})`, 'err');
+      await new Promise(r => setTimeout(r, delays[attempt - 1]));
+      clearInterval(interval);
       _updatePendingCardsStatus(job, '');
     }
   }
