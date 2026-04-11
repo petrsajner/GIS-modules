@@ -569,6 +569,708 @@ async function callGeminiText(apiKey, systemPrompt, userMsg) {
   }
   return await _callGeminiTextFallback(apiKey, systemPrompt, userMsg, 0.9, 8192);
 }
+// ═══════════════════════════════════════════════════════
+// EDIT TOOL
+// ═══════════════════════════════════════════════════════
+
+let _etmChatHistory = [];
+let _etmRefAnalyses = [];    // Array of analyses for each reference image
+let _etmLastPrompt = '';     // Last AI-generated edit prompt
+let _etmCurrentModel = '';   // Model key selected in Edit Tool
+let _etmLastRefCount = 0;    // Track ref count to detect changes
+let _etmAnalyzing = false;
+
+// ── Status line management ─────────────────────────────
+function _etmSetStatus(state) {
+  const analyzing = document.getElementById('etmAnalyzing');
+  const statusLine = document.getElementById('etmStatusLine');
+  if (!analyzing || !statusLine) return;
+  if (state === 'analyzing') {
+    analyzing.style.display = 'block';
+    statusLine.className = 'etm-status-line etm-status-hidden';
+  } else if (state === 'ready') {
+    analyzing.style.display = 'none';
+    statusLine.textContent = '● READY';
+    statusLine.className = 'etm-status-line';
+  } else if (state === 'thinking') {
+    analyzing.style.display = 'none';
+    statusLine.textContent = '● thinking…';
+    statusLine.className = 'etm-status-line etm-status-thinking';
+  } else {
+    analyzing.style.display = 'none';
+    statusLine.className = 'etm-status-line etm-status-hidden';
+  }
+}
+
+// ── Model-type mapping ─────────────────────────────────
+function _etmModelType(key) {
+  const m = MODELS[key];
+  if (!m) return 'gemini';
+  if (m.type === 'gemini') return 'gemini';
+  if (m.type === 'flux')   return 'flux';
+  if (m.type === 'seedream') return 'seedream';
+  return 'gemini';
+}
+
+// ── Comprehensive system prompts per model type ────────
+// Shared rules for Keep section — identical across all models
+const ETM_KEEP_RULES = `
+KEEP SECTION RULES (critical — same for ALL models):
+- List elements by SIMPLE NEUTRAL NAMES: "lighting", "sky", "snow", "mountains", "building".
+- NEVER characterize or interpret elements: NOT "golden hour lighting", NOT "dramatic sky", NOT "fresh powder snow".
+- The model sees the reference image — it knows what the lighting looks like. You just name the element.
+- Use the same neutral language regardless of which model the prompt is for.`;
+
+// Model-specific element edit rules
+const ETM_ELEMENT_GEMINI = `
+=== ELEMENT EDIT MODE (Gemini NB2 / NB Pro) ===
+- The reference image does the heavy lifting. The model SEES it. Less text = less deviation.
+- Keep the prompt SHORT — under 60 words. Every extra word risks unwanted changes.
+- NEVER use compass directions or numeric angles.
+- Position elements using visible objects: "between the desk and the window".
+
+PROMPT STRUCTURE:
+Keep [simple neutral element names] identical.
+Change only this: [minimal description of ONLY the requested change].
+Photorealistic, cinematic, 35mm, film grain.`;
+
+const ETM_ELEMENT_FLUX = `
+=== ELEMENT EDIT MODE (Flux 2) ===
+- Flux takes prompts literally. Describe the full scene factually but don't embellish.
+- The "Preserve exactly" section must be comprehensive.
+- The "Change" section must be MINIMAL — only the user's request.
+
+PROMPT STRUCTURE:
+Original scene: [factual description from analysis — simple names, no adjective embellishment].
+Preserve exactly: [comprehensive list using simple neutral element names].
+Change: [ONLY the user's requested change].
+Photorealistic, cinematic, 35mm, film grain.
+
+Negative prompt: CGI, 3D render, cartoon, illustration, anime, watermark, bad anatomy, extra limbs, blurry`;
+
+const ETM_ELEMENT_SEEDREAM = `
+=== ELEMENT EDIT MODE (Seedream) ===
+- Concise and precise. Every word must earn its place.
+- Do NOT invent details. Use the user's exact words for the change.
+
+PROMPT STRUCTURE:
+Keep [simple neutral element names] unchanged.
+Change: [ONLY user's requested change — their words].
+Photorealistic, cinematic, 35mm, film grain.
+
+Negative prompt: cartoon, CGI, 3D render, blurry, bad anatomy, watermark`;
+
+// Shared camera reframe knowledge — same for all models
+const ETM_REFRAME_KNOWLEDGE = `
+=== CAMERA REFRAME MODE ===
+
+When the user asks to change camera angle, position, distance, or perspective:
+
+{REFRAME_STEP1}
+
+Generate 4 VARIANT PROMPTS using different strategies. Output them in this EXACT format:
+
+===VARIANT 1: [strategy name]===
+[prompt text]
+===VARIANT 2: [strategy name]===
+[prompt text]
+===VARIANT 3: [strategy name]===
+[prompt text]
+===VARIANT 4: [strategy name]===
+[prompt text]
+
+VARIANT STRATEGIES (ranked by proven success — use the best ones first):
+
+STRATEGY A — PHYSICAL POSITION (most reliable):
+"Show me this scene from the view of camera standing [physical location in the scene]"
+Example: "Show me this scene from the view of camera standing between the benches"
+WHY IT WORKS: Describes WHERE the camera IS, not where it MOVED. Simple, concrete.
+
+STRATEGY B — CHARACTER POV (very reliable):
+"Show me this scene from the perspective of [specific person and their location]"
+Example: "Show me this scene from the perspective of the man sitting on the right bench"
+WHY IT WORKS: Model understands POV as a concept. Anchors to a visible person.
+
+STRATEGY C — LANDMARK-TO-TARGET (reliable):
+"Show me this scene from [landmark/object] looking toward [target]"
+Example: "Show me this scene from doors in the middle of right wall — right across the court desk"
+WHY IT WORKS: Two anchor points define a line of sight. Concrete, spatial.
+
+STRATEGY D — SUBJECT REFRAME (moderate):
+"Same [location], [shot type] of [subject] from [their side/direction]"
+Example: "Same courtroom, close-up profile shot of the man in grey from his left side"
+WHY IT WORKS: Standard cinematic language. Works for closer shots and profiles.
+
+STRATEGY E — MULTI-REFERENCE (when 2 refs available):
+"Show me the scene from image 1 in the view and camera angle of image 2"
+Only use when 2 reference images are loaded. Very effective — one of the best strategies.
+
+STRATEGY F — TEMPORAL ORBIT (creative fallback):
+"camera is orbiting around the room. Show me this scene [X] seconds later"
+WHY IT WORKS: Implies continuous camera motion. Model fills in a plausible new angle.
+
+RULES FOR ALL VARIANTS:
+- Each variant MUST use a DIFFERENT strategy from the list above
+- Keep each variant prompt under 40 words — shorter = better for reframe
+- Start with "Show me" or "Same scene" — proven openers
+- NEVER use numeric angles, compass directions, or technical camera jargon
+- NEVER explain what the model should do — just describe what you want to SEE
+- The reference image prefix [Reference images: ...] will be added automatically — do NOT include it
+- For Flux/Seedream: add "Negative prompt: different room, CGI, cartoon, blurry" to each variant
+- CRITICAL — at the very end of each variant, on a new line, add a refs tag:
+  [REFS:1] if the prompt only needs the main scene image (most variants)
+  [REFS:1,2] if the prompt explicitly references image 2 (only STRATEGY E)
+  This tells the system which reference images to send to the generative model.`;
+
+// No per-model reframe structures needed — variants are universal
+// Element edit structures remain model-specific
+
+function _etmGetSystemPrompt() {
+  const type = _etmModelType(_etmCurrentModel);
+  const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+  const hasMultiRef = refCount >= 2;
+
+  let elementRules;
+  if (type === 'flux')         elementRules = ETM_ELEMENT_FLUX;
+  else if (type === 'seedream') elementRules = ETM_ELEMENT_SEEDREAM;
+  else                          elementRules = ETM_ELEMENT_GEMINI;
+
+  const negPromptNote = (type === 'flux' || type === 'seedream')
+    ? '- For this model: always include a Negative prompt line at the end of each variant.'
+    : '- For this model: do NOT include a Negative prompt line.';
+
+  // Build analysis section from array
+  let analysisSection = 'REFERENCE IMAGE ANALYSES (your internal context — never show to user):';
+  for (let i = 0; i < Math.min(refCount, _etmRefAnalyses.length); i++) {
+    const refName = refs[i]?.userLabel || refs[i]?.autoName || `Ref ${i + 1}`;
+    analysisSection += `\n\nImage ${i + 1} ("${refName}"):
+${_etmRefAnalyses[i] || '(analyzing...)'}`;
+  }
+  if (refCount === 0) analysisSection += '\n(No references loaded)';
+
+  // Dynamic reframe step 1 based on ref count
+  let reframeStep1;
+  if (hasMultiRef) {
+    reframeStep1 = `${refCount} reference images are loaded.
+Use the analyses above to understand spatial relationships between different angles.
+IMPORTANT: Include STRATEGY E (multi-reference) as one of your 4 variants.
+Generate the 4 variant prompts IMMEDIATELY — do not ask any questions.`;
+  } else {
+    reframeStep1 = `Only 1 reference image is loaded. Ask the user ONE short question:
+"🎬 Camera reframe — do you have a second reference showing this scene from a different angle? If yes, add it as reference 2 and say 'ready'. If not, just say 'go'."
+After user responds — generate the 4 variant prompts.`;
+  }
+
+  const reframeKnowledge = ETM_REFRAME_KNOWLEDGE.replace('{REFRAME_STEP1}', reframeStep1);
+
+  // Multi-ref awareness for element edits
+  const multiRefNote = hasMultiRef ? `
+MULTI-REFERENCE AWARENESS:
+${refCount} reference images are loaded. The user may refer to any of them:
+- "use the color from image 2" → reference image 2 in your prompt
+- "apply the mask from image 3" → reference image 3 marks the edit area
+- Use "image N" notation to reference specific images in the generated prompt.
+The [Reference images: ...] prefix is added automatically — just use "image 1", "image 2" etc. in the prompt body.` : '';
+
+  return `You are an intelligent image edit prompt engineer. You analyze what the user wants and choose the correct editing strategy.
+
+${analysisSection}
+
+TOTAL REFERENCES LOADED: ${refCount}
+
+=== STEP 1: CLASSIFY THE REQUEST ===
+
+Read the user's message and decide which type of edit they want:
+
+TYPE A — ELEMENT EDIT: Adding, removing, replacing, or modifying an object, person, color, lighting, style, or any visual element.
+
+TYPE B — CAMERA REFRAME: Changing the camera angle, position, distance, perspective, framing, or shot size.
+
+If the request is ambiguous, ask: "Are you changing what's in the scene (edit), or changing where the camera is (reframe)?"
+
+=== TYPE A RULES ===
+
+ABSOLUTE RULES FOR ELEMENT EDITS:
+1. ONLY change what the user explicitly asked for. Do NOT invent details.
+2. If the user didn't specify a detail, do NOT add it.
+3. "change X to Y" → prompt says "Change X to Y." Period.
+4. When the user references a specific image ("use color from image 2", "area marked in image 3"), include that reference in the prompt using "image N (RefName)" notation.
+${ETM_KEEP_RULES}
+${elementRules}
+${multiRefNote}
+
+=== TYPE B RULES ===
+${reframeKnowledge}
+${negPromptNote}
+
+=== GENERAL RULES (both types) ===
+- For TYPE A: respond with ONE prompt only.
+- For TYPE B: follow the step 1 logic above, then generate 4 VARIANT prompts in ===VARIANT N=== format.
+- No explanations, no markdown formatting.
+- When generating a prompt, output ONLY the prompt text ready to paste.`;
+}
+
+
+// ── Open / Close ───────────────────────────────────────
+function openEditTool() {
+  const modal = document.getElementById('editToolModal');
+  if (!modal) return;
+
+  // If session exists, just reopen (user may have left to add refs)
+  const hasExistingSession = _etmChatHistory.length > 0;
+
+  if (!hasExistingSession) {
+    // Fresh session — reset state
+    _etmChatHistory = [];
+    _etmLastPrompt = '';
+    _etmRefAnalyses = [];
+    _etmAnalyzing = false;
+    _etmLastRefCount = 0;
+    document.getElementById('etmChatHistory').innerHTML = '';
+    document.getElementById('etmChatInput').value = '';
+    document.getElementById('etmUseBtn').disabled = true;
+    document.getElementById('etmFooterStatus').textContent = '';
+    _etmSetStatus('hidden');
+
+    // Detect current model
+    _etmCurrentModel = currentModel || 'nb2';
+    _etmPreselectModel(_etmCurrentModel);
+  }
+
+  // Check for reference image (always refresh — user may have added refs)
+  const hasRef = refs && refs.length > 0;
+  document.getElementById('etmNoRef').style.display = hasRef ? 'none' : 'flex';
+  document.getElementById('etmChatCol').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('etmRefCol').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('etmInputRow').classList.toggle('etm-disabled', !hasRef);
+
+  modal.classList.add('show');
+
+  if (hasRef) {
+    _etmRefreshRefPreviews();
+    if (!hasExistingSession) {
+      _etmAppendMsg('system', 'What do you want to change? I can edit elements (replace, add, remove) or reframe the camera angle.');
+    }
+  }
+}
+
+function resetEditTool() {
+  _etmChatHistory = [];
+  _etmLastPrompt = '';
+  _etmRefAnalyses = [];
+  _etmLastRefCount = 0;
+  _etmAnalyzing = false;
+  document.getElementById('etmChatHistory').innerHTML = '';
+  document.getElementById('etmChatInput').value = '';
+  document.getElementById('etmUseBtn').disabled = true;
+  document.getElementById('etmFooterStatus').textContent = '';
+
+  // Re-check refs and re-analyze
+  const hasRef = refs && refs.length > 0;
+  document.getElementById('etmNoRef').style.display = hasRef ? 'none' : 'flex';
+  document.getElementById('etmChatCol').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('etmRefCol').style.display = hasRef ? 'flex' : 'none';
+  document.getElementById('etmInputRow').classList.toggle('etm-disabled', !hasRef);
+
+  if (hasRef) {
+    _etmRefreshRefPreviews();
+    _etmAppendMsg('system', 'What do you want to change? I can edit elements (replace, add, remove) or reframe the camera angle.');
+  } else {
+    _etmSetStatus('hidden');
+  }
+}
+
+function closeEditTool() {
+  document.getElementById('editToolModal')?.classList.remove('show');
+}
+
+function editToolBgClick(e) {
+  if (e.target.id === 'editToolModal') closeEditTool();
+}
+
+// ── Model preselect ────────────────────────────────────
+function _etmPreselectModel(key) {
+  const sel = document.getElementById('etmModelSelect');
+  if (!sel) return;
+  // Map current model to closest Edit Tool model
+  const m = MODELS[key];
+  let etmKey = 'nb2';
+  if (m) {
+    if (m.type === 'gemini') {
+      etmKey = (key === 'nbpro') ? 'nbpro' : 'nb2';
+    } else if (m.type === 'flux') {
+      etmKey = (key === 'flux2_dev') ? 'flux2_dev' : 'flux2_pro';
+    } else if (m.type === 'seedream') {
+      etmKey = (key === 'seedream45') ? 'seedream45' : 'seedream5lite';
+    } else {
+      etmKey = 'nb2'; // fallback for non-edit models
+    }
+  }
+  sel.value = etmKey;
+  _etmCurrentModel = etmKey;
+  _etmUpdateBadge();
+}
+
+function _etmUpdateBadge() {
+  const badge = document.getElementById('etmModelBadge');
+  if (!badge) return;
+  const type = _etmModelType(_etmCurrentModel);
+  const names = { nb2:'NB2', nbpro:'NB Pro', flux2_pro:'Flux 2 Pro', flux2_dev:'Flux 2 Dev',
+                  seedream5lite:'Seedream 5', seedream45:'Seedream 4.5' };
+  badge.textContent = names[_etmCurrentModel] || _etmCurrentModel;
+  if (type === 'gemini') {
+    badge.style.borderColor = 'rgba(212,160,23,.4)'; badge.style.color = 'var(--accent)'; badge.style.background = 'rgba(212,160,23,.06)';
+  } else if (type === 'flux') {
+    badge.style.borderColor = 'rgba(74,144,217,.4)'; badge.style.color = '#4a90d9'; badge.style.background = 'rgba(74,144,217,.06)';
+  } else {
+    badge.style.borderColor = 'rgba(60,190,100,.4)'; badge.style.color = '#3cbe64'; badge.style.background = 'rgba(60,190,100,.06)';
+  }
+}
+
+function etmSwitchModel(key) {
+  const prevType = _etmModelType(_etmCurrentModel);
+  _etmCurrentModel = key;
+  _etmUpdateBadge();
+
+  const newType = _etmModelType(key);
+  // If we have a prompt and model type changed, re-adapt it
+  if (_etmLastPrompt && prevType !== newType) {
+    _etmReadaptPrompt(prevType, newType);
+  }
+}
+
+async function _etmReadaptPrompt(fromType, toType) {
+  const apiKey = document.getElementById('apiKey')?.value?.trim();
+  if (!apiKey || !_etmLastPrompt) return;
+
+  const sendBtn = document.getElementById('etmChatSendBtn');
+  sendBtn.disabled = true;
+  _etmSetStatus('thinking');
+  const typeNames = { gemini: 'Gemini NB2/NB Pro', flux: 'Flux 2', seedream: 'Seedream' };
+  document.getElementById('etmFooterStatus').textContent = 'Adapting prompt for ' + (typeNames[toType] || toType) + '…';
+
+  const adaptSystem = `You are a prompt format adapter. Convert this image edit prompt from ${typeNames[fromType] || fromType} format to ${typeNames[toType] || toType} format.
+
+RULES:
+- Keep the SAME edit intent — do not change what is being edited or reframed.
+- Use simple neutral element names in Keep sections.
+- Do NOT add or invent any details not in the original prompt.
+${toType === 'gemini' ? '- SHORT prompt, under 60 words. No negative prompt. End with: Photorealistic, cinematic, 35mm, film grain.' : ''}${toType === 'flux' ? '- Use Original scene / Preserve exactly / Change structure. Include Negative prompt line.' : ''}${toType === 'seedream' ? '- Concise: Keep [...] unchanged. Change: [...]. Include Negative prompt line.' : ''}
+
+Respond ONLY with the adapted prompt. No explanations.`;
+
+  try {
+    const adapted = await callGeminiText(apiKey, adaptSystem, _etmLastPrompt);
+    const text = adapted.trim();
+    _etmLastPrompt = text;
+    _etmAppendMsg('model', text);
+    _etmChatHistory.push({ role: 'model', parts: [{ text }] });
+    document.getElementById('etmUseBtn').disabled = false;
+    document.getElementById('etmFooterStatus').textContent = 'Prompt adapted for ' + (typeNames[toType] || toType);
+  } catch(e) {
+    _etmAppendMsg('system', '⚠ Adaptation error: ' + e.message);
+  } finally {
+    sendBtn.disabled = false;
+    _etmSetStatus('ready');
+  }
+}
+
+// ── Reference preview ──────────────────────────────────
+function _etmRefreshRefPreviews() {
+  const count = (typeof refs !== 'undefined') ? refs.length : 0;
+  const label = document.getElementById('etmRefLabel');
+  if (label) label.textContent = count > 1 ? `References (${count})` : 'Reference';
+
+  // Show first ref
+  if (count >= 1) _etmShowRefImg('etmRefPreview', refs[0]);
+  else { const img = document.getElementById('etmRefPreview'); if (img) img.style.display = 'none'; }
+
+  // Show second ref preview (if exists)
+  const wrap2 = document.getElementById('etmRef2Wrap');
+  if (count >= 2) {
+    if (wrap2) wrap2.style.display = 'block';
+    _etmShowRefImg('etmRefPreview2', refs[1]);
+  } else {
+    if (wrap2) wrap2.style.display = 'none';
+  }
+
+  // Analyze any new refs that don't have analysis yet
+  for (let i = _etmRefAnalyses.length; i < count; i++) {
+    _etmAnalyzeRefAt(i);
+  }
+
+  // Detect ref count change mid-conversation — inject system note
+  if (count > _etmLastRefCount && _etmLastRefCount > 0 && _etmChatHistory.length > 0) {
+    const note = `[System: Reference image ${count} was added. ${count} references now loaded.]`;
+    _etmChatHistory.push({ role: 'user', parts: [{ text: note }] });
+    _etmAppendMsg('system', `Reference ${count} added ✓`);
+  }
+  _etmLastRefCount = count;
+}
+
+async function _etmShowRefImg(imgId, ref) {
+  const img = document.getElementById(imgId);
+  if (!img || !ref) return;
+  img.style.display = 'none';
+  let src = '';
+  if (ref.thumb) src = `data:${ref.mimeType || 'image/jpeg'};base64,${ref.thumb}`;
+  if (!src && ref.assetId) {
+    try { const meta = await dbGet('assets_meta', ref.assetId); if (meta?.thumb) src = `data:${meta.mimeType || 'image/jpeg'};base64,${meta.thumb}`; } catch(_) {}
+  }
+  if (!src && ref.assetId) {
+    try { const asset = await dbGet('assets', ref.assetId); if (asset?.imageData) src = `data:${asset.mimeType || 'image/jpeg'};base64,${asset.imageData}`; } catch(_) {}
+  }
+  if (src) { img.onload = () => { img.style.display = 'block'; }; img.src = src; }
+}
+
+// ── Reference analysis (per-ref, stored in array) ──────
+async function _etmAnalyzeRefAt(idx) {
+  const ref = refs[idx];
+  if (!ref) return;
+  const apiKey = document.getElementById('apiKey')?.value?.trim();
+  if (!apiKey) { _etmRefAnalyses[idx] = '(No API key)'; return; }
+
+  // Mark as analyzing
+  _etmRefAnalyses[idx] = '(analyzing...)';
+  if (idx === 0) { _etmAnalyzing = true; _etmSetStatus('analyzing'); }
+
+  let imageData = null, mimeType = 'image/jpeg';
+  if (ref.assetId) {
+    const asset = await dbGet('assets', ref.assetId);
+    if (asset?.imageData) { imageData = asset.imageData; mimeType = asset.mimeType || 'image/jpeg'; }
+  }
+  if (!imageData && ref.data) { imageData = ref.data; mimeType = ref.mimeType || 'image/jpeg'; }
+  if (!imageData) { _etmRefAnalyses[idx] = '(Could not load image data)'; if (idx === 0) { _etmAnalyzing = false; _etmSetStatus('ready'); } return; }
+
+  try {
+    const resized = await resizeImageToCanvas(`data:${mimeType};base64,${imageData}`, 1024);
+    const comma = resized.indexOf(',');
+    if (comma !== -1) { mimeType = resized.slice(5, resized.indexOf(';')); imageData = resized.slice(comma + 1); }
+  } catch (_) {}
+
+  // Different instruction for first ref vs additional refs
+  const instruction = idx === 0
+    ? `Describe this image in detail for use as context in an edit prompt generator.
+Describe: 1) Scene type (interior/exterior, style, mood) 2) ALL visible objects and positions (left/right/center/foreground/background) 3) People (appearance, clothing, position, facing) 4) Lighting (direction, quality, shadows) 5) Camera angle and framing. Be precise and factual. 150-250 words.`
+    : `This is reference image ${idx + 1} in an image editing workflow. Describe what this image contains and what role it likely plays as a reference:
+- Is it a photo of the same scene from a different angle? If so, describe the camera position.
+- Is it a color palette, texture, or style reference? Describe the colors/style.
+- Is it a sketch, drawing, or mask? Describe what it outlines or marks.
+- Is it a close-up detail? Describe what it shows.
+Be concise — under 80 words. Focus on what makes this useful as a reference for editing image 1.`;
+
+  try {
+    const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+    if (orKey) {
+      _etmRefAnalyses[idx] = await _callOpenRouterVision(orKey, imageData, mimeType, instruction);
+      trackSpend('openrouter', '_or_describe', 1);
+    } else {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_DESCRIBE_MODEL}:generateContent?key=${apiKey}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [
+            { inlineData: { mimeType, data: imageData } },
+            { text: instruction }
+          ]}],
+          generationConfig: { temperature: 0.3, maxOutputTokens: idx === 0 ? 1024 : 512 },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(`API ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
+      _etmRefAnalyses[idx] = data.candidates?.[0]?.content?.parts?.[0]?.text || '(Analysis failed)';
+    }
+  } catch(e) {
+    _etmRefAnalyses[idx] = '(Analysis error: ' + e.message + ')';
+  } finally {
+    if (idx === 0) { _etmAnalyzing = false; _etmSetStatus('ready'); }
+  }
+}
+
+// ── Chat ───────────────────────────────────────────────
+async function sendEditChat() {
+  const apiKey = document.getElementById('apiKey')?.value?.trim();
+  if (!apiKey) { toast('Enter API key (Gemini) in Setup', 'err'); return; }
+
+  // Refresh refs state (user may have added second ref)
+  _etmRefreshRefPreviews();
+
+  const inputEl = document.getElementById('etmChatInput');
+  const input = inputEl.value.trim();
+  if (!input) return;
+  if (_etmAnalyzing) { toast('Wait for reference analysis to complete…', 'warn'); return; }
+
+  const sendBtn = document.getElementById('etmChatSendBtn');
+  sendBtn.disabled = true;
+
+  _etmAppendMsg('user', input);
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+
+  _etmChatHistory.push({ role: 'user', parts: [{ text: input }] });
+  const typingEl = _etmAppendTyping();
+  _etmSetStatus('thinking');
+
+  try {
+    const systemPrompt = _etmGetSystemPrompt();
+
+    // Build context for first turn
+    let fullSystem = systemPrompt;
+    if (_etmChatHistory.length === 1 && _etmLastPrompt) {
+      fullSystem += `\n\nPREVIOUS EDIT PROMPT (modify this based on user request):\n${_etmLastPrompt}`;
+    }
+
+    const response = await callGeminiTextMultiTurn(apiKey, fullSystem, _etmChatHistory);
+    _etmChatHistory.push({ role: 'model', parts: [{ text: response }] });
+    typingEl.remove();
+    const text = response.trim();
+
+    // Check if response contains variants (===VARIANT N===)
+    const variants = _etmParseVariants(text);
+    const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+    if (variants.length > 1) {
+      _etmAppendVariants(variants);
+      _etmLastPrompt = variants[0].prompt; // Default to first variant
+      // Footer tip set by variant click handler
+      const v0 = variants[0];
+      let tip = 'Variant 1 selected';
+      if (v0.refsNeeded.length === 1 && refCount > 1) {
+        tip += ' · ⚠ Remove extra references before generating — only ref 1 is used.';
+      }
+      document.getElementById('etmFooterStatus').textContent = tip;
+    } else {
+      _etmAppendMsg('model', text);
+      _etmLastPrompt = text;
+      // Check which refs the prompt references
+      const usesMultiRef = /image\s*2|image\s*3|ref\s*2|ref\s*3/i.test(text);
+      let tip = 'Prompt ready — click "Use as Prompt" to apply';
+      if (!usesMultiRef && refCount > 1) {
+        tip += ' · ⚠ This prompt uses only ref 1. Remove extra references before generating.';
+      }
+      document.getElementById('etmFooterStatus').textContent = tip;
+    }
+    document.getElementById('etmUseBtn').disabled = false;
+  } catch(e) {
+    typingEl.remove();
+    _etmAppendMsg('system', '⚠ Error: ' + e.message);
+  } finally {
+    sendBtn.disabled = false;
+    _etmSetStatus('ready');
+    inputEl.focus();
+  }
+}
+
+function _etmAppendMsg(role, text) {
+  const history = document.getElementById('etmChatHistory');
+  if (!history) return;
+  const div = document.createElement('div');
+  div.className = 'etm-msg etm-msg-' + role;
+  div.textContent = text;
+  history.appendChild(div);
+  history.scrollTop = history.scrollHeight;
+  return div;
+}
+
+function _etmAppendTyping() {
+  const history = document.getElementById('etmChatHistory');
+  const div = document.createElement('div');
+  div.className = 'etm-msg etm-msg-model etm-msg-typing';
+  div.textContent = '…';
+  history.appendChild(div);
+  history.scrollTop = history.scrollHeight;
+  return div;
+}
+
+// ── Variant parsing and display ────────────────────────
+function _etmParseVariants(text) {
+  const variants = [];
+  const regex = /===\s*VARIANT\s*(\d+)\s*:\s*(.+?)\s*===\s*\n([\s\S]*?)(?=\n===\s*VARIANT|\s*$)/gi;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    let prompt = match[3].trim();
+    // Extract [REFS:1] or [REFS:1,2] tag
+    let refsNeeded = [1]; // default: only ref 1
+    const refsMatch = prompt.match(/\[REFS:\s*([\d,\s]+)\]\s*$/i);
+    if (refsMatch) {
+      refsNeeded = refsMatch[1].split(',').map(n => parseInt(n.trim())).filter(n => n > 0);
+      prompt = prompt.replace(/\[REFS:[^\]]*\]\s*$/i, '').trim();
+    }
+    variants.push({
+      num: parseInt(match[1]),
+      strategy: match[2].trim(),
+      prompt,
+      refsNeeded,
+    });
+  }
+  return variants;
+}
+
+function _etmAppendVariants(variants) {
+  const history = document.getElementById('etmChatHistory');
+  if (!history) return;
+  const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'etm-variants-wrap';
+
+  const label = document.createElement('div');
+  label.className = 'etm-variants-label';
+  label.textContent = '🎬 ' + variants.length + ' prompt variants — click to select:';
+  wrap.appendChild(label);
+
+  variants.forEach((v, i) => {
+    const card = document.createElement('div');
+    card.className = 'etm-variant-card' + (i === 0 ? ' etm-variant-selected' : '');
+    const refsLabel = v.refsNeeded.length > 1 ? `refs ${v.refsNeeded.join('+')}` : 'ref 1 only';
+    const refsClass = v.refsNeeded.length > 1 ? 'etm-refs-multi' : 'etm-refs-single';
+    card.innerHTML = `<div class="etm-variant-hdr"><span class="etm-variant-num">${v.num}</span> <span class="etm-variant-strategy">${v.strategy}</span><span class="etm-variant-refs ${refsClass}">${refsLabel}</span></div><div class="etm-variant-prompt">${v.prompt.replace(/</g,'&lt;')}</div>`;
+    card.onclick = () => {
+      wrap.querySelectorAll('.etm-variant-card').forEach(c => c.classList.remove('etm-variant-selected'));
+      card.classList.add('etm-variant-selected');
+      _etmLastPrompt = v.prompt;
+      // Show ref tip if variant uses fewer refs than loaded
+      let tip = 'Variant ' + v.num + ' selected';
+      if (v.refsNeeded.length === 1 && refCount > 1) {
+        tip += ' · ⚠ Remove extra references before generating — only ref 1 is used. Extra refs confuse the model.';
+      }
+      document.getElementById('etmFooterStatus').textContent = tip;
+    };
+    wrap.appendChild(card);
+  });
+
+  history.appendChild(wrap);
+  history.scrollTop = history.scrollHeight;
+}
+
+// ── Use as Prompt ──────────────────────────────────────
+function useEditPrompt() {
+  if (!_etmLastPrompt) return;
+  const isVideo = window.aiPromptContext === 'video';
+  const ta = document.getElementById(isVideo ? 'videoPrompt' : 'prompt');
+  if (ta) {
+    ta.value = _etmLastPrompt;
+    ta.dispatchEvent(new Event('input'));
+  }
+  closeEditTool();
+}
+
+// ═══════════════════════════════════════════════════════
+// SPECIAL TOOL (placeholder)
+// ═══════════════════════════════════════════════════════
+
+function openSpecialTool() {
+  document.getElementById('specialToolModal')?.classList.add('show');
+}
+
+function closeSpecialTool() {
+  document.getElementById('specialToolModal')?.classList.remove('show');
+}
+
+function specialToolBgClick(e) {
+  if (e.target.id === 'specialToolModal') closeSpecialTool();
+}
+
 // ── Init chips ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#aiRandomChips .aipm-chip').forEach(chip => {

@@ -598,6 +598,8 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
   }
 
   if (modelType === 'gemini') {
+    // Strip any existing prefix to avoid duplication (rewritePromptForModel may have added it already)
+    const strippedPrompt = prompt.replace(/^\[Reference images:[^\]]*\]\s*/gi, '');
     const namedRefs = activeRefs.filter(r => r.userLabel || r.autoName);
     let prefix = '';
     if (namedRefs.length > 0) {
@@ -607,7 +609,7 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
       }).join(', ');
       prefix = `[Reference images: ${descs}] `;
     }
-    const body = prompt.replace(/@([\w]+)/g, (full, mention) => {
+    const body = strippedPrompt.replace(/@([\w]+)/g, (full, mention) => {
       const idx = findIdx(mention);
       if (idx < 0) return full;
       const r = activeRefs[idx];

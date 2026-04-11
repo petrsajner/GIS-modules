@@ -1,6 +1,6 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 7. 4. 2026 · v184en*
+*Aktualizováno 9. 4. 2026 · v190en*
 
 ---
 
@@ -136,3 +136,93 @@
 | 2026-09 | 6. 4. 2026 | R2 generic upload/serve, Kling V2V fix |
 | 2026-08 | dříve | Magnific video, Mystic, Relight, Style Transfer, Skin Enhancer |
 | luma fix | 7. 4. 2026 | handleLumaVideoSubmit přijímá env, keyframes přes R2 |
+
+---
+
+## Code cleanup & deduplication (9. 4. 2026)
+
+**Problém:** 24k řádků kódu s masivní duplikací — video save pattern 8×, source slot management 4× copy-paste, fal.ai polling 3×, inpaint funkce 7× téměř identické, mrtvý kód po odstraněných modelech.
+
+**Rozhodnutí:** Systematický refaktor v jedné verzi (v190en) se syntax checkpointy po každé fázi.
+
+**Přístup:**
+1. Mrtvý kód odstraněn nejdříve (nízké riziko)
+2. Utility helpery extrahovány do setup.js (getProxyUrl, _arrayBufferToBase64)
+3. Generické funkce vytvořeny pro opakované patterny (_saveVideoResult, _falVideoSubmitPollDownload, _srcSlotClear/Set/Describe, _runSimpleInpaint)
+4. Existující pojmenované funkce zachovány jako thin wrappers (API kompatibilita s template.html onclick handlery)
+
+**Co NEBYLO refaktorováno (záměrně):**
+- Image model call funkce (callFlux, callSeedream, callKling...) — každá má dostatečně specifické parametry, unifikace by byla křehká
+- Mystic modely — aktivně používané
+- Veo/Luma polling — odlišné API (ne fal.ai), vlastní auth pattern
+
+**Výsledek:** 17533 → 16897 JS řádků (−636, −3.6%). Žádná změna funkcionality.
+
+---
+
+## Edit Tool — Unified Agent Architecture (10. 4. 2026)
+
+**Problém:** Uživatel potřebuje generovat editační prompty optimalizované pro různé modely (NB2, NB Pro, Flux 2, Seedream). Každý model má jiné požadavky na formát promptu. Navíc je potřeba rozlišit editaci elementu vs. změnu kamery.
+
+**Rozhodnutí:** Jeden unified AI agent s automatickou klasifikací (TYPE A element edit / TYPE B camera reframe) místo separátních per-model systémů.
+
+**Architektura:**
+- System prompt se buduje dynamicky v `_etmGetSystemPrompt()` na základě: aktuální model, počet refs, analýzy všech refs.
+- `_etmRefAnalyses[]` — pole analýz pro libovolný počet referencí. Ref 1 = detailní popis scény. Ref 2+ = krátká analýza role (barva? maska? úhel?).
+- Agent rozhoduje typ editace sám z uživatelova zadání — nikdy se neptá "edit nebo reframe?" pokud je záměr jasný.
+
+**Alternativy zvážené:**
+- 3 separátní system prompty per model → duplicitní, neflexibilní při přidávání nových modelů
+- Pre-classification v JS před odesláním → uživatel musí volit typ, přidává UI krok
+
+---
+
+## Camera Reframe — Strategie a výsledky výzkumu (10. 4. 2026)
+
+**Problém:** Jak přesvědčit generativní AI modely aby změnily úhel kamery při zachování scény?
+
+**Klíčový poznatek:** Generativní modely nechápou instrukce o pohybu kamery ("rotate 90°", "move camera 5m right"). Rozumí popisu NOVÉHO ZÁBĚRU jako fotografie.
+
+**Testované a zamítnuté přístupy:**
+1. ❌ **Floor plan jako reference** — modely diagramy ignorují nebo vizuálně zapracovávají
+2. ❌ **Dlouhé prostorové popisy** (>80 slov) — model se zmate, přeuspořádá objekty místo otočení kamery
+3. ❌ **Numerické úhly** ("rotate 90°") — ignorováno
+4. ❌ **Kompasové směry** ("face north") — ignorováno
+
+**Přijaté strategie (seřazené dle účinnosti):**
+1. ⭐⭐⭐ **Physical Position** — "from the view of camera standing [location]"
+2. ⭐⭐⭐ **Character POV** — "from the perspective of [person at location]"  
+3. ⭐⭐ **Landmark-to-Target** — "from [object A] looking toward [object B]"
+4. ⭐⭐ **Subject Reframe** — "close-up profile shot of [subject] from [side]"
+5. ⭐⭐⭐ **Multi-Reference** — "scene from image 1 in the view of image 2"
+6. ⭐ **Temporal Orbit** — "camera orbiting, show me X seconds later"
+
+**Rozhodnutí: Variant approach.** Agent generuje 4 různé varianty (různé strategie) a uživatel zkouší postupně. Žádná strategie nefunguje 100% — ale jedna ze 4 variant obvykle dá přijatelný výsledek.
+
+**Model doporučení:** NB Pro je nejspolehlivější pro camera reframe. Ostatní modely fungují hůře.
+
+---
+
+## Druhá reference jako interní kontext (10. 4. 2026)
+
+**Problém:** Druhá reference (jiný úhel scény) dramaticky zlepšuje kvalitu agentova prostorového popisu, ale pokud ji pošleme generativnímu modelu spolu s promptem který na ni neodkazuje, model je zmatený a výsledek se zhorší.
+
+**Rozhodnutí:** REFS tagging systém.
+- Agent taguje každou variantu `[REFS:1]` nebo `[REFS:1,2]`
+- Parser tag extrahuje a odstraní z promptu
+- UI zobrazuje badge "ref 1 only" / "refs 1+2" na kartě varianty
+- Footer varuje při přebytečných referencích
+
+**Princip:** Druhá reference slouží AGENTOVI k pochopení prostoru. Generativnímu MODELU ji posíláme JEN když na ni prompt explicitně odkazuje (Strategy E).
+
+---
+
+## Multi-ref awareness pro element edits (10. 4. 2026)
+
+**Problém:** Uživatel může přidat barvu jako ref 2, masku jako ref 3, texturu jako ref 4. Agent musí vědět co každá reference obsahuje a jak na ni odkazovat v promptu.
+
+**Rozhodnutí:** 
+- `_etmAnalyzeRefAt(idx)` — pro ref 2+ se ptá AI: "Is this a different angle? Color palette? Sketch/mask? Close-up detail?"
+- System prompt obsahuje `MULTI-REFERENCE AWARENESS` sekci s instrukcemi pro odkazování ("image 2", "image 3")
+- Regex check na výstupu: pokud prompt neobsahuje "image 2" ale refs > 1 → varování v footeru
+

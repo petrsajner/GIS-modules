@@ -1474,6 +1474,188 @@ select.inpaint-num option { background:#fff; color:#111; }
   padding: 3px 10px; cursor: pointer; letter-spacing: .05em; transition: all .15s;
 }
 .btn-camera:hover, .btn-camera.active { background: rgba(74,144,217,.18); border-color: #4a90d9; color: #4a90d9; }
+/* ── Special + Edit buttons ── */
+.btn-special {
+  background: rgba(180,50,120,.08); border: 1px solid rgba(180,50,120,.45);
+  color: rgba(210,80,150,.75); font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  padding: 3px 10px; cursor: pointer; letter-spacing: .05em; transition: all .15s;
+}
+.btn-special:hover, .btn-special.active { background: rgba(180,50,120,.18); border-color: #d25096; color: #d25096; }
+.btn-edit {
+  background: rgba(40,160,80,.08); border: 1px solid rgba(40,160,80,.45);
+  color: rgba(60,190,100,.75); font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  padding: 3px 10px; cursor: pointer; letter-spacing: .05em; transition: all .15s;
+}
+.btn-edit:hover, .btn-edit.active { background: rgba(40,160,80,.18); border-color: #3cbe64; color: #3cbe64; }
+
+/* ═══ Edit Tool Modal ═══ */
+#editToolModal {
+  position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:300;
+  display:none; align-items:center; justify-content:center; padding:24px;
+  pointer-events:none;
+}
+#editToolModal.show { display:flex; pointer-events:all; }
+.etm-box {
+  background:var(--s1); border:1px solid var(--border);
+  width:100%; max-width:920px; max-height:92vh;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.etm-hdr {
+  padding:16px 24px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:12px; flex-shrink:0;
+}
+.etm-title { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; color:#3cbe64; }
+.etm-model-sel {
+  font-family:'IBM Plex Mono',monospace; font-size:10px; background:var(--s2);
+  border:1px solid var(--border); color:var(--text); padding:4px 8px; outline:none; cursor:pointer;
+}
+.etm-model-sel option { background:var(--s1); color:var(--text); }
+.etm-model-badge {
+  font-family:'IBM Plex Mono',monospace; font-size:9px; font-weight:700;
+  letter-spacing:.12em; padding:2px 8px; border:1px solid rgba(60,190,100,.4);
+  color:#3cbe64; background:rgba(60,190,100,.06);
+}
+.etm-close { background:none; border:none; color:var(--dim); font-size:20px; cursor:pointer; line-height:1; padding:2px 6px; margin-left:auto; }
+.etm-close:hover { color:var(--text); }
+.etm-body {
+  display:flex; flex:1; min-height:0; overflow:hidden;
+}
+.etm-chat-col {
+  flex:1; display:flex; flex-direction:column; min-height:0;
+  padding:16px 20px 16px 24px; gap:12px;
+}
+.etm-ref-col {
+  width:200px; flex-shrink:0; border-left:1px solid var(--border);
+  display:flex; flex-direction:column; align-items:center; padding:16px 12px; gap:8px;
+  overflow-y:auto;
+}
+.etm-ref-col img { max-width:100%; border:1px solid var(--border); object-fit:contain; }
+.etm-ref-label { font-size:9px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); }
+.etm-noref {
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  color:var(--dim); font-size:12px; gap:12px; text-align:center; padding:40px 20px;
+}
+.etm-noref-icon { font-size:36px; opacity:.3; }
+.etm-analyzing {
+  font-size:10px; font-family:'IBM Plex Mono',monospace; letter-spacing:.08em;
+  color:rgba(220,50,50,.85); animation: etm-blink 1s ease-in-out infinite;
+}
+.etm-status-line {
+  font-size:10px; font-family:'IBM Plex Mono',monospace; letter-spacing:.08em;
+  color:rgba(60,190,100,.85); flex-shrink:0; padding:2px 0;
+}
+.etm-status-line.etm-status-hidden { display:none; }
+.etm-status-line.etm-status-thinking {
+  color:rgba(220,50,50,.85); animation: etm-blink 1s ease-in-out infinite;
+}
+@keyframes etm-blink { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+.etm-chat-history {
+  flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+  min-height:180px; padding:4px 2px 4px 0;
+}
+.etm-msg {
+  font-size:12px; line-height:1.7; max-width:92%;
+  padding:10px 14px; white-space:pre-wrap; word-break:break-word;
+}
+.etm-msg-user {
+  align-self:flex-end; background:rgba(60,190,100,.08);
+  border:1px solid rgba(60,190,100,.25); color:var(--text);
+}
+.etm-msg-model {
+  align-self:flex-start; background:var(--s2);
+  border:1px solid var(--border); color:var(--text);
+}
+.etm-msg-system {
+  align-self:stretch; background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.1); color:rgba(255,255,255,.45);
+  font-style:italic; max-width:100%; font-size:11px;
+}
+.etm-msg-typing { color:var(--dim); font-style:italic; }
+.etm-chat-input-row { display:flex; gap:8px; align-items:flex-end; flex-shrink:0; }
+.etm-chat-input {
+  flex:1; background:var(--s2); border:1px solid var(--border); color:var(--text);
+  font-family:'IBM Plex Mono',monospace; font-size:12px; padding:10px 12px;
+  resize:none; outline:none; line-height:1.6; min-height:42px; max-height:120px;
+}
+.etm-chat-input:focus { border-color:#3cbe64; }
+.etm-chat-input::placeholder { color:var(--dim2); }
+.etm-chat-send {
+  padding:10px 18px; background:#3cbe64; color:#000;
+  font-family:'Syne',sans-serif; font-weight:700; font-size:10px;
+  letter-spacing:.05em; text-transform:uppercase; border:none; cursor:pointer;
+  flex-shrink:0; align-self:flex-end;
+}
+.etm-chat-send:hover { background:#4dd477; }
+.etm-chat-send:disabled { background:rgba(60,190,100,.3); cursor:not-allowed; }
+.etm-footer {
+  padding:14px 24px; border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:10px; flex-shrink:0;
+}
+.etm-footer-status { font-size:10px; color:var(--dim); font-style:italic; flex:1; }
+.etm-use-btn {
+  padding:10px 20px; background:transparent; color:#3cbe64;
+  border:1px solid #3cbe64; font-family:'Syne',sans-serif; font-weight:700;
+  font-size:11px; letter-spacing:.05em; text-transform:uppercase; cursor:pointer;
+  transition:all .15s; flex-shrink:0;
+}
+.etm-use-btn:hover { background:rgba(60,190,100,.1); }
+.etm-use-btn:disabled { opacity:.35; cursor:not-allowed; }
+.etm-disabled { opacity:.35; pointer-events:none; }
+/* Variant cards */
+.etm-variants-wrap { display:flex; flex-direction:column; gap:6px; max-width:100%; }
+.etm-variants-label { font-size:10px; color:var(--dim); margin-bottom:4px; }
+.etm-variant-card {
+  background:var(--s2); border:1px solid var(--border); padding:10px 12px;
+  cursor:pointer; transition:border-color .15s, background .15s;
+}
+.etm-variant-card:hover { border-color:rgba(60,190,100,.45); background:rgba(60,190,100,.03); }
+.etm-variant-card.etm-variant-selected { border-color:#3cbe64; background:rgba(60,190,100,.07); }
+.etm-variant-hdr { display:flex; align-items:center; gap:6px; margin-bottom:5px; }
+.etm-variant-num {
+  font-family:'IBM Plex Mono',monospace; font-size:9px; font-weight:700;
+  color:#3cbe64; background:rgba(60,190,100,.12); padding:1px 6px; letter-spacing:.05em;
+}
+.etm-variant-strategy { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+.etm-variant-refs {
+  font-size:8px; font-family:'IBM Plex Mono',monospace; letter-spacing:.06em;
+  padding:1px 5px; margin-left:auto; border:1px solid;
+}
+.etm-refs-single { color:var(--dim); border-color:var(--border); }
+.etm-refs-multi { color:#4a90d9; border-color:rgba(74,144,217,.4); }
+.etm-variant-prompt { font-size:11px; color:var(--text); line-height:1.7; white-space:pre-wrap; word-break:break-word; }
+
+/* ═══ Special Tool Modal ═══ */
+#specialToolModal {
+  position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:300;
+  display:none; align-items:center; justify-content:center; padding:24px;
+  pointer-events:none;
+}
+#specialToolModal.show { display:flex; pointer-events:all; }
+.spm-box {
+  background:var(--s1); border:1px solid var(--border);
+  width:100%; max-width:520px; display:flex; flex-direction:column; overflow:hidden;
+}
+.spm-hdr {
+  padding:16px 24px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:12px; flex-shrink:0;
+}
+.spm-title { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; color:#d25096; flex:1; }
+.spm-close { background:none; border:none; color:var(--dim); font-size:20px; cursor:pointer; line-height:1; padding:2px 6px; }
+.spm-close:hover { color:var(--text); }
+.spm-body { padding:24px; display:flex; flex-direction:column; gap:12px; }
+.spm-tool {
+  padding:16px 20px; border:1px solid var(--border); background:var(--s2);
+  font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text);
+  cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:10px;
+}
+.spm-tool:hover:not(.spm-disabled) { border-color:var(--border2); background:rgba(210,80,150,.04); }
+.spm-tool.spm-disabled { opacity:.35; cursor:not-allowed; pointer-events:none; }
+.spm-tool-icon { font-size:16px; }
+.spm-tool-label { flex:1; }
+.spm-tool-badge {
+  font-size:8px; text-transform:uppercase; letter-spacing:.1em;
+  padding:2px 6px; border:1px solid rgba(255,255,255,.15); color:var(--dim);
+}
 
 /* Tagy aktivních stylů pod promptem */
 /* Tags are now inside .psec with inline styles */
@@ -1843,7 +2025,7 @@ select.inpaint-num option { background:#fff; color:#111; }
 
       <!-- Prompt -->
       <div class="psec">
-        <div class="plabel">Prompt <span id="charCount">0 ch.</span><button onclick="openAiPromptModal()" style="margin-left:auto;background:rgba(122,74,212,.12);border:1px solid var(--purple);color:var(--purple);font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;cursor:pointer;letter-spacing:.05em;transition:all .15s;" onmouseover="this.style.background='rgba(122,74,212,.25)'" onmouseout="this.style.background='rgba(122,74,212,.12)'">✦ AI Prompt</button></div>
+        <div class="plabel">Prompt <span id="charCount">0 ch.</span><button id="specialBtn" class="btn-special" onclick="openSpecialTool()" style="margin-left:auto;">◆ Special</button><button id="editBtn" class="btn-edit" onclick="openEditTool()">✎ Edit</button><button onclick="openAiPromptModal()" style="background:rgba(122,74,212,.12);border:1px solid var(--purple);color:var(--purple);font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;cursor:pointer;letter-spacing:.05em;transition:all .15s;" onmouseover="this.style.background='rgba(122,74,212,.25)'" onmouseout="this.style.background='rgba(122,74,212,.12)'">✦ AI Prompt</button></div>
         <textarea id="prompt" placeholder="Describe the scene..." oninput="updateCharCount()"></textarea>
         <!-- Řádek pod promptem: Styles + Camera tlačítka -->
         <div style="display:flex; align-items:center; justify-content:flex-end; padding-top:5px; gap:5px;">
@@ -2725,7 +2907,9 @@ select.inpaint-num option { background:#fff; color:#111; }
       <!-- Video prompt -->
       <div class="psec" id="videoPromptSec">
         <div class="plabel">Prompt
-          <button onclick="openAiPromptModal()" style="margin-left:auto;background:rgba(122,74,212,.12);border:1px solid var(--purple);color:var(--purple);font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;cursor:pointer;letter-spacing:.05em;" onmouseover="this.style.background='rgba(122,74,212,.25)'" onmouseout="this.style.background='rgba(122,74,212,.12)'">&#10022; AI Prompt</button>
+          <button class="btn-special" onclick="openSpecialTool()" style="margin-left:auto;">◆ Special</button>
+          <button class="btn-edit" onclick="openEditTool()">✎ Edit</button>
+          <button onclick="openAiPromptModal()" style="background:rgba(122,74,212,.12);border:1px solid var(--purple);color:var(--purple);font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;cursor:pointer;letter-spacing:.05em;" onmouseover="this.style.background='rgba(122,74,212,.25)'" onmouseout="this.style.background='rgba(122,74,212,.12)'">&#10022; AI Prompt</button>
         </div>
         <textarea id="videoPrompt" placeholder="Describe the scene, camera movement, lighting..." style="height:90px;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 10px;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
         <div style="display:flex;align-items:center;justify-content:flex-end;padding-top:5px;gap:5px;">
@@ -4344,6 +4528,90 @@ select.inpaint-num option { background:#fff; color:#111; }
       <button class="aipm-use-btn" onclick="useAiBuffer()">↗ Use as Prompt</button>
     </div>
 
+  </div>
+</div>
+
+<!-- EDIT TOOL MODAL -->
+<div id="editToolModal" onclick="editToolBgClick(event)">
+  <div class="etm-box">
+    <div class="etm-hdr">
+      <div class="etm-title">✎ Edit Tool</div>
+      <select id="etmModelSelect" class="etm-model-sel" onchange="etmSwitchModel(this.value)">
+        <option value="nb2">NB2</option>
+        <option value="nbpro">NB Pro</option>
+        <option value="flux2_pro">Flux 2 Pro</option>
+        <option value="flux2_dev">Flux 2 Dev</option>
+        <option value="seedream5lite">Seedream 5</option>
+        <option value="seedream45">Seedream 4.5</option>
+      </select>
+      <span class="etm-model-badge" id="etmModelBadge">NB2</span>
+      <button class="etm-close" onclick="closeEditTool()">×</button>
+    </div>
+    <div class="etm-body">
+      <!-- No-ref state -->
+      <div class="etm-noref" id="etmNoRef" style="display:none">
+        <div class="etm-noref-icon">🖼</div>
+        <div>Add a reference image first</div>
+        <div style="font-size:10px;color:var(--dim2);margin-top:4px;">The Edit Tool requires a reference image to analyze and generate edit prompts.</div>
+      </div>
+      <!-- Chat column -->
+      <div class="etm-chat-col" id="etmChatCol">
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+          <button class="aipm-mini-btn" onclick="resetEditTool()">↺ New chat</button>
+          <div id="etmAnalyzing" class="etm-analyzing" style="display:none">● analyzing reference…</div>
+          <div id="etmStatusLine" class="etm-status-line etm-status-hidden">● READY</div>
+        </div>
+        <div class="etm-chat-history" id="etmChatHistory"></div>
+        <div class="etm-chat-input-row" id="etmInputRow">
+          <textarea class="etm-chat-input" id="etmChatInput" rows="2"
+            placeholder="What do you want to change in the image?"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendEditChat();}
+                       this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';"
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';"></textarea>
+          <button class="etm-chat-send" id="etmChatSendBtn" onclick="sendEditChat()">Send</button>
+        </div>
+      </div>
+      <!-- Reference preview column -->
+      <div class="etm-ref-col" id="etmRefCol">
+        <div class="etm-ref-label" id="etmRefLabel">Reference</div>
+        <img id="etmRefPreview" style="display:none" onerror="this.style.display='none'">
+        <div id="etmRef2Wrap" style="display:none">
+          <div class="etm-ref-label" style="margin-top:8px;color:rgba(60,190,100,.7);">Ref 2 (angle)</div>
+          <img id="etmRefPreview2" style="display:none;border:1px solid rgba(60,190,100,.5);" onerror="this.style.display='none'">
+        </div>
+      </div>
+    </div>
+    <div class="etm-footer">
+      <span class="etm-footer-status" id="etmFooterStatus"></span>
+      <button class="etm-use-btn" id="etmUseBtn" onclick="useEditPrompt()" disabled>↗ Use as Prompt</button>
+    </div>
+  </div>
+</div>
+
+<!-- SPECIAL TOOL MODAL -->
+<div id="specialToolModal" onclick="specialToolBgClick(event)">
+  <div class="spm-box">
+    <div class="spm-hdr">
+      <div class="spm-title">◆ Special Tools</div>
+      <button class="spm-close" onclick="closeSpecialTool()">×</button>
+    </div>
+    <div class="spm-body">
+      <div class="spm-tool spm-disabled">
+        <span class="spm-tool-icon">👤</span>
+        <span class="spm-tool-label">Character Sheet — multi-angle identity sheet</span>
+        <span class="spm-tool-badge">coming soon</span>
+      </div>
+      <div class="spm-tool spm-disabled">
+        <span class="spm-tool-icon">🎬</span>
+        <span class="spm-tool-label">Character Coverage — 10 shots, all angles</span>
+        <span class="spm-tool-badge">coming soon</span>
+      </div>
+      <div class="spm-tool spm-disabled">
+        <span class="spm-tool-icon">🏛</span>
+        <span class="spm-tool-label">Environment Coverage — 10 views, 360°</span>
+        <span class="spm-tool-badge">coming soon</span>
+      </div>
+    </div>
   </div>
 </div>
 
