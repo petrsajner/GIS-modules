@@ -2843,6 +2843,10 @@ select.inpaint-num option { background:#fff; color:#111; }
           <optgroup label="── Seedance ──">
             <option value="seedance15">Seedance 1.5 Pro · ByteDance</option>
           </optgroup>
+          <optgroup label="── PixVerse ──">
+            <option value="pixverse_c1">PixVerse C1 · Film-grade · Audio · 15s</option>
+            <option value="pixverse_v6">PixVerse V6 · Multi-clip · Audio · 15s</option>
+          </optgroup>
           <optgroup label="── Vidu ──">
             <option value="vidu_q3">Vidu Q3 · Shengshu</option>
           </optgroup>
@@ -3193,6 +3197,81 @@ select.inpaint-num option { background:#fff; color:#111; }
           Source video required · Must be &lt;10s · Optional ref image below for style guidance
         </div>
 
+      </div>
+
+      <!-- PixVerse C1 params -->
+      <div class="psec" id="pixverseParams" style="display:none;">
+        <div class="plabel">PixVerse C1 Settings</div>
+        <div class="ctrl">
+          <div class="ctrl-label">Quality</div>
+          <select id="pixverseQuality" onchange="updateVideoResInfo()" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+            <option value="360p">360p — Turbo</option>
+            <option value="540p">540p</option>
+            <option value="720p" selected>720p</option>
+            <option value="1080p">1080p</option>
+          </select>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Camera Movement <span style="color:var(--dim2);font-weight:400;">(v4/v4.5 only — C1 pending)</span></div>
+          <select id="pixverseCameraMove" disabled style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--dim2);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;opacity:.5;cursor:not-allowed;">
+            <option value="">— None —</option>
+            <optgroup label="Pan &amp; Follow">
+              <option value="pan_left">Pan Left</option>
+              <option value="pan_right">Pan Right</option>
+              <option value="left_follow">Left Follow</option>
+              <option value="right_follow">Right Follow</option>
+            </optgroup>
+            <optgroup label="Horizontal / Vertical">
+              <option value="horizontal_left">Horizontal Left</option>
+              <option value="horizontal_right">Horizontal Right</option>
+              <option value="vertical_up">Vertical Up</option>
+              <option value="vertical_down">Vertical Down</option>
+            </optgroup>
+            <optgroup label="Zoom">
+              <option value="zoom_in">Zoom In</option>
+              <option value="zoom_out">Zoom Out</option>
+              <option value="quickly_zoom_in">Quick Zoom In</option>
+              <option value="quickly_zoom_out">Quick Zoom Out</option>
+              <option value="smooth_zoom_in">Smooth Zoom In</option>
+            </optgroup>
+            <optgroup label="Cinematic">
+              <option value="crane_up">Crane Up</option>
+              <option value="super_dolly_out">Super Dolly Out</option>
+              <option value="hitchcock">Hitchcock (Dolly Zoom)</option>
+              <option value="whip_pan">Whip Pan</option>
+              <option value="robo_arm">Robo Arm</option>
+              <option value="camera_rotation">Camera Rotation</option>
+            </optgroup>
+            <optgroup label="Special">
+              <option value="fix_bg">Fix Background</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Negative prompt <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+          <input type="text" id="pixverseNegPrompt" placeholder="blurry, low quality..."
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+        </div>
+        <div class="ctrl">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="pixverseMultiClip" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+            <span style="font-size:11px;color:var(--dim);">Multi-clip (cuts &amp; camera changes)</span>
+          </label>
+        </div>
+        <div class="ctrl">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="pixverseOffPeak" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+            <span style="font-size:11px;color:var(--dim);">Off-peak mode (~50% cheaper, up to 24h)</span>
+          </label>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+          <input type="number" id="pixverseSeed" placeholder="42" min="0" max="2147483647"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+        </div>
+        <div style="font-size:10px;color:var(--dim2);margin-top:4px;line-height:1.5;">
+          C1 · 1–15s · 1080p · Audio · 20+ camera moves · $0.05/s at 720p
+        </div>
       </div>
 
       <!-- Unified ref panel — adapts to model refMode -->
@@ -3780,9 +3859,9 @@ select.inpaint-num option { background:#fff; color:#111; }
     <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; margin-bottom:20px;">API Keys &amp; Configuration</div>
 
     <!-- Google API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">Google API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Nano Banana, Imagen 4, Veo</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.03);">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Google API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Nano Banana, Imagen 4, Veo · <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupGoogleKey" placeholder="AIza..." autocomplete="off"
           oninput="onSetupGoogleKey(this.value)"
@@ -3793,9 +3872,9 @@ select.inpaint-num option { background:#fff; color:#111; }
     </div>
 
     <!-- fal.ai API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">fal.ai API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">FLUX.2, SeeDream, Kling, Z-Image, Qwen2, Upscale</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px;">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">fal.ai API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">FLUX.2, SeeDream, Kling, Z-Image, Qwen2, Upscale · <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupFalKey" placeholder="fal_..." autocomplete="off"
           oninput="onSetupFalKey(this.value)"
@@ -3806,9 +3885,9 @@ select.inpaint-num option { background:#fff; color:#111; }
     </div>
 
     <!-- xAI API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">xAI API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Grok Imagine</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.03);">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">xAI API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Grok Imagine · <a href="https://console.x.ai/" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupXaiKey" placeholder="xai-..." autocomplete="off"
           oninput="onSetupXaiKey(this.value)"
@@ -3819,9 +3898,9 @@ select.inpaint-num option { background:#fff; color:#111; }
     </div>
 
     <!-- Luma API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">Luma API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Photon, Photon Flash, Ray2 video</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px;">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Luma API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Photon, Photon Flash, Ray2 video · <a href="https://lumalabs.ai/dream-machine/api/keys" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupLumaKey" placeholder="luma-..." autocomplete="off"
           oninput="onSetupLumaKey(this.value)"
@@ -3832,9 +3911,9 @@ select.inpaint-num option { background:#fff; color:#111; }
     </div>
 
     <!-- Freepik API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">Freepik API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Magnific Upscale (Creative, Precision)</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.03);">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Freepik API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Magnific Upscale (Creative, Precision) · <a href="https://www.freepik.com/api/keys" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupFreepikKey" placeholder="FPSX..." autocomplete="off"
           oninput="onSetupFreepikKey(this.value)"
@@ -3845,9 +3924,9 @@ select.inpaint-num option { background:#fff; color:#111; }
     </div>
 
     <!-- Topaz Labs API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">Topaz Labs API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Starlight video upscale (Precise 2.5, HQ&hellip;)</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px;">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Topaz Labs API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Starlight video upscale (Precise 2.5, HQ&hellip;) · <a href="https://www.topazlabs.com/account" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupTopazKey" placeholder="tpz_..." autocomplete="off"
           oninput="onSetupTopazKey(this.value)"
@@ -3857,9 +3936,10 @@ select.inpaint-num option { background:#fff; color:#111; }
       <div id="spendBlock_topaz" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
     </div>
 
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">Replicate API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">WAN 2.7 image generation &amp; editing</div>
+    <!-- Replicate API Key -->
+    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.03);">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Replicate API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">WAN 2.7 image generation &amp; editing · <a href="https://replicate.com/account/api-tokens" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupReplicateKey" placeholder="r8_..." autocomplete="off"
           oninput="onSetupReplicateKey(this.value)"
@@ -3869,10 +3949,23 @@ select.inpaint-num option { background:#fff; color:#111; }
       <div id="spendBlock_replicate" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
     </div>
 
+    <!-- PixVerse API Key -->
+    <div style="margin-bottom:0; padding:16px 16px 12px;">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">PixVerse API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">PixVerse C1 video generation · <a href="https://platform.pixverse.ai/api-key" target="_blank" style="color:var(--accent);">Get key →</a></div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="password" id="setupPixverseKey" placeholder="pv-..." autocomplete="off"
+          oninput="onSetupPixverseKey(this.value)"
+          style="flex:1; background:var(--bg2); color:var(--fg); border:1px solid var(--border); padding:7px 10px; font-family:'IBM Plex Mono',monospace; font-size:12px; outline:none;">
+        <div class="dot" id="setupPixverseDot"></div>
+      </div>
+      <div id="spendBlock_pixverse" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
+    </div>
+
     <!-- OpenRouter API Key -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">OpenRouter API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Primary for AI Prompt &amp; Describe — Claude Sonnet 4.6 · ~$0.003/prompt · ~$0.01/describe</div>
+    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.03);">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">OpenRouter API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Primary for AI Prompt &amp; Describe — Claude Sonnet 4.6 · <a href="https://openrouter.ai/settings/keys" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="password" id="setupOpenRouterKey" placeholder="sk-or-v1-..." autocomplete="off"
           oninput="onSetupOpenRouterKey(this.value)"
@@ -3891,7 +3984,7 @@ select.inpaint-num option { background:#fff; color:#111; }
           onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
           onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--dim)'">↺ Reset</button>
       </div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Cloudflare Worker for xAI, Luma, Magnific and Topaz</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">Cloudflare Worker for xAI, Luma, Magnific, Topaz and PixVerse</div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="text" id="setupProxyUrl" autocomplete="off"
           oninput="onSetupProxyUrl(this.value)"

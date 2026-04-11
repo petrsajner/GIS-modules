@@ -258,10 +258,17 @@ function rerunJob(cardKey) {
   const card = document.querySelector(`[data-card-key="${cardKey}"]`);
   const job = card?._job;
   if (!job) { toast('Cannot rerun — job data lost', 'err'); return; }
-  if (card.parentNode) card.parentNode.removeChild(card);
   const { id, status, startedAt, elapsed, retryAttempt, retryTotal, pendingCards,
           requestId, cancelled, ...jobData } = job;
   addToQueue(jobData);
+  // In-place: move new placeholder(s) to old error card's position, then remove old card
+  const lastJob = jobQueue[jobQueue.length - 1];
+  if (lastJob?.pendingCards?.length && card?.parentNode) {
+    for (const newCard of lastJob.pendingCards) {
+      card.parentNode.insertBefore(newCard, card);
+    }
+  }
+  if (card?.parentNode) card.parentNode.removeChild(card);
 }
 // Re-loads job parameters into the form so the user can review and re-generate
 async function loadJobParamsToForm(job) {

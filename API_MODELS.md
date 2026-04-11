@@ -330,3 +330,78 @@ POST /magnific/status       → handleMagnificStatus s upscaler_type
   upscaler_type: 'precision-v2' → /image-upscaler-precision-v2/{id}
   upscaler_type: 'creative'     → /image-upscaler/{id}  (původní)
 ```
+
+---
+
+## PixVerse C1 (video) — added v193en
+
+**Provider:** PixVerse · `app-api.pixverse.ai`
+**Model string:** `c1`
+**Auth:** `API-KEY` header + `Ai-trace-id` header (unique UUID per request)
+**CORS:** ❌ — needs proxy
+**Proxy handler:** `handlers/pixverse.js` (passthrough design)
+
+**Endpoints:**
+```
+POST /openapi/v2/video/text/generate         → T2V
+POST /openapi/v2/video/img/generate          → I2V (NE /image/!)
+POST /openapi/v2/video/transition/generate   → Transition (first+last frame)
+POST /openapi/v2/video/fusion/generate       → Fusion (reference images)
+POST /openapi/v2/image/upload                → multipart image upload → img_id
+GET  /openapi/v2/video/result/{video_id}     → status poll
+```
+
+**T2V payload:** `{ model, prompt, duration, quality, aspect_ratio, negative_prompt, seed, generate_audio_switch, generate_multi_clip_switch, off_peak_mode }`
+
+**I2V payload:** Same + `img_id` (from upload). No aspect_ratio.
+
+**Transition payload:** `{ model, prompt, duration, quality, first_frame_img, last_frame_img, generate_audio_switch, seed, negative_prompt }`
+
+**Fusion payload:**
+```json
+{
+  "model": "c1",
+  "prompt": "@cat plays at @park",
+  "image_references": [
+    { "type": "subject", "img_id": 12345, "ref_name": "cat" },
+    { "type": "background", "img_id": 67890, "ref_name": "park" }
+  ],
+  "duration": 5, "quality": "720p", "aspect_ratio": "16:9",
+  "generate_audio_switch": true
+}
+```
+- type: "subject" or "background"
+- ref_name: exact match required in prompt (@ref_name)
+- C1: up to 7 refs (v4.5/v5: max 3)
+- C1 extra ratios: 2:3, 3:2, 21:9
+
+**Status codes:** 1=done (has url), 2=failed, 5=generating, 7=moderation fail, 8=failed, 9=queued
+
+**Duration:** C1: 1–15s continuous. 1080p max 5s.
+
+**Pricing (credits/s, $1=200cr):**
+| Quality | No audio | With audio | ≈ USD/s |
+|---------|----------|------------|---------|
+| 360p    | 6        | 8          | $0.03   |
+| 540p    | 8        | 10         | $0.04   |
+| 720p    | 10       | 13         | $0.05   |
+| 1080p   | 19       | 24         | $0.095  |
+
+**Gotchas:**
+- `Ai-trace-id` must be unique per request — reuse = no new video
+- I2V endpoint is `/video/img/generate` not `/video/image/generate`
+- `camera_movement` only v4/v4.5 for T2V, v4/v4.5/v5 for I2V — C1 returns 400017
+- `generate_multi_clip_switch: false` ignored by T2V in C1 — workaround via neg prompt
+- `generate_audio_switch` must be explicitly sent (default OFF)
+- Upload returns non-JSON on some errors — Worker uses safeJson()
+- Response wrapper: `{ ErrCode, ErrMsg, Resp: { video_id } }`
+
+**Proxy routes (passthrough):**
+```
+POST /pixverse/t2v          → handlePixverseT2V
+POST /pixverse/i2v          → handlePixverseI2V
+POST /pixverse/transition   → handlePixverseTransition
+POST /pixverse/fusion       → handlePixverseFusion
+POST /pixverse/upload-image → handlePixverseUploadImage
+POST /pixverse/status       → handlePixverseStatus
+```

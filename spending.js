@@ -100,9 +100,13 @@ const SPEND_PRICES = {
   '_wan27_1080p':  0.15,   // WAN 2.7 I2V/T2V 1080p via fal.ai (estimate)
   '_wan27e_720p':  0.10,   // WAN 2.7 Video Edit 720p via fal.ai (estimate)
   '_wan27e_1080p': 0.15,   // WAN 2.7 Video Edit 1080p via fal.ai (estimate)
+
+  // ── PixVerse — video (per SECOND) ─────────────────────
+  // C1 pricing: 720p no audio = 10 credits/s, $1 = 200 credits → $0.05/s
+  '_pixverse_video': 0.050, // PixVerse C1 720p (default estimate)
 };
 
-const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'replicate', 'openrouter'];
+const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'replicate', 'openrouter', 'pixverse'];
 
 function _spendKey(provider) {
   return `gis_spend_${provider}`;

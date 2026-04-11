@@ -1,4 +1,23 @@
 // ═══════════════════════════════════════════════════════
+// SHARED UTILITIES
+// ═══════════════════════════════════════════════════════
+
+// Get proxy URL from localStorage — used by fal.js, video.js, output-render.js
+function getProxyUrl() {
+  return (localStorage.getItem('gis_proxy_url') || 'https://gis-proxy.petr-gis.workers.dev').trim().replace(/\/$/, '');
+}
+
+// Convert ArrayBuffer to base64 string (chunk-safe for large videos)
+function _arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 8192;
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += CHUNK)
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  return btoa(bin);
+}
+
+// ═══════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════
 window.onload = () => {
@@ -33,6 +52,8 @@ window.onload = () => {
   if (savedReplicate) { document.getElementById('setupReplicateKey').value = savedReplicate; updateSetupDot('setupReplicateDot', savedReplicate.length > 10); }
   const savedOpenRouter = localStorage.getItem('gis_openrouter_apikey');
   if (savedOpenRouter) { document.getElementById('setupOpenRouterKey').value = savedOpenRouter; updateSetupDot('setupOpenRouterDot', savedOpenRouter.length > 10); }
+  const savedPixverse = localStorage.getItem('gis_pixverse_apikey');
+  if (savedPixverse) { document.getElementById('setupPixverseKey').value = savedPixverse; updateSetupDot('setupPixverseDot', savedPixverse.length > 10); }
   const DEFAULT_PROXY = 'https://gis-proxy.petr-gis.workers.dev';
   const savedProxy = localStorage.getItem('gis_proxy_url') || DEFAULT_PROXY;
   if (!localStorage.getItem('gis_proxy_url')) localStorage.setItem('gis_proxy_url', DEFAULT_PROXY);
@@ -165,6 +186,11 @@ function onSetupOpenRouterKey(val) {
   updateSetupDot('setupOpenRouterDot', val.length > 10);
 }
 
+function onSetupPixverseKey(val) {
+  localStorage.setItem('gis_pixverse_apikey', val);
+  updateSetupDot('setupPixverseDot', val.length > 10);
+}
+
 function onSetupProxyUrl(val) {
   localStorage.setItem('gis_proxy_url', val.trim());
   updateSetupDot('setupProxyDot', val.trim().length > 10);
@@ -195,6 +221,7 @@ const API_KEY_FIELDS = [
   { key: 'gis_topaz_apikey',       label: 'Topaz API Key',       inputId: 'setupTopazKey',       dotId: 'setupTopazDot'       },
   { key: 'gis_replicate_apikey',   label: 'Replicate API Key',   inputId: 'setupReplicateKey',   dotId: 'setupReplicateDot'   },
   { key: 'gis_openrouter_apikey',  label: 'OpenRouter API Key',  inputId: 'setupOpenRouterKey',  dotId: 'setupOpenRouterDot'  },
+  { key: 'gis_pixverse_apikey',   label: 'PixVerse API Key',    inputId: 'setupPixverseKey',    dotId: 'setupPixverseDot'    },
   { key: 'gis_proxy_url',          label: 'Proxy URL',           inputId: 'setupProxyUrl',       dotId: 'setupProxyDot'       },
 ];
 

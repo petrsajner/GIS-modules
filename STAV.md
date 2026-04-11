@@ -1,15 +1,15 @@
 # GIS — STAV PROJEKTU
-*Aktualizováno konec session · 10. 4. 2026*
+*Aktualizováno konec session · 11. 4. 2026*
 
 ## Aktuální verze
 | Soubor | Verze | Datum |
 |--------|-------|-------|
-| Kód EN | gis_v192en.html | 10. 4. 2026 |
-| Worker | gis-proxy v2026-11 | 9. 4. 2026 |
+| Kód EN | gis_v193en.html | 11. 4. 2026 |
+| Worker | gis-proxy v2026-12 | 11. 4. 2026 |
 
-**Příští verze:** v193en
+**Příští verze:** v194en
 
-> Build: `cd /home/claude && node build.js 193en`
+> Build: `cd /home/claude && node build.js 194en`
 
 ---
 
@@ -29,24 +29,25 @@ echo "template.html — src-chip:" && grep -c "src-chip" /mnt/project/template.h
 echo "template.html — inpaintQueueList:" && grep -c "inpaintQueueList" /mnt/project/template.html && \
 echo "model-select.js — setup:6:" && grep -c "setup: 6" /mnt/project/model-select.js && \
 echo "setup.js — getProxyUrl:" && grep -c "getProxyUrl" /mnt/project/setup.js && \
-echo "setup.js — _arrayBufferToBase64:" && grep -c "_arrayBufferToBase64" /mnt/project/setup.js && \
+echo "setup.js — onSetupPixverseKey:" && grep -c "onSetupPixverseKey" /mnt/project/setup.js && \
 echo "video.js — _saveVideoResult:" && grep -c "_saveVideoResult" /mnt/project/video.js && \
-echo "video.js — _falVideoSubmitPollDownload:" && grep -c "_falVideoSubmitPollDownload" /mnt/project/video.js && \
-echo "video.js — _srcSlotClear:" && grep -c "_srcSlotClear" /mnt/project/video.js && \
+echo "video.js — _pixverseUpload:" && grep -c "_pixverseUpload" /mnt/project/video.js && \
+echo "video.js — pixverse_c1_fusion:" && grep -c "pixverse_c1_fusion" /mnt/project/video.js && \
+echo "video.js — pixverse_v6_t2v:" && grep -c "pixverse_v6_t2v" /mnt/project/video.js && \
+echo "video.js — fusionPrompt:" && grep -c "fusionPrompt" /mnt/project/video.js && \
+echo "output-placeholder.js — insertBefore:" && grep -c "insertBefore" /mnt/project/output-placeholder.js && \
 echo "db.js — assets_meta:" && grep -c "assets_meta" /mnt/project/db.js && \
-echo "spending.js — openrouter:" && grep -c "openrouter" /mnt/project/spending.js && \
+echo "spending.js — pixverse:" && grep -c "pixverse" /mnt/project/spending.js && \
 echo "ai-prompt.js — ETM_REFRAME_KNOWLEDGE:" && grep -c "ETM_REFRAME_KNOWLEDGE" /mnt/project/ai-prompt.js && \
-echo "ai-prompt.js — _etmRefAnalyses:" && grep -c "_etmRefAnalyses" /mnt/project/ai-prompt.js && \
-echo "ai-prompt.js — _etmParseVariants:" && grep -c "_etmParseVariants" /mnt/project/ai-prompt.js && \
-echo "template.html — editToolModal:" && grep -c "editToolModal" /mnt/project/template.html && \
-echo "template.html — specialToolModal:" && grep -c "specialToolModal" /mnt/project/template.html
+echo "template.html — pixverseParams:" && grep -c "pixverseParams" /mnt/project/template.html && \
+echo "template.html — pixverseOffPeak:" && grep -c "pixverseOffPeak" /mnt/project/template.html
 ```
 Vše musí vrátit ≥ 1.
 
 > **Syntax check:**
 > ```bash
 > awk '/<script>$/{found=1;next} found && /^<\/script>/{exit} found{print}' \
->   /home/claude/dist/gis_v193en.html > /tmp/check.mjs
+>   /home/claude/dist/gis_v194en.html > /tmp/check.mjs
 > node --input-type=module < /tmp/check.mjs 2>&1 | head -3
 > # OK = "window is not defined"
 > ```
@@ -55,125 +56,69 @@ Vše musí vrátit ≥ 1.
 
 ## Kde jsme přestali
 
-v192en dokončen. Session ukončena čistě 10. 4. 2026.
+v193en dokončen a otestován. Session ukončena čistě 11. 4. 2026.
 
-**v192en = Edit Tool + Special Tool + Camera Reframe Research**
-
----
-
-## Co bylo uděláno dnes (10. 4. 2026)
-
-### v192en — Edit Tool, Special Tool, Camera Reframe
-
-**Nové UI prvky:**
-- **◆ Special** tlačítko (červenofialové) + **✎ Edit** tlačítko (tmavě zelené) přidány do řádku Prompt vedle AI Prompt — v image i video mode.
-- Oba buttony mají CSS classes `.btn-special` a `.btn-edit` s hover/active stavy.
-
-**◆ Special Tools Modal (`#specialToolModal`):**
-- Placeholder modal s 3 budoucími tooly:
-  1. 👤 Character Sheet — multi-angle identity sheet (disabled)
-  2. 🎬 Character Coverage — 10 shots, all angles (disabled)
-  3. 🏛 Environment Coverage — 10 views, 360° (disabled)
-- Tyto tooly budou založeny na výzkumu camera reframe z této session.
-
-**✎ Edit Tool Modal (`#editToolModal`):**
-- Plně funkční AI agent pro generování editačních promptů.
-- Design konzistentní s AI Prompt modalem (`.etm-*` CSS prefix).
-- Header: název + model selector (NB2, NB Pro, Flux 2 Pro/Dev, Seedream 5/4.5) + model badge.
-- Chat oblast + reference preview vpravo.
-- Status line: `analyzing` (red blink) → `READY` (green) → `thinking` (red blink).
-- "↺ New chat" pro tvrdý reset (re-analyzuje reference).
-- "↗ Use as Prompt" odešle vybraný prompt do hlavního textarea.
-- Session persistence — zavření a znovuotevření zachová konverzaci.
-
-**Edit Tool — AI Agent architektura:**
-
-*Unified intelligent agent* s automatickou klasifikací editací:
-
-**TYPE A — Element Edit:**
-- Agent mění jen to co uživatel řekl. Žádné vymýšlení detailů.
-- Keep section: neutrální jména elementů ("lighting", ne "golden hour lighting").
-- Model-specific prompt struktury (Gemini krátký <60 slov, Flux verbose, Seedream stručný).
-- Multi-reference awareness: agent ví co je v každé referenci (barva, maska, úhel...) a umí na ně odkazovat v promptu.
-
-**TYPE B — Camera Reframe:**
-- Agent generuje **4 varianty** s různými strategiemi (viz DECISIONS.md).
-- Varianty zobrazeny jako klikací karty se zeleným border a badge.
-- Každá varianta tagována `[REFS:1]` nebo `[REFS:1,2]` — UI varuje při přebytečných referencích.
-- Pokud existuje druhá reference, agent ji analyzuje pro lepší prostorové pochopení, ale doporučuje ji odeslat generativnímu modelu jen když na ni prompt explicitně odkazuje.
-
-**Reference system:**
-- `_etmRefAnalyses[]` — pole analýz pro libovolný počet referencí.
-- `_etmAnalyzeRefAt(idx)` — ref 1 dostane detailní analýzu scény (150-250 slov), ref 2+ dostane krátkou analýzu role (barva? maska? úhel? 80 slov).
-- `_etmRefreshRefPreviews()` — voláno při open, send, new chat — detekuje nové refs, spustí analýzu, zobrazí preview.
-- System prompt dynamicky buildí sekci `REFERENCE IMAGE ANALYSES` pro N referencí.
-- Změna ref count mid-conversation → system note injected do chat history.
-
-**Bug fix: Double reference prefix (refs.js):**
-- `preprocessPromptForModel` pro gemini stripuje existující `[Reference images:...]` prefix přes regex před přidáním nového.
-
-**v192en JS řádky: 17785 (z v191en 17068, +717)**
+**v193en = PixVerse C1+V6 Full Integration + Card Ordering Fix**
 
 ---
 
-## Výzkum: Camera Reframe pro AI Image Models (10. 4. 2026)
+## Co bylo uděláno (11. 4. 2026)
 
-### Testované přístupy a výsledky
+### v193en — PixVerse C1+V6 Video + UX Improvements
 
-**❌ Floor plan jako druhá reference NEFUNGUJE:**
-- Generativní modely ignorují diagramy/náčrtky jako prostorové instrukce.
-- Snaží se je vizuálně zapracovat nebo úplně ignorují.
-- Testováno s NB2, NB Pro, Seedream 4.5.
+**Worker (gis-proxy v2026-12):**
+- Nový handler `handlers/pixverse.js` — passthrough architektura, 6 routes:
+  - `POST /pixverse/t2v` → `/openapi/v2/video/text/generate`
+  - `POST /pixverse/i2v` → `/openapi/v2/video/img/generate` (NE /image/)
+  - `POST /pixverse/transition` → `/openapi/v2/video/transition/generate`
+  - `POST /pixverse/fusion` → `/openapi/v2/video/fusion/generate`
+  - `POST /pixverse/upload-image` → `/openapi/v2/image/upload` (multipart)
+  - `POST /pixverse/status` → `/openapi/v2/video/result/{video_id}`
+- `safeJson()` — bezpečný JSON parse
+- `splitBody()` — strip apiKey, forwarduj vše (žádné budoucí Worker updaty pro nové params)
 
-**❌ Dlouhé prostorové popisy NEFUNGUJÍ:**
-- "Camera now stands along the right wall where the spectators were, shooting across the width..." → model se zmate, přeuspořádá objekty.
-- Čím delší popis, tím horší výsledky.
+**GIS client — 7 video modelů (4× C1, 3× V6):**
 
-**❌ Numerické úhly a kompasové směry NEFUNGUJÍ:**
-- "Rotate camera 90° left" → ignorováno nebo špatně interpretováno.
-- "Camera facing north" → ignorováno.
+| Model key | Režim | Refs | Endpoint | Multi-clip |
+|-----------|-------|------|----------|------------|
+| `pixverse_c1_t2v` | T2V | 0 | t2v | ❌ (neg prompt workaround) |
+| `pixverse_c1_i2v` | I2V | 1 | upload → i2v | ❌ |
+| `pixverse_c1_transition` | Transition | 2 | upload 2× → transition | ✅ (inverted API) |
+| `pixverse_c1_fusion` | Fusion | 1–7 | upload N× → fusion | ❌ |
+| `pixverse_v6_t2v` | T2V | 0 | t2v | ✅ |
+| `pixverse_v6_i2v` | I2V | 1 | upload → i2v | ✅ |
+| `pixverse_v6_transition` | Transition | 2 | upload 2× → transition | ✅ |
 
-**✅ Cinematic shot language FUNGUJE:**
-- "over-the-shoulder shot from behind [character]"
-- "profile shot from the left side"
-- "wide shot from the opposite end of the room"
+**Klíčové implementační detaily:**
+- `_pixverseUpload()` helper — reusable upload → img_id
+- `callPixverseVideo()` — dispatch 4 režimů (T2V/I2V/Transition/Fusion)
+- `modelId` field ('c1' nebo 'v6') → `pvModelId` v API payloadu
+- `supportsMultiClip` flag → řídí zobrazení checkboxu + odesílání
+- Multi-clip API je INVERTED: `true` = single shot, `false` = multi. GIS posílá `!multiClip`.
+- C1 T2V/I2V nepodporují `generate_multi_clip_switch` (400017) → workaround: neg prompt inject
+- `generate_audio_switch` explicitně ve všech payloadech
+- Fusion: `ref_name` = `pic1`, `pic2`... (PixVerse vyžaduje čistě alfanumerické)
+- Fusion prompt auto-rewrite: `@Element3` → `@pic3`, `@Ref_031` → `@pic1`, `@Image2` → `@pic2`
+- Camera Movement: disabled (v4/v4.5 only, C1 vrací 400017). Kód + UI select připraveny.
+- Off-peak mode: `off_peak_mode: true`, 15s poll, 2h timeout
+- Duration: 1–15s slider
+- Status kódy: 1=done, 2/8=failed, 5=generating, 7=moderation, 9=queued
 
-**✅ Krátké prompty FUNGUJÍ lépe:**
-- Pod 40 slov = nejlepší výsledky pro reframe.
-- Pod 60 slov = akceptovatelné pro Gemini.
+**Card ordering fix (video + image):**
+- Video: `videoShowPlaceholder` změněno z `prepend` na `appendChild` — nové karty na konec
+- Video: `renderVideoResultCard` nyní `replaceChild` in-place místo remove+prepend
+- Video: `rerunVideoJob` — `insertBefore` + `remove` (in-place)
+- Image: `rerunJob` (output-placeholder.js) — `addToQueue` → `insertBefore` staré karty → remove
+- Ref thumbnaily nyní viditelné na error kartách (`thumb` přidáno do videoRefsAtSubmit snapshotu)
 
-### Seřazení strategií podle úspěšnosti (z testování):
+**Setup UI redesign:**
+- Střídavé `rgba(255,255,255,.03)` pozadí API key sekcí
+- Accent-colored labels (font-weight:600)
+- Žlutý "Get key →" link u VŠECH providerů (Google, fal.ai, xAI, Luma, Freepik, Topaz, Replicate, PixVerse, OpenRouter)
+- PixVerse key input + spendBlock_pixverse
+- Proxy URL popis: "+PixVerse"
 
-| # | Strategie | Příklad | Účinnost |
-|---|-----------|---------|----------|
-| A | **Physical Position** | "from the view of camera standing between benches" | ⭐⭐⭐ Nejspolehlivější |
-| B | **Character POV** | "from the perspective of the man sitting on the right bench" | ⭐⭐⭐ Velmi spolehlivé |
-| C | **Landmark-to-Target** | "from doors in the right wall — across the court desk" | ⭐⭐ Spolehlivé |
-| D | **Subject Reframe** | "close-up profile shot of the man from his left side" | ⭐⭐ Střední |
-| E | **Multi-Reference** | "scene from image 1 in the view and camera angle of image 2" | ⭐⭐⭐ S 2 refs |
-| F | **Temporal Orbit** | "camera orbiting, show me 20 seconds later" | ⭐ Kreativní fallback |
-
-### Klíčové poznatky:
-
-1. **NB Pro je nejlepší model pro camera reframe.** Jediný který spolehlivě otočil kameru o 90°.
-2. **Nejlepší výsledky dává strategie "popsat kde kamera stojí"** — ne kam se posunula.
-3. **Druhá reference (z jiného úhlu) dramaticky zlepšuje výsledky** — ale NE posíláním k modelu. Slouží agentovi k pochopení prostoru. K modelu se posílá jen hlavní ref + prompt.
-4. **Multi-ref strategy E** je velmi účinná ale vyžaduje obě reference v API callu.
-5. **Generované prompty by měly znít jako popis nové fotografie** — ne jako instrukce pro kameru.
-
-### Úspěšné prompty z testů:
-```
-[Ref_044] Show me this scene from the view of camera standing between benches
-[Ref_031] Show me this scene from the perspective of the man sitting on the right bench
-Same courtroom, close-up profile shot of the man in grey from his left side
-[Ref_031, Ref_045] Show me the scene from image 1 in the view and camera angle of image 2
-[Ref_031] camera is orbiting around the room. Show me this scene 20 second later
-```
-
-### Aplikace pro budoucí moduly (Character Coverage, Environment Coverage):
-- Character Coverage (10 záběrů postavy) → primárně strategie B (Character POV) + D (Subject Reframe)
-- Environment Coverage (10 záběrů prostředí) → primárně strategie A (Physical Position) + C (Landmark-to-Target)
-- Obě budou těžit z multi-ref approach kde první generovaný záběr slouží jako reference pro další
+**v193en JS řádky: 18175 (z v192en 17785, +390)**
 
 ---
 
@@ -208,12 +153,17 @@ generate → fal → output-placeholder → proxy → gemini →
 output-render → db → gallery → toast → paint → ai-prompt → video
 ```
 
-### Změněné moduly v v192en (oproti v191en)
+### Změněné moduly v v193en (oproti v192en)
 | Modul | Změny |
 |-------|-------|
-| `ai-prompt.js` | +Edit Tool (chat, unified agent, TYPE A element edit + TYPE B camera reframe, 6 strategií, variant parsing+display, REFS tagging, multi-ref analysis array), +Special Tool placeholder, +resetEditTool, +session persistence |
-| `template.html` | +Edit Tool modal (`#editToolModal`), +Special Tool modal (`#specialToolModal`), +`.btn-special`/`.btn-edit` CSS, +`.etm-*` CSS (modal, chat, variants, status line, ref preview), tlačítka v plabel řadě |
-| `refs.js` | Fix: `preprocessPromptForModel` stripuje existující `[Reference images:...]` prefix před přidáním nového (fix double prefix bug) |
+| `video.js` | +PixVerse C1+V6: 7 modelů, _pixverseUpload, callPixverseVideo (4 režimy), fusion prompt auto-rewrite, multi-clip inverted logic, card ordering fix (appendChild + replaceChild), ref thumb v snapshotu, aspect ratio restore |
+| `output-placeholder.js` | rerunJob in-place (insertBefore + remove) |
+| `setup.js` | +gis_pixverse_apikey, +onSetupPixverseKey, +API_KEY_FIELDS |
+| `spending.js` | +_pixverse_video $0.05/s, +pixverse provider |
+| `template.html` | +PixVerse C1+V6 optgroups, +pixverseParams panel (quality/camera disabled/neg prompt/multi-clip/off-peak/seed), setup redesign (alternating bg, accent labels, Get Key links) |
 
-### Worker struktura (gis-proxy v2026-11)
-Beze změn oproti v191en.
+### Worker struktura (gis-proxy v2026-12)
+| Handler | Routes |
+|---------|--------|
+| `pixverse.js` (NEW) | 6 routes: t2v, i2v, transition, fusion, upload-image, status |
+| `index.js` | +PixVerse imports + 6 routes, version 2026-12 |

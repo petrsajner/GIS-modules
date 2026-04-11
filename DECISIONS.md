@@ -226,3 +226,31 @@
 - System prompt obsahuje `MULTI-REFERENCE AWARENESS` sekci s instrukcemi pro odkazování ("image 2", "image 3")
 - Regex check na výstupu: pokud prompt neobsahuje "image 2" ale refs > 1 → varování v footeru
 
+
+---
+
+## PixVerse C1 integration via proxy (11. 4. 2026)
+
+**Problém:** PixVerse C1 je nový film-grade video model (launched 7. 4. 2026). Nemá CORS → potřebuje proxy.
+
+**Rozhodnutí:** Passthrough Worker architektura — Worker stripuje apiKey, vše ostatní forwarduje beze změny. Žádné budoucí Worker updaty pro nové parametry.
+
+**4 režimy:** T2V, I2V (upload 1 img), Transition (upload 2 imgs → first_frame_img + last_frame_img), Fusion (upload N imgs → image_references[] s type/ref_name).
+
+**I2V endpoint gotcha:** `/openapi/v2/video/img/generate` (NE /image/ — PixVerse nekonzistentní naming).
+
+**Camera movement:** Podporováno jen ve v4/v4.5 (T2V) a v4/v4.5/v5 (I2V). C1 vrací 400017. Select v UI disabled, kód připravený pro budoucí C1 podporu.
+
+**Multi-clip T2V bug:** `generate_multi_clip_switch: false` funguje pro I2V ale ne pro T2V. Workaround: automatická injekce "single continuous shot, no cuts, no transitions" do negative promptu.
+
+**Audio:** `generate_audio_switch: true/false` — musí být explicitně posláno, jinak default OFF.
+
+**Fusion notace:** Prompt používá `@ref_name` (e.g. `@cat plays at @park`). Ref type (subject/background) detekován z user label — [bg] tag = background, jinak subject.
+
+---
+
+## Setup UI redesign — střídavé pozadí + Get Key linky (11. 4. 2026)
+
+**Problém:** API klíče v setupu splývají — těžko vizuálně odlišit jednotlivé sekce.
+
+**Rozhodnutí:** Střídavé `rgba(255,255,255,.03)` pozadí (lichá/sudá), accent-colored label text, žlutý "Get key →" link u každého providera směřující na jeho API key stránku.

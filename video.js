@@ -391,6 +391,76 @@ const VIDEO_MODELS = {
     refLabel: 'Character refs (image or video)',
     desc: 'R2V Flash · Character consistency · 1-5 refs · Up to 10s · $0.05/s · Alibaba',
   },
+  // ── PixVerse C1 — via proxy (async submit → poll → download) ──
+  // Camera movements: disabled for C1 (v4/v4.5 only)
+  // Duration: 1–15s continuous (1080p max 5s)
+  // generate_multi_clip_switch: NOT supported for C1 T2V/I2V (400017), inverted for Transition
+  // generate_audio_switch: must be explicit
+  // off_peak_mode: slower, ~50% cheaper
+  pixverse_c1_t2v: {
+    name: 'PixVerse C1 T2V', type: 'pixverse_video', modelId: 'c1',
+    desc: 'T2V · Audio · 1–15s · 1080p · Action &amp; combat · PixVerse',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15, minDur: 1,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_c1_i2v: {
+    name: 'PixVerse C1 I2V', type: 'pixverse_video', modelId: 'c1',
+    desc: 'I2V · Audio · 1–15s · 1080p · Start frame → video · PixVerse',
+    refMode: 'single', maxRefs: 1,
+    hasAudio: true, maxDur: 15, minDur: 1,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_c1_transition: {
+    name: 'PixVerse C1 Transition', type: 'pixverse_video', modelId: 'c1', pixverseMode: 'transition',
+    desc: 'First + Last frame · Audio · 1–15s · Smooth morph · PixVerse',
+    refMode: 'keyframe', maxRefs: 2,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_c1_fusion: {
+    name: 'PixVerse C1 Fusion', type: 'pixverse_video', modelId: 'c1', pixverseMode: 'fusion',
+    desc: 'Reference images (1–7) → Video · Use @name in prompt · PixVerse',
+    refMode: 'multi', maxRefs: 7,
+    hasAudio: true, maxDur: 15, minDur: 1,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '2:3', '3:2', '21:9'],
+    pixverseKey: true,
+  },
+  // ── PixVerse V6 — multi-clip supported ──
+  pixverse_v6_t2v: {
+    name: 'PixVerse V6 T2V', type: 'pixverse_video', modelId: 'v6',
+    desc: 'T2V · Audio · Multi-clip · 1–15s · 1080p · PixVerse',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_v6_i2v: {
+    name: 'PixVerse V6 I2V', type: 'pixverse_video', modelId: 'v6',
+    desc: 'I2V · Audio · Multi-clip · 1–15s · 1080p · PixVerse',
+    refMode: 'single', maxRefs: 1,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_v6_transition: {
+    name: 'PixVerse V6 Transition', type: 'pixverse_video', modelId: 'v6', pixverseMode: 'transition',
+    desc: 'First + Last frame · Audio · Multi-clip · 1–15s · PixVerse',
+    refMode: 'keyframe', maxRefs: 2,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
 };
 
 // ── Kling model groups (main key → variants list) ────────
@@ -481,6 +551,23 @@ const KLING_GROUPS = {
       { key: 'wan26_t2v_single', label: 'T2V · Single shot · $0.10/s (720p)' },
       { key: 'wan26_i2v',        label: 'I2V · Start frame · $0.10/s (720p)' },
       { key: 'wan26_r2v_flash',  label: 'R2V Flash · Character refs · $0.05/s' },
+    ],
+  },
+  pixverse_c1: {
+    default: 'pixverse_c1_t2v',
+    variants: [
+      { key: 'pixverse_c1_t2v',        label: 'T2V · Text to Video' },
+      { key: 'pixverse_c1_i2v',        label: 'I2V · Start frame → Video' },
+      { key: 'pixverse_c1_transition', label: 'Transition · First + Last frame' },
+      { key: 'pixverse_c1_fusion',     label: 'Fusion · Reference images (1-7)' },
+    ],
+  },
+  pixverse_v6: {
+    default: 'pixverse_v6_t2v',
+    variants: [
+      { key: 'pixverse_v6_t2v',        label: 'T2V · Multi-clip support' },
+      { key: 'pixverse_v6_i2v',        label: 'I2V · Multi-clip support' },
+      { key: 'pixverse_v6_transition', label: 'Transition · First + Last frame' },
     ],
   },
 };
@@ -630,8 +717,9 @@ async function _saveVideoResult(videoArrayBuffer, recordFields, job, spendArgs) 
   if (spendArgs) trackSpend(...spendArgs);
 
   renderVideoQueue();
-  removeVideoPlaceholder(job);
-  renderVideoResultCard(videoRecord, thumbData);
+  // Replace placeholder in-place (don't remove + prepend — keeps card position)
+  const placeholderEl = document.getElementById(`vphold_${job.id}`);
+  renderVideoResultCard(videoRecord, thumbData, placeholderEl);
   return { videoId, elapsed, thumbData };
 }
 
@@ -1111,6 +1199,7 @@ function _applyVideoModel(key) {
     _setRow('lumaResRow',        false);
     _setRow('wanResRow',         false);
     _setRow('wan27vParams',      false);
+    _setRow('pixverseParams',    false);
     _setRow('videoAspectRow',    false);
     _setRow('videoAudioCtrl',    false);
     _setRow('videoDurSliderRow', false);
@@ -1160,6 +1249,7 @@ function _applyVideoModel(key) {
     _setRow('lumaResRow',         false);
     _setRow('wanResRow',          false);
     _setRow('wan27vParams',       false);
+    _setRow('pixverseParams',    false);
     _setRow('videoAspectRow',     false);
     _setRow('videoAudioCtrl',     false);
     _setRow('videoDurSliderRow',  false);
@@ -1201,6 +1291,7 @@ function _applyVideoModel(key) {
   _setRow('videoDurRow',       true);
   _setRow('videoCfgRow',       true);
   _setRow('videoCountRow',     true);
+  _setRow('videoAspectRow',    true);
   // Restore button label
   const lbl = document.getElementById('videoGenBtnLabel');
   if (lbl) lbl.textContent = '▶ Generate Video';
@@ -1239,7 +1330,10 @@ function _applyVideoModel(key) {
     if (videoRefs.length > m.maxRefs) videoRefs = videoRefs.slice(0, m.maxRefs);
     if (refCount) refCount.textContent = `${videoRefs.length} / ${m.maxRefs}`;
     if (refNote && m.refMode === 'keyframe') {
-      refNote.textContent = 'Add start frame first, then end frame.';
+      refNote.textContent = m.type === 'pixverse_video' ? 'Add first frame, then last frame. Video morphs between them.' : 'Add start frame first, then end frame.';
+      refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'multi' && m.pixverseMode === 'fusion') {
+      refNote.innerHTML = 'Use <b>@pic1</b>, <b>@pic2</b>... in prompt to reference each image. Tag label with [bg] for backgrounds.';
       refNote.style.display = 'block';
     } else if (refNote && m.refMode === 'multi') {
       refNote.textContent = `Reference subjects as @Element1, @Element2... in your prompt.`;
@@ -1404,6 +1498,24 @@ function _applyVideoModel(key) {
     _setRow('videoCountRow',   false);
   }
 
+  // PixVerse params panel
+  const pixverseParams = document.getElementById('pixverseParams');
+  const isPixverse = m.type === 'pixverse_video';
+  if (pixverseParams) pixverseParams.style.display = isPixverse ? '' : 'none';
+  if (isPixverse) {
+    _setRow('videoCfgRow',     false);
+    // Rebuild quality select
+    const qSel = document.getElementById('pixverseQuality');
+    if (qSel && m.qualityOptions) {
+      qSel.innerHTML = m.qualityOptions.map(q =>
+        `<option value="${q}"${q === '720p' ? ' selected' : ''}>${q}</option>`
+      ).join('');
+    }
+    // Show/hide multi-clip checkbox (only for models that support it)
+    const mcRow = document.getElementById('pixverseMultiClip')?.closest('.ctrl');
+    if (mcRow) mcRow.style.display = m.supportsMultiClip ? '' : 'none';
+  }
+
   updateVideoResInfo();
 }
 
@@ -1474,7 +1586,11 @@ function updateVideoResInfo() {
   if (resInfoRow) resInfoRow.style.display = (hasResSwitcher || hasOwnPanel) ? 'none' : '';
   if (!resEl || hasResSwitcher || hasOwnPanel) return;
 
-  if (m.type === 'veo') {
+  if (m.type === 'pixverse_video') {
+    const q = document.getElementById('pixverseQuality')?.value || '720p';
+    const aspect = document.getElementById('videoAspectRatio')?.value || '16:9';
+    resEl.textContent = `${q} · ${aspect}`;
+  } else if (m.type === 'veo') {
     const res = document.getElementById('veoResolution')?.value || '720p';
     const mode = videoRefs.length > 0 ? 'I2V' : 'T2V';
     resEl.textContent = `${res} · ${mode} · Google`;
@@ -1781,6 +1897,10 @@ async function generateVideo() {
   } else if (model.type === 'luma_video') {
     if (!lumaKey)  { showApiKeyWarning('Luma API Key missing', 'Ray3 / Ray3.14 requires a Luma API key. Add it in the Setup tab.'); return; }
     if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'Luma video requires the GIS proxy URL. Add it in the Setup tab.'); return; }
+  } else if (model.type === 'pixverse_video') {
+    const pvKey = (localStorage.getItem('gis_pixverse_apikey') || '').trim();
+    if (!pvKey)    { showApiKeyWarning('PixVerse API Key missing', 'PixVerse C1 requires a PixVerse API key. Add it in the Setup tab.'); return; }
+    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'PixVerse C1 requires the GIS proxy URL. Add it in the Setup tab.'); return; }
   } else if (model.type === 'wan27_video') {
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 requires a fal.ai API key. Add it in the Setup tab.'); return; }
   } else if (model.type === 'wan27e_video') {
@@ -1797,7 +1917,7 @@ async function generateVideo() {
   const veoFramesMode = model.type === 'veo' &&
     document.getElementById('veoRefMode')?.value === 'frames';
   const promptOptional = veoFramesMode ||
-    (model.type !== 'luma_video' && model.type !== 'kling_video' &&
+    (model.type !== 'luma_video' && model.type !== 'kling_video' && model.type !== 'pixverse_video' &&
      (refMode === 'single_end' || refMode === 'single' || refMode === 'keyframe' ||
       refMode === 'wan_r2v' || refMode === 'multi'));
   if (!rawVideoPrompt && !promptOptional) { toast('Enter a prompt', 'err'); return; }
@@ -1894,6 +2014,7 @@ async function generateVideo() {
       mimeType: r.mimeType,
       autoName: r.autoName,
       userLabel: r.userLabel || '',
+      thumb: r.thumb || null,
     };
     // Store imageData so refs survive if asset is later deleted
     if (r.data) {
@@ -1901,6 +2022,7 @@ async function generateVideo() {
     } else if (r.assetId) {
       const asset = await dbGet('assets', r.assetId).catch(() => null);
       if (asset?.imageData) snap.imageData = asset.imageData;
+      if (!snap.thumb && asset?.thumb) snap.thumb = asset.thumb;
     }
     return snap;
   }));
@@ -1909,6 +2031,7 @@ async function generateVideo() {
     const job = {
       id: jobId, modelKey, model, prompt, duration, aspectRatio, enableAudio,
       cfgScale, targetFolder, falKey, googleKey, lumaKey, proxyUrl,
+      pixverseKey: (localStorage.getItem('gis_pixverse_apikey') || '').trim(),
       veoResolution, veoRefMode, veoDuration,
       lumaResolution, lumaDurationSel, lumaLoop, lumaColorMode, lumaCharRefAssetId,
       wan27vSnap, wan27eSnap,
@@ -2068,10 +2191,11 @@ async function runVideoJob(job) {
   renderVideoQueue();
 
   // Dispatch to model-specific handler
-  if (model.type === 'veo')          return callVeoVideo(job);
-  if (model.type === 'luma_video')   return callLumaVideo(job);
-  if (model.type === 'wan27_video')  return callWan27Video(job);
-  if (model.type === 'wan27e_video') return callWan27eVideo(job);
+  if (model.type === 'veo')              return callVeoVideo(job);
+  if (model.type === 'luma_video')       return callLumaVideo(job);
+  if (model.type === 'wan27_video')      return callWan27Video(job);
+  if (model.type === 'wan27e_video')     return callWan27eVideo(job);
+  if (model.type === 'pixverse_video')   return callPixverseVideo(job);
   // seedance_video uses the same fal.ai queue path below
 
   // ── Kling / fal.ai path ──────────────────────────────────
@@ -2302,6 +2426,224 @@ async function callLumaVideo(job) {
   throw new Error('Luma video timeout — generation did not complete within 20 minutes');
 }
 
+// ── PixVerse C1 video generation ─────────────────────────
+// Flow: (I2V: GIS → Worker POST /pixverse/upload-image → img_id)
+//       GIS → Worker POST /pixverse/t2v or /pixverse/i2v → { video_id }
+//       GIS polls → Worker POST /pixverse/status → { status, video_url }
+//       GIS downloads MP4 directly from PixVerse CDN
+// Helper: upload a single image to PixVerse, returns img_id
+async function _pixverseUpload(proxyUrl, pixverseKey, imgData, mimeType) {
+  const resp = await fetch(`${proxyUrl}/pixverse/upload-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: pixverseKey, image_base64: imgData, mime_type: mimeType }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(`PixVerse upload ${resp.status}: ${err.ErrMsg || err.error || resp.statusText}`);
+  }
+  const data = await resp.json();
+  const imgId = data.Resp?.img_id;
+  if (!imgId) throw new Error('PixVerse: no img_id — ' + JSON.stringify(data));
+  return imgId;
+}
+
+async function callPixverseVideo(job) {
+  const { model, modelKey, prompt, duration, aspectRatio, enableAudio, pixverseKey, proxyUrl } = job;
+
+  if (!pixverseKey) throw new Error('Missing PixVerse API key');
+  if (!proxyUrl)    throw new Error('Missing proxy URL');
+
+  const quality   = document.getElementById('pixverseQuality')?.value || '720p';
+  const negPrompt = document.getElementById('pixverseNegPrompt')?.value?.trim() || '';
+  const seedStr   = document.getElementById('pixverseSeed')?.value?.trim();
+  const seed      = seedStr ? parseInt(seedStr) : undefined;
+  const multiClip = document.getElementById('pixverseMultiClip')?.checked || false;
+  const offPeak   = document.getElementById('pixverseOffPeak')?.checked || false;
+  const durNum    = Math.max(model.minDur || 1, Math.min(model.maxDur || 15, parseInt(duration)));
+  const pvMode    = model.pixverseMode || (model.refMode === 'single' ? 'i2v' : 't2v');
+  const pvModelId = model.modelId || 'c1';
+
+  // Build negative prompt — inject anti-cut phrase when multi-clip OFF and model doesn't support the switch
+  let finalNeg = negPrompt;
+  if (!multiClip && !model.supportsMultiClip && pvMode === 't2v' && !negPrompt.includes('no cuts')) {
+    finalNeg = finalNeg ? finalNeg + ', single continuous shot, no cuts, no transitions' : 'single continuous shot, no cuts, no transitions';
+  }
+
+  // Shared fields for all modes
+  const shared = {};
+  if (finalNeg) shared.negative_prompt = finalNeg;
+  if (seed != null) shared.seed = seed;
+  // Multi-clip: only send for models that support it. API is INVERTED: true=single, false=multi
+  if (model.supportsMultiClip) {
+    shared.generate_multi_clip_switch = !multiClip; // invert: checkbox ON (want multi) → send false (API: multi)
+  }
+  shared.generate_audio_switch = !!enableAudio;
+  if (offPeak) shared.off_peak_mode = true;
+
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  let video_id;
+  let endpoint;
+
+  // ── Load ref image data from assets DB ──
+  async function loadRefData(refIdx) {
+    const ref = videoRefs[refIdx];
+    if (!ref?.assetId) throw new Error(`PixVerse: ref ${refIdx + 1} missing`);
+    const asset = await dbGet('assets', ref.assetId);
+    if (!asset?.imageData) throw new Error(`Asset not found for ref ${refIdx + 1}`);
+    return { imgData: asset.imageData, mimeType: asset.mimeType || ref.mimeType || 'image/png', label: ref.userLabel || ref.autoName || `ref${refIdx + 1}` };
+  }
+
+  if (pvMode === 'transition') {
+    // ── Transition: upload 2 images → first_frame_img + last_frame_img ──
+    if (videoRefs.length < 2) throw new Error('Transition requires 2 images (start + end frame)');
+    updateVideoPlaceholderStatus(job, 'UPLOADING FRAMES…');
+    const r0 = await loadRefData(0);
+    const r1 = await loadRefData(1);
+    const imgId0 = await _pixverseUpload(proxyUrl, pixverseKey, r0.imgData, r0.mimeType);
+    const imgId1 = await _pixverseUpload(proxyUrl, pixverseKey, r1.imgData, r1.mimeType);
+
+    endpoint = '/pixverse/transition';
+    const payload = { apiKey: pixverseKey, prompt, model: pvModelId, duration: durNum, quality, first_frame_img: imgId0, last_frame_img: imgId1, ...shared };
+    updateVideoPlaceholderStatus(job, 'SUBMITTING TRANSITION…');
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse transition ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+
+  } else if (pvMode === 'fusion') {
+    // ── Fusion: upload N images → image_references array ──
+    if (videoRefs.length === 0) throw new Error('Fusion requires at least 1 reference image');
+    updateVideoPlaceholderStatus(job, 'UPLOADING REFS…');
+    const imageRefs = [];
+    for (let i = 0; i < videoRefs.length; i++) {
+      const r = await loadRefData(i);
+      const imgId = await _pixverseUpload(proxyUrl, pixverseKey, r.imgData, r.mimeType);
+      const label = r.label.toLowerCase();
+      const type = (label.includes('[bg]') || label.includes('background') || label.includes('scene')) ? 'background' : 'subject';
+      // PixVerse ref_name: simple alphanumeric only — use pic1, pic2... for reliability
+      const refName = `pic${i + 1}`;
+      imageRefs.push({ type, img_id: imgId, ref_name: refName });
+    }
+
+    // Auto-rewrite prompt: replace @RefLabel, @autoName, @ElementN with @picN
+    let fusionPrompt = prompt;
+    for (let i = 0; i < videoRefs.length; i++) {
+      const ref = videoRefs[i];
+      const picTag = `@pic${i + 1}`;
+      // Replace known GIS mention patterns: @Ref_XXX, @UserLabel, @ElementN
+      if (ref.userLabel) fusionPrompt = fusionPrompt.replace(new RegExp('@' + ref.userLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), picTag);
+      if (ref.autoName)  fusionPrompt = fusionPrompt.replace(new RegExp('@' + ref.autoName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), picTag);
+      fusionPrompt = fusionPrompt.replace(new RegExp(`@Element${i + 1}\\b`, 'gi'), picTag);
+      fusionPrompt = fusionPrompt.replace(new RegExp(`@Image${i + 1}\\b`, 'gi'), picTag);
+    }
+    // If no @picN found in prompt at all, append generic references
+    if (!fusionPrompt.includes('@pic')) {
+      const refTags = imageRefs.map(r => `@${r.ref_name}`).join(' and ');
+      fusionPrompt = fusionPrompt + ` featuring ${refTags}`;
+    }
+
+    endpoint = '/pixverse/fusion';
+    const payload = { apiKey: pixverseKey, image_references: imageRefs, prompt: fusionPrompt, model: pvModelId, duration: durNum, quality, aspect_ratio: aspectRatio, ...shared };
+    updateVideoPlaceholderStatus(job, 'SUBMITTING FUSION…');
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse fusion ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+
+  } else if (pvMode === 'i2v' && videoRefs.length > 0) {
+    // ── I2V: upload 1 image → img_id ──
+    updateVideoPlaceholderStatus(job, 'UPLOADING IMAGE…');
+    const r0 = await loadRefData(0);
+    const imgId = await _pixverseUpload(proxyUrl, pixverseKey, r0.imgData, r0.mimeType);
+
+    endpoint = '/pixverse/i2v';
+    const payload = { apiKey: pixverseKey, prompt, img_id: imgId, model: pvModelId, duration: durNum, quality, ...shared };
+    updateVideoPlaceholderStatus(job, 'SUBMITTING I2V…');
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse I2V ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+
+  } else {
+    // ── T2V ──
+    endpoint = '/pixverse/t2v';
+    const payload = { apiKey: pixverseKey, prompt, model: pvModelId, duration: durNum, quality, aspect_ratio: aspectRatio, ...shared };
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse T2V ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+  }
+
+  // ── Poll for completion ──
+  job.status = 'generating';
+  updateVideoPlaceholderStatus(job, offPeak ? 'GENERATING (off-peak)…' : 'GENERATING…');
+
+  const POLL_MS = offPeak ? 15000 : 5000;
+  const TIMEOUT = (offPeak ? 120 : 20) * 60 * 1000;
+  const deadline = Date.now() + TIMEOUT;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+
+    const statusResp = await fetch(`${proxyUrl}/pixverse/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: pixverseKey, video_id }),
+    });
+    if (!statusResp.ok) {
+      const err = await statusResp.json().catch(() => ({}));
+      throw new Error(`PixVerse status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+    }
+    const sData = await statusResp.json();
+    const resp = sData.Resp || sData;
+    const st = resp.status;
+
+    // PixVerse statuses: 1=done, 2/8=failed, 3/5=processing, 7=moderation, 9=queued
+    if (st === 2 || st === 8) throw new Error(`PixVerse generation failed: ${resp.error_message || resp.err_msg || 'unknown'}`);
+    if (st === 7) throw new Error('PixVerse: content moderation failed — modify your prompt and retry');
+
+    if (st === 1) {
+      const videoUrl = resp.url || resp.video_url;
+      if (!videoUrl) throw new Error('PixVerse: done but no video URL');
+
+      job.status = 'fetching';
+      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+      const videoRes = await fetch(videoUrl);
+      if (!videoRes.ok) throw new Error(`PixVerse video download failed (${videoRes.status})`);
+      const videoArrayBuffer = await videoRes.arrayBuffer();
+
+      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+        model: model.name, modelKey, prompt,
+        params: { duration: durNum, aspectRatio, quality, enableAudio, multiClip, offPeak, negativePrompt: finalNeg, mode: pvMode },
+        duration: durNum,
+        cdnUrl: videoUrl,
+        usedVideoRefs: job.videoRefsSnapshot || [],
+      }, job, ['pixverse', '_pixverse_video', 1, durNum]);
+      toast(`PixVerse C1 ${pvMode.toUpperCase()} generated · ${elapsed}s`, 'ok');
+      return;
+    }
+    // st === 3, 5, 9 → continue polling
+  }
+
+  throw new Error(`PixVerse video timeout — generation did not complete within ${offPeak ? '2 hours' : '20 minutes'}`);
+}
+
 // ── Thumbnail generation ─────────────────────────────────
 async function generateVideoThumb(blob) {
   return new Promise(resolve => {
@@ -2385,7 +2727,7 @@ function videoShowPlaceholder(job) {
       <div class="meta-pill">Duration: <b>${durationLabel}</b></div>
       <div class="meta-pill" style="color:var(--dim2)">processing…</div>
     </div>`;
-  area.prepend(div);
+  area.appendChild(div);
 }
 
 function updateVideoPlaceholderStatus(job, statusText) {
@@ -2424,7 +2766,7 @@ function _videoDateStr(ts) {
   return new Date(ts).toLocaleDateString('en');
 }
 
-function renderVideoResultCard(rec, thumbData) {
+function renderVideoResultCard(rec, thumbData, placeholderEl) {
   const area = document.getElementById('videoOutputArea');
   const emptyState = document.getElementById('videoEmptyState');
   if (emptyState) emptyState.style.display = 'none';
@@ -2466,7 +2808,12 @@ function renderVideoResultCard(rec, thumbData) {
     if (e.target.closest('button')) return;
     openVideoLightboxById(rec.id);
   };
-  area.prepend(div);
+  // In-place replacement: swap placeholder with result card
+  if (placeholderEl && placeholderEl.parentNode) {
+    placeholderEl.parentNode.replaceChild(div, placeholderEl);
+  } else {
+    area.appendChild(div);
+  }
 }
 
 // ── Video error ──────────────────────────────────────────
@@ -2585,15 +2932,39 @@ function rerunVideoJob(jobId) {
   const card = document.getElementById(`vphold_${jobId}`);
   const job = videoJobs.find(j => j.id === jobId);
   if (!job) { toast('Cannot rerun — job data lost', 'err'); return; }
-  if (card) card.remove();
   // Re-queue with same parameters, fresh ID
   const { id: _id, status: _s, startedAt: _st, elapsed: _e,
           requestId: _r, cancelled: _c, errorMsg: _em, ...jobData } = job;
   const newJob = { ...jobData,
     id: `vid_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
-    status: 'queued' };
+    status: 'queued', startedAt: Date.now() };
   videoJobs.push(newJob);
-  videoShowPlaceholder(newJob);
+  // In-place rerun: insert new placeholder where the error card is, then remove error card
+  if (card && card.parentNode) {
+    const area = document.getElementById('videoOutputArea');
+    const emptyState = document.getElementById('videoEmptyState');
+    if (emptyState) emptyState.style.display = 'none';
+    const isTopaz  = !!newJob.isTopaz;
+    const mn = isTopaz ? `✦ Topaz ${TOPAZ_MODEL_NAMES[newJob.topazModel] || newJob.topazModel}` : newJob.model.name;
+    const sub = isTopaz ? `${newJob.srcDuration}s · ${newJob.out_width}×${newJob.out_height}`
+      : escHtml((newJob.prompt || '').slice(0, 80)) + ((newJob.prompt || '').length > 80 ? '…' : '');
+    const dl = isTopaz ? `${newJob.srcDuration}s` : `${newJob.duration}s`;
+    const div = document.createElement('div');
+    div.className = 'img-card placeholder-card';
+    div.id = `vphold_${newJob.id}`;
+    div.innerHTML = `<div class="img-card-top-spacer"></div>
+      <div class="ph-body" style="aspect-ratio:16/9;"><div class="ph-shimmer"></div>
+      <div class="ph-overlay"><div class="ph-top"><span class="ph-model">${mn}</span>
+      <span class="ph-elapsed">⟳ <span class="vphold-status">queued…</span></span></div>
+      <div class="ph-prompt-txt">${sub}</div></div></div>
+      <div class="img-card-meta"><div class="meta-pill">Model: <b>${mn}</b></div>
+      <div class="meta-pill">Duration: <b>${dl}</b></div>
+      <div class="meta-pill" style="color:var(--dim2)">processing…</div></div>`;
+    card.parentNode.insertBefore(div, card);
+    card.remove();
+  } else {
+    videoShowPlaceholder(newJob);
+  }
   renderVideoQueue();
   runVideoJob(newJob).catch(e => videoJobError(newJob, e.message || 'Unknown error'));
 }

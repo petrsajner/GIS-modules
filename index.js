@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════
 // GIS Proxy — Cloudflare Worker
-// Verze: 2026-11 (+depth route restored)
+// Verze: 2026-12 (+PixVerse C1 video routes)
 //
 // Slouží jako CORS proxy pro providery, kteří blokují přímé
 // browser requesty z file:// origin.
@@ -40,6 +40,10 @@
 //   POST /topaz/image/download   → Topaz image: stream result→browser
 //   POST /replicate/wan27/submit → Replicate WAN 2.7 prediction submit
 //   POST /replicate/wan27/status → Replicate WAN 2.7 prediction status
+//   POST /pixverse/t2v           → PixVerse C1 text-to-video submit
+//   POST /pixverse/i2v           → PixVerse C1 image-to-video submit
+//   POST /pixverse/upload-image  → PixVerse upload image → img_id
+//   POST /pixverse/status        → PixVerse video status poll
 //   GET  /health                 → health check
 // ══════════════════════════════════════════════════════════
 
@@ -78,6 +82,10 @@ import { handleReplicateWan27eSubmit,
          handleReplicateFilesUpload,
          handleReplicateVideoServe,
          handleReplicateUploadVideo }             from './handlers/replicate-wan27e.js';
+import { handlePixverseT2V, handlePixverseI2V,
+         handlePixverseTransition, handlePixverseFusion,
+         handlePixverseUploadImage,
+         handlePixverseStatus }                   from './handlers/pixverse.js';
 
 // ── CORS hlavičky — povoleno pro file:// a všechny origins ──
 const CORS_HEADERS = {
@@ -108,7 +116,7 @@ export default {
     if (path === '/health' || path === '/') {
       return corsResponse(JSON.stringify({
         status: 'ok',
-        version: '2026-11',
+        version: '2026-12',
         routes: [
           'POST /xai/generate',
           'POST /luma/generate',
@@ -145,6 +153,12 @@ export default {
           'POST /replicate/wan27v/status',
           'POST /replicate/wan27e/submit',
           'POST /replicate/wan27e/status',
+          'POST /pixverse/t2v',
+          'POST /pixverse/i2v',
+          'POST /pixverse/transition',
+          'POST /pixverse/fusion',
+          'POST /pixverse/upload-image',
+          'POST /pixverse/status',
         ],
       }));
     }
@@ -228,6 +242,14 @@ export default {
       if (path === '/replicate/wan27e/status')   return withCors(await handleReplicateWan27eStatus(request));
       if (path === '/replicate/files/upload')    return withCors(await handleReplicateFilesUpload(request));
       if (path === '/replicate/upload/video')    return withCors(await handleReplicateUploadVideo(request));
+
+      // ── PixVerse C1 video ──────────────────────────────
+      if (path === '/pixverse/t2v')              return withCors(await handlePixverseT2V(request));
+      if (path === '/pixverse/i2v')              return withCors(await handlePixverseI2V(request));
+      if (path === '/pixverse/transition')       return withCors(await handlePixverseTransition(request));
+      if (path === '/pixverse/fusion')           return withCors(await handlePixverseFusion(request));
+      if (path === '/pixverse/upload-image')     return withCors(await handlePixverseUploadImage(request));
+      if (path === '/pixverse/status')           return withCors(await handlePixverseStatus(request));
 
     } catch (err) {
       console.error(`[GIS Proxy] Uncaught error on ${path}:`, err);
