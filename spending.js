@@ -51,8 +51,40 @@ const SPEND_PRICES = {
   '_upscale_seedvr':    0.030,   // SeedVR2
   '_upscale_crisp':     0.025,   // Recraft Crisp
 
-  // ── fal.ai — video (per SECOND, rough estimates) ────
-  '_fal_video':         0.040,   // Generic fal.ai video fallback
+  // ── fal.ai — video (per SECOND, confirmed fal.ai pricing) ──
+  // Kling V3 — fal.ai/kling-video/v3
+  '_kling_v3_std':      0.084,   // V3 Standard no audio ($0.126 with audio)
+  '_kling_v3_std_audio': 0.126,  // V3 Standard with audio
+  '_kling_v3_pro':      0.112,   // V3 Pro no audio ($0.168 with audio)
+  '_kling_v3_pro_audio': 0.168,  // V3 Pro with audio
+  // Kling O3 — fal.ai/kling-video/o3
+  '_kling_o3_std':      0.168,   // O3 Standard no audio
+  '_kling_o3_std_audio': 0.224,  // O3 Standard with audio
+  '_kling_o3_pro':      0.224,   // O3 Pro no audio
+  '_kling_o3_pro_audio': 0.280,  // O3 Pro with audio
+  // Kling O1 — fal.ai/kling-video/o1
+  '_kling_o1':          0.112,   // O1 Dual Keyframe (estimate)
+  // Kling 2.6 Pro — fal.ai/kling-video/v2.6/pro
+  '_kling_26':          0.070,   // 2.6 Pro no audio
+  '_kling_26_audio':    0.140,   // 2.6 Pro with audio
+  // Kling 2.5 Turbo — fal.ai/kling-video/v2.5-turbo
+  '_kling_25t':         0.070,   // 2.5 Turbo
+  // Kling 2.1 — fal.ai/kling-video/v2.1
+  '_kling_21_master':   0.070,   // 2.1 Master (estimate)
+  '_kling_21_std':      0.056,   // 2.1 Standard (estimate)
+  // Kling 1.6
+  '_kling_16':          0.040,   // 1.6 (estimate)
+  // Kling Motion Control — fal.ai/kling-video/v3/*/motion-control
+  '_kling_mc':          0.126,   // Motion Control (estimate, ~standard+audio tier)
+  // Seedance 1.5 — fal.ai/bytedance/seedance/v1.5/pro (720p with audio ~$0.052/s)
+  '_seedance15':        0.052,
+  // Vidu Q3 — fal.ai/vidu/q3 ($0.035/s base × 2.2 for 720p = $0.077)
+  '_vidu_q3':           0.077,
+  // WAN 2.6 — fal.ai/wan (720p ~$0.05/s, 1080p ~$0.10/s)
+  '_wan26_720p':        0.050,
+  '_wan26_1080p':       0.100,
+  // Generic fallback (should not be used — all models should have specific keys)
+  '_fal_video':         0.084,   // Updated fallback to mid-tier Kling Standard
 
   // ── xAI (per image) ─────────────────────────────────
   'grok-imagine-image': 0.070,
@@ -84,12 +116,8 @@ const SPEND_PRICES = {
   '_topaz_slhq':   0.012,  // Starlight HQ
   '_topaz_slm':    0.008,  // Starlight Mini
 
-  // ── Replicate (per image) ────────────────────────────
-  'wan-video/wan-2.7-image': 0.030,  // WAN 2.7 image
-  '_replicate_wan27v_720p':  0.10,   // WAN 2.7 I2V 720p via Replicate (legacy)
-  '_replicate_wan27v_1080p': 0.15,   // WAN 2.7 I2V 1080p via Replicate (legacy)
-  '_replicate_wan27e_720p':  0.10,   // WAN 2.7 Edit 720p via Replicate (legacy)
-  '_replicate_wan27e_1080p': 0.15,   // WAN 2.7 Edit 1080p via Replicate (legacy)
+  // ── WAN 2.7 image via fal.ai (per image) ───────────────
+  '_wan27_image':            0.030,   // WAN 2.7 image via fal.ai (estimate)
 
   // ── OpenRouter — Claude Sonnet 4.6 (per call) ──────
   '_or_prompt':   0.003,   // AI Prompt text (~500 in + 500 out tokens)
@@ -104,9 +132,14 @@ const SPEND_PRICES = {
   // ── PixVerse — video (per SECOND) ─────────────────────
   // C1 pricing: 720p no audio = 10 credits/s, $1 = 200 credits → $0.05/s
   '_pixverse_video': 0.050, // PixVerse C1 720p (default estimate)
+
+  // ── Seedance 2.0 — video (per SECOND of 720p) ─────────
+  '_seedance2_std':       0.303,  // Standard T2V/I2V/R2V $0.3034/s
+  '_seedance2_fast':      0.242,  // Fast T2V/I2V $0.2419/s
+  '_seedance2_r2v_fast':  0.181,  // Fast R2V with video inputs $0.1814/s
 };
 
-const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'replicate', 'openrouter', 'pixverse'];
+const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'openrouter', 'pixverse', 'segmind'];
 
 function _spendKey(provider) {
   return `gis_spend_${provider}`;

@@ -82,7 +82,7 @@ async function _falQueue(falKey, endpointPath, payload, onStatus, signal) {
 // ── fal.ai queue via GIS proxy (CORS bypass for flux-pro and other restricted models) ──
 // Uses Worker routes: /fal/submit → /fal/status → /fal/result
 async function _falQueueViaProxy(falKey, endpointPath, payload, onStatus, signal) {
-  const proxyBase = (localStorage.getItem('gis_proxy_url') || 'https://gis-proxy.petr-gis.workers.dev').trim().replace(/\/$/, '');
+  const proxyBase = getProxyUrl();
   const headers   = { 'X-Fal-Key': falKey, 'Content-Type': 'application/json' };
 
   // 1. Submit
@@ -421,12 +421,17 @@ async function callWan27(apiKey, prompt, model, refs, snap, onStatus) {
   let payload;
 
   if (isEdit) {
-    const editRef = refs && refs.length > 0 ? refs[0] : null;
-    if (!editRef) throw new Error('WAN 2.7 Edit: upload input image to the ref panel.');
-    const apiRef = await _refAsJpeg(editRef, REF_MAX_PX);
+    if (!refs || refs.length === 0) throw new Error('WAN 2.7 Edit: upload input image to the ref panel.');
+    // fal.ai WAN edit uses image_urls[] (array), NOT image_url (single)
+    // Support 1-4 refs — reference as 'image 1', 'image 2'... in prompt
+    const imageUrls = [];
+    for (const ref of refs.slice(0, 4)) {
+      const apiRef = await _refAsJpeg(ref, REF_MAX_PX);
+      imageUrls.push(`data:${apiRef.mimeType};base64,${apiRef.data}`);
+    }
     payload = {
       prompt,
-      image_url:             `data:${apiRef.mimeType};base64,${apiRef.data}`,
+      image_urls:            imageUrls,
       enable_safety_checker: snap.safety !== false,
     };
     if (snap.seed) payload.seed = parseInt(snap.seed);
@@ -535,16 +540,6 @@ async function callQwen2(apiKey, prompt, model, refs, snap, onStatus) {
   };
 }
 
-async function renderOutput(result, prompt, galId) {
-  const area = document.getElementById('outputArea');
-  document.getElementById('emptyState').style.display = 'none';
-  if (result.type === 'gemini') {
-    await renderGeminiOutput(area, result, prompt, galId);
-  } else {
-    await renderImagenOutput(area, result, prompt, galId);
-  }
-}
-
 // ── FLUX Pro Fill — inpainting (used by paint.js runInpaint) ──
 async function callFluxFill(apiKey, imageB64, maskB64, prompt, width, height, onStatus, signal, opts = {}) {
   const { steps = 28, guidance = 3.5, seed = null, safetyTolerance = '2' } = opts;
@@ -624,7 +619,7 @@ async function callFluxGeneralInpaint(apiKey, params, onStatus, signal) {
 async function callDepthAnything(apiKey, imageB64, onStatus, signal) {
   // depth-anything is sync → routed through GIS proxy (CORS bypass)
   if (onStatus) onStatus('⏳ Generating depth map…');
-  const proxyBase = (localStorage.getItem('gis_proxy_url') || 'https://gis-proxy.petr-gis.workers.dev').trim().replace(/\/$/, '');
+  const proxyBase = getProxyUrl();
   const res = await fetch(`${proxyBase}/depth`, {
     method: 'POST',
     headers: { 'X-Fal-Key': apiKey, 'Content-Type': 'application/json' },
@@ -643,127 +638,10 @@ async function callDepthAnything(apiKey, imageB64, onStatus, signal) {
   return { base64, mimeType };
 }
 
-// ── FLUX Dev Inpaint (fal-ai/flux-lora/inpainting) ──────────────────────────
-// Cheaper FLUX variant, no ControlNet/IP-Adapter, fast
-async function callFluxDevInpaint(apiKey, params, onStatus, signal) {
-  const {
-    imageB64, maskB64, prompt,
-    width, height,
-    steps = 28, guidance = 3.5, strength = 0.85, seed = null,
-  } = params;
-
-  const payload = {
-    image_url:           `data:image/jpeg;base64,${imageB64}`,
-    mask_url:            `data:image/png;base64,${maskB64}`,
-    prompt:              prompt || '',
-    num_inference_steps: steps,
-    guidance_scale:      guidance,
-    strength,
-    num_images:          1,
-    output_format:       'jpeg',
-  };
-  if (seed !== null) payload.seed = seed;
-
-  const data = await _falQueue(apiKey, 'fal-ai/flux-lora/inpainting', payload, onStatus, signal);
-  const imageObj = data.images?.[0];
-  if (!imageObj?.url) throw new Error('FLUX Dev Inpaint: no image in result.');
-  const actualW = imageObj.width  || width;
-  const actualH = imageObj.height || height;
-  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
-  return { base64, mimeType, width: actualW, height: actualH };
-}
-
-// ── Qwen Edit Inpaint (fal-ai/qwen-image-edit/inpaint) ──────────────────────
-// Different architecture, strong for instruction-based edits, fast
-async function callQwenInpaint(apiKey, params, onStatus, signal) {
-  const {
-    imageB64, maskB64, prompt,
-    width, height,
-    steps = 30, guidance = 4, seed = null,
-  } = params;
-
-  // Qwen uses same mask convention as FLUX: white = inpaint area, black = preserve
-  const payload = {
-    image_url:           `data:image/jpeg;base64,${imageB64}`,
-    mask_url:            `data:image/png;base64,${maskB64}`,
-    prompt:              prompt || '',
-    num_inference_steps: steps,
-    guidance_scale:      guidance,
-    num_images:          1,
-    output_format:       'jpeg',
-    acceleration:        'regular',  // 'none' is very slow, 'regular' = fast + quality
-  };
-  if (seed !== null) payload.seed = seed;
-
-  const data = await _falQueue(apiKey, 'fal-ai/qwen-image-edit/inpaint', payload, onStatus, signal);
-  const imageObj = data.images?.[0];
-  if (!imageObj?.url) throw new Error('Qwen Inpaint: no image in result.');
-  const actualW = imageObj.width  || width;
-  const actualH = imageObj.height || height;
-  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
-  return { base64, mimeType, width: actualW, height: actualH };
-}
-
-// Invert a B&W mask (white↔black) — for models using opposite mask convention
-async function _invertMaskB64(maskB64, w, h) {
-  return new Promise(res => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth || w || 512;
-      c.height = img.naturalHeight || h || 512;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const d = ctx.getImageData(0, 0, c.width, c.height);
-      for (let i = 0; i < d.data.length; i += 4) {
-        d.data[i]   = 255 - d.data[i];
-        d.data[i+1] = 255 - d.data[i+1];
-        d.data[i+2] = 255 - d.data[i+2];
-        // alpha stays 255
-      }
-      ctx.putImageData(d, 0, 0);
-      res(c.toDataURL('image/png').split(',')[1]);
-    };
-    img.onerror = () => res(maskB64); // fallback: use original
-    img.src = `data:image/png;base64,${maskB64}`;
-  });
-}
-
-// ── FLUX Kontext Inpaint (fal-ai/flux-kontext-lora/inpaint) ─────────────────
-// Latest model, native reference image support, strong context understanding
-async function callFluxKontextInpaint(apiKey, params, onStatus, signal) {
-  const {
-    imageB64, maskB64, prompt,
-    width, height,
-    steps = 30, guidance = 2.5, strength = 0.88, seed = null,
-    refB64 = null,
-  } = params;
-
-  const payload = {
-    image_url:           `data:image/jpeg;base64,${imageB64}`,
-    mask_url:            `data:image/png;base64,${maskB64}`,
-    prompt:              prompt || '',
-    num_inference_steps: steps,
-    guidance_scale:      guidance,
-    strength,
-    num_images:          1,
-    output_format:       'jpeg',
-  };
-  if (seed !== null) payload.seed = seed;
-  if (refB64) payload.reference_image_url = `data:image/jpeg;base64,${refB64}`;
-
-  const data = await _falQueue(apiKey, 'fal-ai/flux-kontext-lora/inpaint', payload, onStatus, signal);
-  const imageObj = data.images?.[0];
-  if (!imageObj?.url) throw new Error('FLUX Kontext Inpaint: no image in result.');
-  const actualW = imageObj.width  || width;
-  const actualH = imageObj.height || height;
-  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
-  return { base64, mimeType, width: actualW, height: actualH };
-}
-
-// ── FLUX Krea Inpaint (fal-ai/flux-krea-lora/inpainting) ────────────────────
-// Fine-tuned FLUX.1 dev by Krea — same interface as FLUX Dev, $0.035/MP
-async function callFluxKreaInpaint(apiKey, params, onStatus, signal) {
+// ── Generic simple fal.ai inpaint helper ─────────────────────────────────────
+// Used by FLUX Dev, FLUX Krea, and any future simple inpaint model.
+// endpoint: fal.ai model path, label: error label, extraPayload: model-specific fields
+async function _runSimpleInpaint(apiKey, endpoint, label, params, onStatus, signal, extraPayload = {}) {
   const { imageB64, maskB64, prompt, width, height,
           steps = 28, guidance = 3.5, strength = 0.85, seed = null } = params;
   const payload = {
@@ -775,64 +653,25 @@ async function callFluxKreaInpaint(apiKey, params, onStatus, signal) {
     strength,
     num_images:          1,
     output_format:       'jpeg',
+    ...extraPayload,
   };
   if (seed !== null) payload.seed = seed;
-  const data = await _falQueue(apiKey, 'fal-ai/flux-krea-lora/inpainting', payload, onStatus, signal);
+  const data = await _falQueue(apiKey, endpoint, payload, onStatus, signal);
   const imageObj = data.images?.[0];
-  if (!imageObj?.url) throw new Error('FLUX Krea Inpaint: no image in result.');
+  if (!imageObj?.url) throw new Error(`${label}: no image in result.`);
   const actualW = imageObj.width || width, actualH = imageObj.height || height;
   const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
   return { base64, mimeType, width: actualW, height: actualH };
 }
 
-// ── SDXL Fast Inpaint (fal-ai/fast-sdxl/inpainting) ─────────────────────────
-// Fast SDXL, supports negative_prompt, white=inpaint convention, ~$0.003/img
-async function callFastSdxlInpaint(apiKey, params, onStatus, signal) {
-  const { imageB64, maskB64, prompt, width, height,
-          steps = 25, guidance = 7.5, strength = 0.85, seed = null,
-          negativePrompt = '' } = params;
-  const payload = {
-    image_url:           `data:image/jpeg;base64,${imageB64}`,
-    mask_url:            `data:image/png;base64,${maskB64}`,
-    prompt:              prompt || '',
-    negative_prompt:     negativePrompt,
-    num_inference_steps: steps,
-    guidance_scale:      guidance,
-    strength,
-    num_images:          1,
-    output_format:       'jpeg',
-  };
-  if (seed !== null) payload.seed = seed;
-  const data = await _falQueue(apiKey, 'fal-ai/fast-sdxl/inpainting', payload, onStatus, signal);
-  const imageObj = data.images?.[0];
-  if (!imageObj?.url) throw new Error('SDXL Fast Inpaint: no image in result.');
-  const actualW = imageObj.width || width, actualH = imageObj.height || height;
-  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
-  return { base64, mimeType, width: actualW, height: actualH };
+// ── FLUX Dev Inpaint ─────────────────────────────────────────────────────────
+async function callFluxDevInpaint(apiKey, params, onStatus, signal) {
+  return _runSimpleInpaint(apiKey, 'fal-ai/flux-lora/inpainting', 'FLUX Dev Inpaint', params, onStatus, signal);
 }
 
-// ── Playground v2.5 Inpaint (fal-ai/playground-v25/inpainting) ───────────────
-// Aesthetic open model, negative_prompt, custom size as object, ~$0.005/img
-async function callPlaygroundV25Inpaint(apiKey, params, onStatus, signal) {
-  const { imageB64, maskB64, prompt, width, height,
-          steps = 25, guidance = 3.0, strength = 0.95, seed = null,
-          negativePrompt = '' } = params;
-  const payload = {
-    image_url:           `data:image/jpeg;base64,${imageB64}`,
-    mask_url:            `data:image/png;base64,${maskB64}`,
-    prompt:              prompt || '',
-    negative_prompt:     negativePrompt,
-    image_size:          { width, height },
-    num_inference_steps: steps,
-    guidance_scale:      guidance,
-    strength,
-    num_images:          1,
-  };
-  if (seed !== null) payload.seed = seed;
-  const data = await _falQueue(apiKey, 'fal-ai/playground-v25/inpainting', payload, onStatus, signal);
-  const imageObj = data.images?.[0];
-  if (!imageObj?.url) throw new Error('Playground v2.5 Inpaint: no image in result.');
-  const actualW = imageObj.width || width, actualH = imageObj.height || height;
-  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus, `${actualW}×${actualH}`);
-  return { base64, mimeType, width: actualW, height: actualH };
+// ── FLUX Krea Inpaint ────────────────────────────────────────────────────────
+async function callFluxKreaInpaint(apiKey, params, onStatus, signal) {
+  return _runSimpleInpaint(apiKey, 'fal-ai/flux-krea-lora/inpainting', 'FLUX Krea Inpaint', params, onStatus, signal);
 }
+
+

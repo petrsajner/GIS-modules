@@ -726,8 +726,9 @@ input[type=file] { display:none; }
 }
 .gal-filter-panel.open { display:flex; }
 .gal-filter-group { display:flex; flex-direction:column; gap:6px; min-width:160px; }
+.gal-filter-group:first-child { flex:1; }
 .gal-filter-label { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
-.gal-filter-models { display:flex; flex-wrap:wrap; gap:5px; max-width:420px; }
+.gal-filter-models { display:flex; flex-wrap:wrap; gap:5px; }
 .gal-filter-chip {
   font-size:10px; font-family:'IBM Plex Mono',monospace; padding:3px 8px;
   border:1px solid var(--border); background:var(--s3); color:var(--dim);
@@ -2530,30 +2531,41 @@ select.inpaint-num option { background:#fff; color:#111; }
         <!-- ═══ WAN 2.7 params ═══ -->
         <div id="wan27Params" style="display:none">
 
-          <!-- Resolution — přesné pixel hodnoty pro Replicate API -->
+          <!-- Resolution — pixel values for Segmind API -->
           <div class="ctrl" id="wan27SizeRow">
             <div class="ctrl-label">Resolution</div>
             <select id="wan27Size" onchange="onWan27SizeChange(this.value)"
               style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-              <option value="1280*720">1280×720 — 16:9 HD</option>
-              <option value="2048*1152" selected>2048×1152 — 16:9 2K</option>
-              <option value="720*1280">720×1280 — 9:16 Portrait</option>
-              <option value="1152*2048">1152×2048 — 9:16 2K</option>
-              <option value="1024*1024">1024×1024 — 1:1 Square</option>
-              <option value="2048*2048">2048×2048 — 1:1 2K</option>
-              <option value="1024*768">1024×768 — 4:3</option>
-              <option value="2048*1536">2048×1536 — 4:3 2K</option>
-              <option value="768*1024">768×1024 — 3:4</option>
-              <option value="1536*2048">1536×2048 — 3:4 2K</option>
+              <optgroup label="── 1K ──">
+                <option value="1280*720">1280×720 — 16:9 HD</option>
+                <option value="720*1280">720×1280 — 9:16 Portrait</option>
+                <option value="1024*1024">1024×1024 — 1:1 Square</option>
+                <option value="1024*768">1024×768 — 4:3</option>
+                <option value="768*1024">768×1024 — 3:4</option>
+              </optgroup>
+              <optgroup label="── 2K ──">
+                <option value="2048*1152" selected>2048×1152 — 16:9 2K</option>
+                <option value="1152*2048">1152×2048 — 9:16 2K</option>
+                <option value="2048*2048">2048×2048 — 1:1 2K</option>
+                <option value="2048*1536">2048×1536 — 4:3 2K</option>
+                <option value="1536*2048">1536×2048 — 3:4 2K</option>
+              </optgroup>
+              <optgroup label="── 4K (Pro only) ──">
+                <option value="3840*2160" data-pro>3840×2160 — 16:9 4K</option>
+                <option value="2160*3840" data-pro>2160×3840 — 9:16 4K</option>
+                <option value="4096*4096" data-pro>4096×4096 — 1:1 4K</option>
+                <option value="3840*2880" data-pro>3840×2880 — 4:3 4K</option>
+                <option value="2880*3840" data-pro>2880×3840 — 3:4 4K</option>
+              </optgroup>
             </select>
             <div style="font-size:11px;color:var(--dim2);margin-top:4px;">Aspect ratio: <span id="wan27RatioInfo" style="color:var(--accent);">16:9</span></div>
           </div>
 
-          <!-- Thinking mode (T2I only) -->
+          <!-- Thinking mode (T2I only — Segmind/DashScope) -->
           <div class="ctrl" id="wan27ThinkingRow">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
               <input type="checkbox" id="wan27Thinking" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Thinking mode <span style="color:var(--dim2)">(better quality, slower)</span></span>
+              <span style="font-size:11px;color:var(--dim);">Thinking mode <span style="color:var(--dim2)">(better composition, slower)</span></span>
             </label>
           </div>
 
@@ -2973,6 +2985,7 @@ select.inpaint-num option { background:#fff; color:#111; }
             <option value="luma_ray2">Ray2 · T2V+I2V · $0.71/5s · Luma</option>
           </optgroup>
           <optgroup label="── Seedance ──">
+            <option value="seedance2">★ Seedance 2.0 · Multi-modal · ByteDance</option>
             <option value="seedance15">Seedance 1.5 Pro · ByteDance</option>
           </optgroup>
           <optgroup label="── PixVerse ──">
@@ -3401,6 +3414,124 @@ select.inpaint-num option { background:#fff; color:#111; }
         </div>
         <div style="font-size:10px;color:var(--dim2);margin-top:4px;line-height:1.5;">
           C1 · 1–15s · 1080p · Audio · 20+ camera moves · $0.05/s at 720p
+        </div>
+      </div>
+
+      <!-- Seedance 2.0 params -->
+      <div class="psec" id="seedance2Params" style="display:none;">
+        <div class="plabel">Seedance 2.0 Settings</div>
+
+        <!-- Duration slider + Auto -->
+        <div class="ctrl">
+          <div class="ctrl-label">Duration
+            <span id="sd2DurLabel" style="color:var(--acc);font-weight:400;margin-left:auto;">5s</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="range" id="sd2Duration" min="4" max="15" value="5" step="1"
+              oninput="document.getElementById('sd2DurLabel').textContent=this.value+'s'"
+              style="flex:1;accent-color:var(--acc);">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">
+              <input type="checkbox" id="sd2DurAuto"
+                onchange="document.getElementById('sd2Duration').disabled=this.checked; document.getElementById('sd2DurLabel').textContent=this.checked?'auto':document.getElementById('sd2Duration').value+'s'"
+                style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+              <span style="font-size:10px;color:var(--dim);">Auto</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Resolution radio -->
+        <div class="ctrl">
+          <div class="ctrl-label">Resolution</div>
+          <div style="display:flex;gap:12px;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="radio" name="sd2Res" value="720p" checked style="accent-color:var(--acc);">
+              <span style="font-size:11px;color:var(--dim);">720p</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="radio" name="sd2Res" value="480p" style="accent-color:var(--acc);">
+              <span style="font-size:11px;color:var(--dim);">480p (faster)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Seed -->
+        <div class="ctrl">
+          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+          <input type="number" id="sd2Seed" placeholder="42" min="0" max="2147483647"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+        </div>
+
+        <!-- R2V section: video slots + audio URLs (hidden unless R2V) -->
+        <div id="sd2R2VSection" style="display:none;">
+
+          <!-- Video ref slots (3x) -->
+          <div class="ctrl" style="margin-top:8px;">
+            <div class="ctrl-label">Video References <span style="color:var(--dim2);font-weight:400;">(max 3 · use [Video1] [Video2] in prompt)</span></div>
+          </div>
+          <div id="sd2VidSrc1Row" style="margin-bottom:6px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <span style="font-size:10px;color:var(--dim);min-width:14px;">#1</span>
+              <span id="sd2VidSrc1Info" style="font-size:10px;color:var(--dim);flex:1;">None</span>
+              <button class="ibtn" id="sd2VidSrc1DescribeBtn" onclick="sd2VidDescribe(0)" style="font-size:9px;padding:2px 6px;display:none;">✦</button>
+              <button class="ibtn" id="sd2VidSrc1ClearBtn" onclick="sd2VidClear(0)" style="font-size:9px;padding:2px 6px;display:none;">✕</button>
+            </div>
+            <div id="sd2VidSrc1Thumb" style="display:none;margin-left:20px;">
+              <img id="sd2VidSrc1Img" src="" style="width:100%;max-height:80px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+              <div id="sd2VidSrc1Meta" style="font-size:9px;color:var(--dim2);padding:2px 0;"></div>
+            </div>
+          </div>
+          <div id="sd2VidSrc2Row" style="margin-bottom:6px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <span style="font-size:10px;color:var(--dim);min-width:14px;">#2</span>
+              <span id="sd2VidSrc2Info" style="font-size:10px;color:var(--dim);flex:1;">None</span>
+              <button class="ibtn" id="sd2VidSrc2DescribeBtn" onclick="sd2VidDescribe(1)" style="font-size:9px;padding:2px 6px;display:none;">✦</button>
+              <button class="ibtn" id="sd2VidSrc2ClearBtn" onclick="sd2VidClear(1)" style="font-size:9px;padding:2px 6px;display:none;">✕</button>
+            </div>
+            <div id="sd2VidSrc2Thumb" style="display:none;margin-left:20px;">
+              <img id="sd2VidSrc2Img" src="" style="width:100%;max-height:80px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+              <div id="sd2VidSrc2Meta" style="font-size:9px;color:var(--dim2);padding:2px 0;"></div>
+            </div>
+          </div>
+          <div id="sd2VidSrc3Row" style="margin-bottom:6px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <span style="font-size:10px;color:var(--dim);min-width:14px;">#3</span>
+              <span id="sd2VidSrc3Info" style="font-size:10px;color:var(--dim);flex:1;">None</span>
+              <button class="ibtn" id="sd2VidSrc3DescribeBtn" onclick="sd2VidDescribe(2)" style="font-size:9px;padding:2px 6px;display:none;">✦</button>
+              <button class="ibtn" id="sd2VidSrc3ClearBtn" onclick="sd2VidClear(2)" style="font-size:9px;padding:2px 6px;display:none;">✕</button>
+            </div>
+            <div id="sd2VidSrc3Thumb" style="display:none;margin-left:20px;">
+              <img id="sd2VidSrc3Img" src="" style="width:100%;max-height:80px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+              <div id="sd2VidSrc3Meta" style="font-size:9px;color:var(--dim2);padding:2px 0;"></div>
+            </div>
+          </div>
+          <div style="margin-bottom:8px;">
+            <button class="ibtn" onclick="sd2VidPick()" style="font-size:10px;padding:3px 9px;">☰ Pick from Gallery</button>
+          </div>
+
+          <!-- Audio URL inputs (3x) -->
+          <div class="ctrl">
+            <div class="ctrl-label">Audio References <span style="color:var(--dim2);font-weight:400;">(max 3 · paste URL · use [Audio1] in prompt)</span></div>
+          </div>
+          <input type="text" id="sd2AudioUrl1" placeholder="Audio URL #1 (WAV, MP3)" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
+          <input type="text" id="sd2AudioUrl2" placeholder="Audio URL #2" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
+          <input type="text" id="sd2AudioUrl3" placeholder="Audio URL #3" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
+
+          <div style="font-size:10px;color:var(--dim2);line-height:1.5;margin-top:2px;">
+            Reference in prompt: <b>[Image1]</b> <b>[Video1]</b> <b>[Audio1]</b> etc.
+          </div>
+        </div>
+
+        <!-- Multi-shot prompting guide -->
+        <div style="font-size:10px;color:var(--dim2);margin-top:8px;line-height:1.6;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;">
+          <b style="color:var(--acc);">Multi-shot &amp; Camera Control</b> — use in prompt:<br>
+          <code style="color:var(--dim);font-size:10px;">[lens switch]</code> — hard cut between shots<br>
+          <code style="color:var(--dim);font-size:10px;">[0-3s] wide shot... [4-7s] close-up...</code> — timeline<br>
+          <code style="color:var(--dim);font-size:10px;">Shot 1: ... Shot 2: ... Shot 3: ...</code> — numbered<br>
+          Camera: <code style="color:var(--dim);font-size:10px;">dolly zoom</code>, <code style="color:var(--dim);font-size:10px;">tracking shot</code>, <code style="color:var(--dim);font-size:10px;">Dutch angle</code>, <code style="color:var(--dim);font-size:10px;">crane up</code>, <code style="color:var(--dim);font-size:10px;">worm's eye</code>, <code style="color:var(--dim);font-size:10px;">bird's eye</code>
+        </div>
+
+        <div style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;">
+          Seedance 2.0 · 4–15s · 720p/480p · Native audio · $0.30/s std · $0.24/s fast
         </div>
       </div>
 
@@ -4066,21 +4197,8 @@ select.inpaint-num option { background:#fff; color:#111; }
       <div id="spendBlock_topaz" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
     </div>
 
-    <!-- Replicate API Key -->
-    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.06);">
-      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Replicate API Key</div>
-      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">WAN 2.7 image generation &amp; editing · <a href="https://replicate.com/account/api-tokens" target="_blank" style="color:var(--accent);">Get key →</a></div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <input type="password" id="setupReplicateKey" placeholder="r8_..." autocomplete="off"
-          oninput="onSetupReplicateKey(this.value)"
-          style="flex:1; background:var(--bg2); color:var(--fg); border:1px solid var(--border); padding:7px 10px; font-family:'IBM Plex Mono',monospace; font-size:12px; outline:none;">
-        <div class="dot" id="setupReplicateDot"></div>
-      </div>
-      <div id="spendBlock_replicate" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
-    </div>
-
     <!-- PixVerse API Key -->
-    <div style="margin-bottom:0; padding:16px 16px 12px;">
+    <div style="margin-bottom:0; padding:16px 16px 12px; background:rgba(255,255,255,.06);">
       <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">PixVerse API Key</div>
       <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">PixVerse C1 video generation · <a href="https://platform.pixverse.ai/api-key" target="_blank" style="color:var(--accent);">Get key →</a></div>
       <div style="display:flex; align-items:center; gap:8px;">
@@ -4090,6 +4208,19 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div class="dot" id="setupPixverseDot"></div>
       </div>
       <div id="spendBlock_pixverse" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
+    </div>
+
+    <!-- Segmind API Key -->
+    <div style="margin-bottom:0; padding:16px 16px 12px;">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Segmind API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">WAN 2.7 image generation &amp; editing (4K Pro, Thinking mode) · <a href="https://www.segmind.com/api-keys" target="_blank" style="color:var(--accent);">Get key →</a></div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="password" id="setupSegmindKey" placeholder="SG_..." autocomplete="off"
+          oninput="onSetupSegmindKey(this.value)"
+          style="flex:1; background:var(--bg2); color:var(--fg); border:1px solid var(--border); padding:7px 10px; font-family:'IBM Plex Mono',monospace; font-size:12px; outline:none;">
+        <div class="dot" id="setupSegmindDot"></div>
+      </div>
+      <div id="spendBlock_segmind" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
     </div>
 
     <!-- OpenRouter API Key -->
@@ -4920,6 +5051,19 @@ select.inpaint-num option { background:#fff; color:#111; }
 </div>
 
 <!-- MODAL -->
+<!-- API Key Warning Modal -->
+<div id="apiKeyWarning" onclick="if(event.target===this)closeApiKeyWarning()">
+  <div class="akw-box">
+    <div class="akw-icon">🔑</div>
+    <div class="akw-title" id="akwTitle">API Key Missing</div>
+    <div class="akw-msg" id="akwMsg">Add your API key in the Setup tab.</div>
+    <div>
+      <button class="akw-btn-primary" onclick="closeApiKeyWarning(true)">→ Go to Setup</button>
+      <button class="akw-btn-secondary" onclick="closeApiKeyWarning()">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="modal" onclick="closeModal(event)">
   <div class="modal-box" id="modalBox">
     <div class="modal-hdr">

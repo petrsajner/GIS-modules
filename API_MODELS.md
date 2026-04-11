@@ -333,7 +333,124 @@ POST /magnific/status       → handleMagnificStatus s upscaler_type
 
 ---
 
-## PixVerse C1 (video) — added v193en
+## Runway Gen-4 Image + Video — VÝZKUM (11. 4. 2026, neimplementováno)
+
+### Dostupné modely
+
+**Image:**
+| Model | Input | Cena |
+|-------|-------|------|
+| `gen4_image` | Text + až 3 ref obrázky | $0.05/720p, $0.08/1080p |
+| `gen4_image_turbo` | Text + ref obrázky | $0.02/image (jakékoli rozlišení) |
+| `gemini_2.5_flash` | Text + ref | $0.05/image |
+
+**Video:**
+| Model | Input | Cena/s |
+|-------|-------|--------|
+| `gen4.5` | Text nebo Image (T2V + I2V) | $0.12/s |
+| `gen4_turbo` | Image | $0.05/s |
+| `gen4_aleph` | Video + Text/Image (V2V) | $0.15/s |
+| `veo3` | Text nebo Image | $0.40/s |
+| `veo3.1` | Text nebo Image | $0.40/s (audio) / $0.20/s (bez) |
+| `veo3.1_fast` | Text nebo Image | $0.15/s (audio) / $0.10/s (bez) |
+
+### API architektura
+
+**Endpoint base:** `https://api.dev.runwayml.com`
+**Auth:** `Authorization: Bearer key_xxxxxxx` (klíče začínají `key_`, 128 hex znaků)
+**Povinný header:** `X-Runway-Version: 2024-11-06`
+
+**Async polling pattern (stejný jako Topaz/Luma):**
+```
+POST /v1/text_to_image      → { id: "task_xyz" }         # image
+POST /v1/image_to_video     → { id: "task_xyz" }         # video I2V/T2V
+POST /v1/video_to_video     → { id: "task_xyz" }         # Aleph V2V
+GET  /v1/tasks/{id}         → { status, output: ["https://..."] }
+```
+
+**Status hodnoty:** `PENDING` → `RUNNING` → `SUCCEEDED` / `FAILED` / `THROTTLED`
+- `THROTTLED` = job přijat ale čeká na kapacitu (tier limit) — poll dál
+
+### Image — payload (gen4_image)
+
+```javascript
+POST /v1/text_to_image
+{
+  model: "gen4_image",                    // nebo "gen4_image_turbo"
+  ratio: "1920:1080",                     // "1280:720" | "1920:1080" | atd.
+  promptText: "@Karel stojí před @Budovou",
+  referenceImages: [
+    { uri: "data:image/png;base64,...", tag: "Karel" },
+    { uri: "data:image/png;base64,...", tag: "Budova" }
+  ]
+}
+→ { id } → poll GET /v1/tasks/{id} → { output: ["https://..."] }
+```
+
+**Reference syntaxe:** `@TagName` v promptu — reference se citují jménem tagu.
+**Max refs:** 3 reference obrázky.
+**Data URI limit:** 5 MB encoded (= ~3.3 MB binárního souboru).
+
+### Video — payload (gen4.5)
+
+```javascript
+POST /v1/image_to_video
+{
+  model: "gen4.5",               // nebo "gen4_turbo"
+  promptImage: "data:image/png;base64,...",  // optional pro T2V
+  promptText: "string",
+  ratio: "1280:720",             // "1280:720" | "720:1280" | "1104:832" | atd.
+  duration: 5,                   // integer seconds
+}
+// T2V = vynech promptImage
+→ { id } → poll GET /v1/tasks/{id} → { output: ["https://...video.mp4"] }
+```
+
+### Tier limity
+
+| Tier | Concurrent jobs | Gens/day | Max spend/měs | Podmínka |
+|------|-----------------|----------|---------------|---------|
+| 1 | 1 | 50 | $100 | default |
+| 2 | 3 | 500 | $500 | 1 den po $50 |
+| 3 | 5 | 1000 | $2000 | 7 dní po $100 |
+| 4 | 10 | 5000 | $20000 | 14 dní po $1000 |
+
+Throttled joby se zařadí do fronty a spustí jakmile kapacita uvolní — nestihají 503.
+
+### CORS — status
+
+**Pravděpodobně BLOKOVÁNO.** Runway dokumentace říká: *„For Node.js and Python integrations, we strongly advise against integrating directly"* → doporučuje SDK. Chrome extension sample apps Runway fungují díky Chrome extension CORS bypass (manifest permissions), ne standardnímu browser CORS.
+
+**Nutná proxy:** 2 nové Worker routes:
+```
+POST /runway/image/submit   → POST api.dev.runwayml.com/v1/text_to_image
+POST /runway/video/submit   → POST api.dev.runwayml.com/v1/image_to_video
+GET  /runway/tasks/:id      → GET  api.dev.runwayml.com/v1/tasks/:id     (passthrough poll)
+```
+
+Worker free tier 30s limit = passthrough polling → klient poluje client-side přes Worker.
+
+### Klíčové gotchas
+
+- Klíč musí mít formát `key_` + 128 hex znaků — jinak 401
+- `X-Runway-Version: 2024-11-06` je povinný v každém requestu
+- Credits (API) a kredity webové aplikace (app.runwayml.com) jsou **zcela oddělené** — nesdílí se
+- Data URI image limit: 5 MB encoded — velké PNG refs nutno před odesláním zkomprimovat
+- `THROTTLED` status není chyba — pokračuj v pollingu
+- Gen-4.5 podporuje T2V (bez `promptImage`) i I2V (s `promptImage`)
+
+### Srovnání s existujícími GIS providery
+
+| Vlastnost | Runway Gen-4 Image | Gemini NB2 | Kling V3 Image |
+|-----------|-------------------|------------|----------------|
+| Ref konzistence | ⭐⭐⭐ (character-level) | ⭐⭐ | ⭐⭐ |
+| Max refs | 3 | 14 | 6 |
+| Ref syntaxe | @mention v promptu | inline | image_urls[] |
+| Cena (standard) | $0.08/img | ~$0.045/img | $0.014/img |
+| Cena (turbo) | $0.02/img | — | — |
+| CORS | ❌ proxy | ✓ přímé | ✓ fal.ai |
+
+
 
 **Provider:** PixVerse · `app-api.pixverse.ai`
 **Model string:** `c1`

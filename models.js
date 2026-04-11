@@ -233,54 +233,51 @@ const MODELS = {
     resolutions: ['1K', '2K'],
   },
 
-  // ── WAN 2.7 — přes Replicate API (CORS-blokováno → přes GIS proxy)
-  // T2I: prompt + size(1K/2K) + num_outputs + thinking_mode
-  // Edit: prompt + images[] + size(1K/2K) + num_outputs
-  // Auth: Bearer {replicateKey}, async polling přes proxy
-  // Cena: $0.03/img, polled přes /replicate/wan27/submit + /status
+  // ── WAN 2.7 — Segmind API via proxy ────────────────────
+  // T2I: up to 2K (std) / 4K (Pro), thinking mode, neg prompt
+  // Edit: up to 9 refs, instruction-based editing
+  // Auth: x-api-key header, sync response
   wan27_std: {
-    id: 'wan-video/wan-2.7-image',
+    id: 'wan2.7-image',
     name: 'WAN 2.7',
     type: 'wan27r',
-    provider: 'replicate',
+    provider: 'segmind',
     refs: false,
     maxRefs: 0,
     editModel: false,
     seed: true,
-    negPrompt: false,   // Replicate WAN 2.7 nemá negative_prompt
+    negPrompt: true,
   },
   wan27_pro: {
-    id: 'wan-video/wan-2.7-image',
+    id: 'wan2.7-image-pro',
     name: 'WAN 2.7 Pro',
     type: 'wan27r',
-    provider: 'replicate',
+    provider: 'segmind',
     refs: false,
     maxRefs: 0,
     editModel: false,
-    thinkingMode: true,  // Pro = thinking_mode:true
     seed: true,
-    negPrompt: false,
+    negPrompt: true,
   },
   wan27_edit: {
-    id: 'wan-video/wan-2.7-image',
+    id: 'wan2.7-image',
     name: 'WAN 2.7 Edit',
     type: 'wan27r',
-    provider: 'replicate',
+    provider: 'segmind',
     refs: true,
-    maxRefs: 4,
+    maxRefs: 9,
     editModel: true,
     seed: true,
     negPrompt: false,
   },
   wan27_pro_edit: {
-    id: 'wan-video/wan-2.7-image',
+    id: 'wan2.7-image-pro',
     name: 'WAN 2.7 Pro Edit',
     type: 'wan27r',
-    provider: 'replicate',
+    provider: 'segmind',
     refs: true,
-    maxRefs: 4,
+    maxRefs: 9,
     editModel: true,
-    thinkingMode: false,  // thinking_mode jen pro T2I
     seed: true,
     negPrompt: false,
   },

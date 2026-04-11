@@ -53,6 +53,18 @@ function selectModel(key) {
   document.getElementById('grokParams').style.display     = m.type === 'proxy_xai'   ? '' : 'none';
   document.getElementById('lumaParams').style.display     = m.type === 'proxy_luma'  ? '' : 'none';
   document.getElementById('qwen2Params').style.display    = m.type === 'qwen2'       ? '' : 'none';
+  document.getElementById('wan27Params').style.display    = m.type === 'wan27r'      ? '' : 'none';
+  // WAN 2.7: hide T2I-only rows in Edit mode, show Pro-only options
+  if (m.type === 'wan27r') {
+    const isEdit = !!m.editModel;
+    const isPro  = m.id?.includes('-pro');
+    document.getElementById('wan27ThinkingRow').style.display = isEdit ? 'none' : '';
+    document.getElementById('wan27CountRow').style.display    = isEdit ? 'none' : '';
+    document.getElementById('wan27NegRow').style.display      = (isEdit || !m.negPrompt) ? 'none' : '';
+    document.getElementById('wan27SizeRow').style.display     = isEdit ? 'none' : '';
+    // Pro 4K options visibility
+    document.querySelectorAll('#wan27Size option[data-pro]').forEach(o => o.style.display = isPro ? '' : 'none');
+  }
   document.getElementById('mysticParams').style.display      = m.type === 'proxy_mystic'      ? '' : 'none';
   document.getElementById('freepikEditParams').style.display = m.type === 'proxy_freepik_edit' ? '' : 'none';
 
@@ -284,6 +296,7 @@ function switchView(v) {
   document.getElementById('assetsView').classList.toggle('show', v === 'assets');
   document.getElementById('paintView').classList.toggle('show', v === 'paint');
   document.getElementById('setupView').style.display = v === 'setup' ? 'flex' : 'none';
+  if (v === 'setup') initSpendingUI();
   const videoView = document.getElementById('videoView');
   if (videoView) videoView.classList.toggle('show', v === 'video');
   if (v === 'gallery') {

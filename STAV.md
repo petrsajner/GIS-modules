@@ -1,231 +1,228 @@
-# GIS — STAV PROJEKTU
-*Aktualizováno konec session · 11. 4. 2026*
+# STAV.md — Generative Image Studio
 
-## Aktuální verze
-| Soubor | Verze | Datum |
+## Aktuální verze: v195en
+## Příští verze: v196en
+## Datum: 2026-04-12
+## Worker verze: 2026-13 (+Segmind, -Replicate)
+
+---
+
+## Co je v195en (oproti v194en)
+
+### 1. Seedance 2.0 — 6 video modelů
+- **Modely:** T2V/I2V/R2V × Standard + Fast (6 kombinací)
+- **Endpointy:** `bytedance/seedance-2.0/{text-to-video|image-to-video|reference-to-video}` + `/fast/`
+- **Multi-shot via prompt:** `[lens switch]`, timeline `[0-3s]...`, `Shot 1:...` (čistě prompt-driven, žádný API parametr)
+- **R2V:** 9 image refs + 3 video slots (R2 upload → URLs) + 3 audio URL paste inputs
+- **`callSeedance2Video()`** v video.js — T2V/I2V/R2V dispatch
+- **`seedance2Params` panel:** duration slider 4–15s + Auto, resolution 480p/720p radio, seed, R2V sekce
+- **Spending:** `_seedance2_std` ($0.303/s), `_seedance2_fast` ($0.242/s), `_seedance2_r2v_fast` ($0.181/s)
+
+### 2. Video ref renaming systém
+- **Seedance 2.0 R2V:** `[Image1]`, `[Video1]`, `[Audio1]` s prefixem `[` a live rewrite
+- **PixVerse Fusion fix:** `@pic1` (bylo `@Element1`) — display label, mention text, bidirectional rewrite opraveny
+- **Funkce upraveny:** `getVideoRefDisplayLabel`, `getVideoRefMentionText`, `getVideoRefMentionPrefix`, `isVideoRefLabelFixed`, `videoPromptModelToUserLabels`, `videoPromptUserLabelsToModel`, `rewriteVideoPromptForModel`
+
+### 3. Filter layout fix
+- `.gal-filter-models` — odstraněn `max-width:420px`
+- `.gal-filter-group:first-child` — přidán `flex:1` → MODEL chipy zabírají celou šířku, DATE zůstává kompaktní vpravo
+
+### 4. Video spending overhaul
+- **Nahrazeno:** single `_fal_video: $0.040/s` → 25+ per-model cenových klíčů
+- **`_getVideoSpendKey(modelKey, hasAudio)`** v video.js — mapuje model + audio flag → správný cenový tier
+- **Kling V3:** Std $0.084/$0.126, Pro $0.112/$0.168; O3: Std $0.168/$0.224, Pro $0.224/$0.280
+- **Seedance 1.5:** $0.052; Vidu Q3: $0.077; WAN 2.6: $0.050/$0.100
+- **PixVerse spending fix:** `switchView('setup')` volá `initSpendingUI()` pro refresh
+
+### 5. WAN 2.7 Image: migrace na Segmind
+- **Provider:** Segmind API (`https://api.segmind.com/v1/{model}`)
+- **Auth:** `x-api-key` header
+- **Model IDs:** `wan2.7-image` (standard, 2K), `wan2.7-image-pro` (Pro, 4K)
+- **API styl:** synchronní — vrací surový PNG binární soubor přímo (ne JSON s URL)
+- **Payload formát:**
+  ```json
+  {
+    "messages": [{"role": "user", "content": [{"type": "text", "text": "prompt"}]}],
+    "prompt": "prompt text (top-level, required)",
+    "size": "2K",
+    "watermark": false,
+    "negative_prompt": "...",
+    "seed": 42
+  }
+  ```
+- **Size parametr:** preset stringy "1K" / "2K" / "4K" (ne pixel hodnoty)
+- **Response:** raw PNG binary (Content-Type: image/png)
+- **Edit mode:** refs jako image URLs v messages content (upload přes R2)
+- **`callSegmindWan27()`** v proxy.js — builds payload, R2 upload pro edit refs, reads binary blob → base64
+- **Segmind API key** v Setup (localStorage: `gis_segmind_apikey`)
+- **Registrace:** https://www.segmind.com/api-keys
+
+### 6. Replicate kompletně odstraněn
+- 0 referencí v celém GIS kódu
+- Odstraněno z proxy.js: `callReplicateWan27()` (~100 řádků)
+- Odstraněno ze setup.js: Replicate API key
+- Odstraněno z template.html: Replicate key UI sekce
+- Odstraněno ze spending.js: `replicate` z SPEND_PROVIDERS
+- Worker: odstraněny 3 importy + 8 routes pro replicate-wan27/wan27v/wan27e handlery
+- Worker: odstraněny 2 GET routes pro /replicate/video/ a /replicate/image/ serving
+
+### 7. WAN 2.7 params panel fix
+- **Bug:** `wan27Params` panel existoval v template.html ale `model-select.js` ho nikdy nezobrazoval
+- **Fix:** přidán toggle `document.getElementById('wan27Params').style.display = m.type === 'wan27r' ? '' : 'none'`
+- **T2I zobrazuje:** Resolution (1K/2K/4K optgroups), Thinking mode, Image count 1–4, Negative prompt, Seed, Safety
+- **Edit mode:** skrývá T2I-only řádky (Resolution, Thinking, Count, Neg prompt)
+- **Pro 4K options:** `data-pro` atribut na option elementech, skryté pro Standard modely
+- **Resolution select:** organizován v optgroups (1K, 2K, 4K Pro only)
+
+### 8. apiKeyWarning modal fix
+- **Bug:** CSS pro `#apiKeyWarning` modal existovalo ale HTML element chyběl kompletně
+- **Důsledek:** `showApiKeyWarning()` crashovala s TypeError (`null.textContent`), `generate()` tiše selhala
+- **Fix:** přidán kompletní `<div id="apiKeyWarning">` modal s `akwTitle`, `akwMsg`, tlačítky "→ Go to Setup" a "Close"
+
+### 9. fal.js WAN 2.7 Edit fix
+- **Bug:** `callWan27` edit branch posílal `image_url` (string) ale fal.ai endpoint vyžaduje `image_urls` (array)
+- **Fix:** změněno na array, podporuje 1–4 refs
+
+---
+
+## Změněné moduly
+
+| Modul | Řádků | Popis změn |
+|-------|-------|------------|
+| video.js | 4921 | Seedance 2.0, spending key lookup, R2V slots |
+| template.html | 5216 | Seedance 2 panel, filter CSS, WAN 2.7 params, apiKeyWarning modal, Segmind Setup, 4K options |
+| spending.js | 218 | 25+ video spend keys, segmind provider |
+| models.js | 576 | Seedance 2.0 modely, WAN 2.7 → Segmind (provider, IDs, maxRefs:9) |
+| generate.js | 898 | Segmind key validation, callSegmindWan27 dispatch |
+| setup.js | 311 | Segmind key init + handler, removed Replicate |
+| model-select.js | 313 | wan27Params toggle, edit/Pro row visibility, spending refresh |
+| proxy.js | 449 | callSegmindWan27 (binary response handling), removed callReplicateWan27 |
+| fal.js | 677 | WAN 2.7 edit image_urls fix |
+
+## Worker soubory
+
+| Soubor | Řádků | Popis |
 |--------|-------|-------|
-| Kód EN | gis_v194en.html | 11. 4. 2026 |
-| Worker | gis-proxy v2026-12 | 11. 4. 2026 |
+| index.js | 243 | v2026-13, +Segmind route (1), -Replicate (8 routes + 3 imports) |
+| handlers/segmind.js | 60 | NOVÝ — Segmind passthrough, binary image response |
 
-**Příští verze:** v195en
-
-> Build: `cd /home/claude && node build.js 195en`
+### Worker deploy stav
+- `handlers/segmind.js` — NOVÝ, nasazený
+- `handlers/replicate-wan27.js` — SMAZAT (dead code)
+- `handlers/replicate-wan27v.js` — SMAZAT (dead code)
+- `handlers/replicate-wan27e.js` — SMAZAT (dead code)
 
 ---
 
-## Session start — POVINNÝ první krok
-```bash
-echo "=== VERSION CHECK ===" && \
-echo "paint.js — inpaintQueue:" && grep -c "inpaintQueue" /mnt/project/paint.js && \
-echo "paint.js — openInpaintFromNav:" && grep -c "openInpaintFromNav" /mnt/project/paint.js && \
-echo "paint.js — qo-item:" && grep -c "qo-item" /mnt/project/paint.js && \
-echo "paint.js — maskBlur:" && grep -c "maskBlur" /mnt/project/paint.js && \
-echo "fal.js — _runSimpleInpaint:" && grep -c "_runSimpleInpaint" /mnt/project/fal.js && \
-echo "fal.js — callFluxFill opts:" && grep -c "opts = {}" /mnt/project/fal.js && \
-echo "gallery.js — _mzScale:" && grep -c "_mzScale" /mnt/project/gallery.js && \
-echo "gallery.js — mInpaintRefBtn:" && grep -c "mInpaintRefBtn" /mnt/project/gallery.js && \
-echo "template.html — inpaintNavTab:" && grep -c "inpaintNavTab" /mnt/project/template.html && \
-echo "template.html — src-chip:" && grep -c "src-chip" /mnt/project/template.html && \
-echo "template.html — inpaintQueueList:" && grep -c "inpaintQueueList" /mnt/project/template.html && \
-echo "model-select.js — setup:6:" && grep -c "setup: 6" /mnt/project/model-select.js && \
-echo "setup.js — getProxyUrl:" && grep -c "getProxyUrl" /mnt/project/setup.js && \
-echo "setup.js — onSetupPixverseKey:" && grep -c "onSetupPixverseKey" /mnt/project/setup.js && \
-echo "video.js — _saveVideoResult:" && grep -c "_saveVideoResult" /mnt/project/video.js && \
-echo "video.js — _pixverseUpload:" && grep -c "_pixverseUpload" /mnt/project/video.js && \
-echo "video.js — pixverse_c1_fusion:" && grep -c "pixverse_c1_fusion" /mnt/project/video.js && \
-echo "video.js — pixverse_v6_t2v:" && grep -c "pixverse_v6_t2v" /mnt/project/video.js && \
-echo "video.js — fusionPrompt:" && grep -c "fusionPrompt" /mnt/project/video.js && \
-echo "output-placeholder.js — insertBefore:" && grep -c "insertBefore" /mnt/project/output-placeholder.js && \
-echo "output-placeholder.js — _suppressPlaceholderScroll:" && grep -c "_suppressPlaceholderScroll" /mnt/project/output-placeholder.js && \
-echo "db.js — assets_meta:" && grep -c "assets_meta" /mnt/project/db.js && \
-echo "spending.js — pixverse:" && grep -c "pixverse" /mnt/project/spending.js && \
-echo "ai-prompt.js — ETM_REFRAME_KNOWLEDGE:" && grep -c "ETM_REFRAME_KNOWLEDGE" /mnt/project/ai-prompt.js && \
-echo "ai-prompt.js — openCharacterSheet:" && grep -c "openCharacterSheet" /mnt/project/ai-prompt.js && \
-echo "ai-prompt.js — openCharacterCoverage:" && grep -c "openCharacterCoverage" /mnt/project/ai-prompt.js && \
-echo "ai-prompt.js — openEnvCoverage:" && grep -c "openEnvCoverage" /mnt/project/ai-prompt.js && \
-echo "ai-prompt.js — _ccRefLabel:" && grep -c "_ccRefLabel" /mnt/project/ai-prompt.js && \
-echo "template.html — pixverseParams:" && grep -c "pixverseParams" /mnt/project/template.html && \
-echo "template.html — pixverseOffPeak:" && grep -c "pixverseOffPeak" /mnt/project/template.html && \
-echo "template.html — cs-view:" && grep -c "cs-view" /mnt/project/template.html && \
-echo "template.html — cc-view:" && grep -c "cc-view" /mnt/project/template.html && \
-echo "template.html — ecView:" && grep -c "ecView" /mnt/project/template.html
+## Známé problémy / TODO pro v196en
+
+### Segmind parametry — vyžaduje další ladění
+- **Ověřit Thinking mode:** parametr `thinking_mode` — potřeba zjistit zda Segmind ho podporuje a pod jakým názvem
+- **Ověřit n (batch count):** Segmind pravděpodobně nepodporuje `n` parametr — aktuálně odstraněn, count řeší paralelní volání
+- **Ověřit 4K resolution:** Pro model by měl podporovat "4K" preset — neotestováno
+- **Ověřit Edit mode:** ref images přes R2 upload → URLs v messages content — neotestováno
+- **Size mapping precision:** aktuálně `maxDim > 2048 → "4K"`, `> 1280 → "2K"`, else `"1K"` — ověřit zda Segmind akceptuje tyto presets
+- **Seed v response:** Segmind vrací binary PNG, ne JSON — seed z response nedostupný, ukládáme pouze user-zadaný seed
+
+### Template.html popisky — stále říkají "fal.ai"
+- Řádky ~2119-2122: WAN 2.7 model options v image select stále mají popis "fal.ai"
+- Změnit na "Segmind"
+
+### Pending z v194en
+1. Fix copyright to 2026 — `GIS_COPYRIGHT` a všechny výskyty "2025" v branding textech
+2. Rename output HTML z `google-image-studio_vXXen.html` → `gis_vXXen.html` — fix v `build.js`
+
+---
+
+## TODO (prioritní pořadí)
+
+1. **Doladění Segmind parametrů** (viz výše)
+2. Style Library "My Presets"
+3. Z-Image Edit (`fal-ai/z-image/edit`)
+4. Clarity 8×/16× via proxy
+5. Claid.ai via proxy
+6. WAN audio (DashScope)
+7. Vidu Q3 Turbo (`fal-ai/vidu/q3/turbo/*`)
+8. Wan 2.6 R2V
+9. Ideogram V3
+10. Recraft V4
+11. GPT Image 1.5
+12. Hailuo 2.3
+13. Use button for V2V models
+
+---
+
+## Klíčové technické detaily
+
+### Segmind API formát (potvrzený a funkční)
 ```
-Vše musí vrátit ≥ 1.
-
-> **Syntax check:**
-> ```bash
-> awk '/<script>$/{found=1;next} found && /^<\/script>/{exit} found{print}' \
->   /home/claude/dist/gis_v195en.html > /tmp/check.mjs
-> node --input-type=module < /tmp/check.mjs 2>&1 | head -3
-> # OK = "window is not defined"
-> ```
-
----
-
-## Kde jsme přestali
-
-v194en dokončen a otestován. Session ukončena čistě 11. 4. 2026.
-
-**v194en = Special Tools (all 3) + Setup stripe fix + Rerun scroll fix**
-
----
-
-## Co bylo uděláno (11. 4. 2026)
-
-### v194en — Special Tools Complete + UX Fixes
-
-**Setup stripe visibility fix:**
-- Alternating section background `.03` → `.06` (doubled opacity, 5 sections)
-
-**Rerun scroll fix (output-placeholder.js):**
-- `_suppressPlaceholderScroll` flag prevents `scrollIntoView` during rerunJob
-- New renders still scroll to card; reruns stay in place
-
-**Special Tool #1 — Character Sheet:**
-- Sub-view with blue info box explaining Method A (with ref) vs Method B (description only)
-- AI analyzes ref via OpenRouter (primary) / Gemini (fallback)
-- Two prompt cards: green (A, with ref) + red (B, no ref)
-- Golden "↗ Use as Prompt" buttons
-- Session persists across close/reopen
-- "↻ New analysis" button resets and re-analyzes
-
-**Special Tool #2 — Character Coverage (10 shots):**
-- 10 hardcoded camera positions (frontal, profiles, 3/4 views, back, low/high angle, overhead)
-- AI analyzes character appearance from ref
-- Checkbox "Include character description in prompts" — regenerates on toggle
-- `_ccRefLabel(idx)` — model-aware ref mentions (`@Image1` for flux, `Figure 1` for seedream, `image 1` for gemini)
-- Prompts refresh on reopen (after model switch) — mentions + batch info update
-- Individual "↗ Use" per shot + "▶ Batch render all 10" with current settings display
-- Batch calls `generate()` 10× sequentially → queue handles concurrency
-
-**Special Tool #3 — Environment Coverage (10 views, AI-generated):**
-- TWO-STEP AI workflow: vision analysis → text prompt generation
-- Step 1: Vision call analyzes space (objects, positions, lighting, entry points, dimensions)
-- Step 2: Text call generates 10 camera positions following coverage rules:
-  - Shots 1↔2, 3↔4, 5↔6 are counter-views (opposite directions)
-  - Shot 7: center, dominant feature
-  - Shot 8: low angle from floor
-  - Shot 9: overhead/bird's-eye
-  - Shot 10: exterior peek (through window/doorway)
-- `_ecParseShots()` parses `=== SHOT N: label ===` format from AI output
-- Same UI pattern: cards, individual Use, batch render
-- `EC_SYSTEM_PROMPT` enforces cinematographer rules, counter-view pairs, no compass directions
-
-**Shared Special Tools infrastructure:**
-- `resetActiveSpmTool()` dispatches to cs/cc/ec based on `_ccActiveTool`
-- All 3 sub-views properly hidden when switching between tools
-- Modal: 860px wide, 88vh, 18px title
-- Reusable `.cc-` CSS classes shared between Character Coverage and Environment Coverage
-
-**v194en JS řádky: 18869 (z v193en 18175, +694)**
-
-### v193en — PixVerse C1+V6 Video + UX Improvements
-
-**Worker (gis-proxy v2026-12):**
-- Nový handler `handlers/pixverse.js` — passthrough architektura, 6 routes:
-  - `POST /pixverse/t2v` → `/openapi/v2/video/text/generate`
-  - `POST /pixverse/i2v` → `/openapi/v2/video/img/generate` (NE /image/)
-  - `POST /pixverse/transition` → `/openapi/v2/video/transition/generate`
-  - `POST /pixverse/fusion` → `/openapi/v2/video/fusion/generate`
-  - `POST /pixverse/upload-image` → `/openapi/v2/image/upload` (multipart)
-  - `POST /pixverse/status` → `/openapi/v2/video/result/{video_id}`
-- `safeJson()` — bezpečný JSON parse
-- `splitBody()` — strip apiKey, forwarduj vše (žádné budoucí Worker updaty pro nové params)
-
-**GIS client — 7 video modelů (4× C1, 3× V6):**
-
-| Model key | Režim | Refs | Endpoint | Multi-clip |
-|-----------|-------|------|----------|------------|
-| `pixverse_c1_t2v` | T2V | 0 | t2v | ❌ (neg prompt workaround) |
-| `pixverse_c1_i2v` | I2V | 1 | upload → i2v | ❌ |
-| `pixverse_c1_transition` | Transition | 2 | upload 2× → transition | ✅ (inverted API) |
-| `pixverse_c1_fusion` | Fusion | 1–7 | upload N× → fusion | ❌ |
-| `pixverse_v6_t2v` | T2V | 0 | t2v | ✅ |
-| `pixverse_v6_i2v` | I2V | 1 | upload → i2v | ✅ |
-| `pixverse_v6_transition` | Transition | 2 | upload 2× → transition | ✅ |
-
-**Klíčové implementační detaily:**
-- `_pixverseUpload()` helper — reusable upload → img_id
-- `callPixverseVideo()` — dispatch 4 režimů (T2V/I2V/Transition/Fusion)
-- `modelId` field ('c1' nebo 'v6') → `pvModelId` v API payloadu
-- `supportsMultiClip` flag → řídí zobrazení checkboxu + odesílání
-- Multi-clip API je INVERTED: `true` = single shot, `false` = multi. GIS posílá `!multiClip`.
-- C1 T2V/I2V nepodporují `generate_multi_clip_switch` (400017) → workaround: neg prompt inject
-- `generate_audio_switch` explicitně ve všech payloadech
-- Fusion: `ref_name` = `pic1`, `pic2`... (PixVerse vyžaduje čistě alfanumerické)
-- Fusion prompt auto-rewrite: `@Element3` → `@pic3`, `@Ref_031` → `@pic1`, `@Image2` → `@pic2`
-- Camera Movement: disabled (v4/v4.5 only, C1 vrací 400017). Kód + UI select připraveny.
-- Off-peak mode: `off_peak_mode: true`, 15s poll, 2h timeout
-- Duration: 1–15s slider
-- Status kódy: 1=done, 2/8=failed, 5=generating, 7=moderation, 9=queued
-
-**Card ordering fix (video + image):**
-- Video: `videoShowPlaceholder` změněno z `prepend` na `appendChild` — nové karty na konec
-- Video: `renderVideoResultCard` nyní `replaceChild` in-place místo remove+prepend
-- Video: `rerunVideoJob` — `insertBefore` + `remove` (in-place)
-- Image: `rerunJob` (output-placeholder.js) — `addToQueue` → `insertBefore` staré karty → remove
-- Ref thumbnaily nyní viditelné na error kartách (`thumb` přidáno do videoRefsAtSubmit snapshotu)
-
-**Setup UI redesign:**
-- Střídavé `rgba(255,255,255,.03)` pozadí API key sekcí (v194: zvýšeno na .06)
-- Accent-colored labels (font-weight:600)
-- Žlutý "Get key →" link u VŠECH providerů (Google, fal.ai, xAI, Luma, Freepik, Topaz, Replicate, PixVerse, OpenRouter)
-- PixVerse key input + spendBlock_pixverse
-- Proxy URL popis: "+PixVerse"
-
-**v193en JS řádky: 18175 (z v192en 17785, +390)**
-
----
-
-## Stav inpaint systému (k 10. 4. 2026)
-
-Beze změn oproti v191en.
-
----
-
-## Aktivní TODO (v pořadí priority)
-- [ ] **#0** Otestovat FLUX Krea inpaint s platným klíčem
-- [ ] **#1** Style Library "My Presets"
-- [ ] #4 Clarity 8×/16×
-- [ ] #5 Claid.ai
-- [ ] #6 WAN audio (DashScope)
-- [ ] #7 Vidu Q3 Turbo
-- [ ] #9 Seedance 2.0
-- [ ] #10 Ideogram V3
-- [ ] #11 Recraft V4
-- [ ] #12 GPT Image 1.5
-- [ ] #13 Hailuo 2.3
-- [ ] WAN 2.7 R2V — ověřit endpoint
-- [ ] MuAPI klíč do Setup
-
----
-
-## Modulární struktura
-### Build pořadí (NEMĚNIT)
-```
-models → styles → setup → spending → model-select → assets → refs →
-generate → fal → output-placeholder → proxy → gemini →
-output-render → db → gallery → toast → paint → ai-prompt → video
+POST https://api.segmind.com/v1/wan2.7-image-pro
+Headers: x-api-key: KEY, Content-Type: application/json
+Body: {
+    "messages": [{"role": "user", "content": [{"type": "text", "text": "prompt"}]}],
+    "prompt": "prompt text",
+    "size": "2K",
+    "watermark": false,
+    "negative_prompt": "...",
+    "seed": 42
+}
+Response: raw PNG binary (Content-Type: image/png)
 ```
 
-### Změněné moduly v v194en (oproti v193en)
-| Modul | Změny |
-|-------|-------|
-| `template.html` | Setup stripes .03→.06; Special Tools complete (3 tools CSS+HTML); specialToolModal 860px/88vh; golden Use buttons |
-| `ai-prompt.js` | +Character Sheet (openCharacterSheet, _csRunAnalysis, _csGeneratePrompts, csUsePrompt); +Character Coverage (CC_SHOTS, _ccRefLabel, ccRegeneratePrompts, ccBatchRender); +Environment Coverage (EC_SYSTEM_PROMPT, _ecRunAnalysis, _ecParseShots, ecBatchRender); resetActiveSpmTool dispatcher |
-| `output-placeholder.js` | +_suppressPlaceholderScroll flag; rerunJob no-scroll fix |
+### Segmind Worker handler (`handlers/segmind.js`)
+- Přijímá `{ apiKey, model, messages, parameters }` z GIS
+- Spreaduje `parameters` na top-level: `Object.assign(sgPayload, parameters)`
+- Posílá na `https://api.segmind.com/v1/${model}` s `x-api-key` headerem
+- Detekuje `Content-Type: image/*` → passthrough binary s CORS headers
+- JSON responses (errory) parsuje a forwarduje normálně
 
-### Změněné moduly v v193en (oproti v192en)
-| Modul | Změny |
-|-------|-------|
-| `video.js` | +PixVerse C1+V6: 7 modelů, _pixverseUpload, callPixverseVideo (4 režimy), fusion prompt auto-rewrite, multi-clip inverted logic, card ordering fix (appendChild + replaceChild), ref thumb v snapshotu, aspect ratio restore |
-| `output-placeholder.js` | rerunJob in-place (insertBefore + remove) |
-| `setup.js` | +gis_pixverse_apikey, +onSetupPixverseKey, +API_KEY_FIELDS |
-| `spending.js` | +_pixverse_video $0.05/s, +pixverse provider |
-| `template.html` | +PixVerse C1+V6 optgroups, +pixverseParams panel (quality/camera disabled/neg prompt/multi-clip/off-peak/seed), setup redesign (alternating bg, accent labels, Get Key links) |
+### callSegmindWan27 v proxy.js
+- Builds messages + top-level `prompt` (Segmind vyžaduje obojí)
+- Edit mode: upload refs přes R2 (`POST /r2/upload`) → public URLs v messages content
+- Konvertuje pixel strings na presets: `maxDim > 2048 → "4K"`, `> 1280 → "2K"`, else `"1K"`
+- Čte binary response jako blob → base64
+- Detekuje rozměry výsledného obrázku přes `new Image()` pro metadata
 
-### Worker struktura (gis-proxy v2026-12)
-| Handler | Routes |
-|---------|--------|
-| `pixverse.js` (NEW) | 6 routes: t2v, i2v, transition, fusion, upload-image, status |
-| `index.js` | +PixVerse imports + 6 routes, version 2026-12 |
+### Architektura providerů pro WAN 2.7
+| Feature | Provider | Stav |
+|---------|----------|------|
+| WAN 2.7 Image T2I | Segmind (proxy) | ✅ Funkční |
+| WAN 2.7 Image Edit | Segmind (proxy) | ⚠ Neotestováno |
+| WAN 2.7 Video I2V | fal.ai (direct) | ✅ Funkční |
+| WAN 2.7 Video T2V | fal.ai (direct) | ✅ Funkční |
+| WAN 2.7 Video Edit | fal.ai (direct) | ✅ Funkční |
+
+---
+
+## Pravidla a principy
+
+- **⚠ CRITICAL WORKFLOW — `/mnt/project/` je VŽDY stale. NIKDY ho nepoužívat.** Zdrojové moduly musí přijít z GitHubu (via `web_fetch` blob URLs) nebo přímým uploadem od Petra.
+- **Session start:** (1) načíst `STAV.md` z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) build s `node build.js NNNen → dist/`.
+- **Syntax check:** `awk '/<script>$/...' | node --input-type=module` → OK = "window is not defined"
+- **NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele.**
+- **Vždy důkladně prozkoumat** (web search, probe APIs) než prohlásit že něco nejde.
+- **Research API maturity a regionální dostupnost** před integrací nových modelů.
+- **fal.ai vs. direct APIs:** fal.ai je ~15–30 % dražší ale preferovaný pro nepravidelné použití. Přímé provider APIs preferovány když CORS-kompatibilní. Proxy (CF Worker) povinný když ani jedno nefunguje.
+- **Worker free tier:** 30s wall-clock limit — nikdy nepollovat uvnitř Workeru.
+- **Snap count v `addToQueue`:** každý nový model musí mít svůj count field v count expresi.
+- **`_prevVideoModelKey`** vždy místo `getActiveVideoModelKey()` když je potřeba předchozí model.
+- **Kling video:** nikdy neposílat `prompt: ""` — API rejectne s 422.
+- **`inpaintQueue[]` results** ukládat jen do galerie, nikdy neaktualizovat paint canvas.
+- **fal-inpaint.js** (NE `fal.js`) je Worker handler pro fal.ai queue. Import: `'./handlers/fal-inpaint.js'`.
+- **PixVerse gotchas:** I2V endpoint je `/video/img/generate` (NE `/image/`). `multi_clip_switch` API je INVERTED.
+- **Replicate auth:** `Bearer` token; fal.ai: `Key` token; Segmind: `x-api-key` header.
+- **Segmind response:** raw binary image (PNG), ne JSON. Worker musí passthrough binary s CORS headers.
+- **Segmind size:** preset stringy "1K"/"2K"/"4K", ne pixel hodnoty.
+- **Segmind prompt:** vyžaduje top-level `prompt` pole navíc k messages formátu.
+- **OpenRouter (Claude Sonnet 4.6)** je PRIMARY agent pro všechny tool features. Gemini Flash je POUZE fallback.
+- **Rozhodnutí nedělat za Petra** — prezentovat možnosti a nechat ho rozhodnout.
+
+---
+
+## Nástroje a resources
+
+- **Kódová báze:** `petrsajner/GIS-modules` na GitHubu
+- **Proxy:** Cloudflare Workers na `gis-proxy.petr-gis.workers.dev`; R2 bucket `gis-magnific-videos`
+- **AI provideři:** fal.ai, Google Gemini/Imagen, Luma, Kling, Segmind (WAN 2.7 Image), Freepik/Magnific, Topaz, PixVerse, xAI/Grok, OpenRouter
+- **Dokumenty:** `STAV.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `API_MODELS.md`, `COPYRIGHT_PROTECTION.md`
+- **Kontakt:** info.genimagestudio@gmail.com; LinkedIn: linkedin.com/in/sajner

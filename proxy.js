@@ -156,112 +156,6 @@ async function callProxyLuma(apiKey, proxyUrl, prompt, model, refs, snap) {
   throw new Error('Luma timeout — generation did not complete within 10 minutes');
 }
 
-// ══════════════════════════════════════════════════════════
-// REPLICATE — WAN 2.7 Image (T2I + Edit)
-// Worker endpoints: POST /replicate/wan27/submit + POST /replicate/wan27/status
-// Replicate API: async polling, output = array of image URLs
-// ══════════════════════════════════════════════════════════
-
-async function callReplicateWan27(replicateKey, proxyUrl, prompt, model, refs, snap, onStatus) {
-  const isEdit      = !!model.editModel;
-  const size        = snap.size || '2048*1152';
-  const useThinking = !isEdit && !!snap.thinkingMode;
-  const seed        = snap.seed ? parseInt(snap.seed) : undefined;
-
-  // Spočítej simplified aspect ratio z size stringu ("2048*1152" → "16:9")
-  function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
-  const [sw, sh] = size.split('*').map(Number);
-  const g = sw && sh ? gcd(sw, sh) : 1;
-  const computedRatio = sw && sh ? `${sw/g}:${sh/g}` : '—';
-
-  // num_outputs vždy 1 — paralelismus řeší Promise.allSettled v generate.js
-  const input = { prompt, size, num_outputs: 1 };
-  if (useThinking) input.thinking_mode = true;
-  if (seed !== undefined) input.seed = seed;
-
-  // Edit mode: collect image refs
-  if (isEdit) {
-    const images = [];
-    for (const ref of (refs || []).slice(0, 4)) {
-      const apiRef = await getRefDataForApi(ref, REF_MAX_PX);
-      images.push(`data:${apiRef.mimeType};base64,${apiRef.data}`);
-    }
-    if (!images.length) throw new Error('WAN 2.7 Edit: upload aspoň jeden obrázek do ref panelu.');
-    input.images = images;
-  }
-
-  // Submit prediction
-  onStatus?.('⟳ Odesílám…');
-  const submitResp = await fetch(`${proxyUrl}/replicate/wan27/submit`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ replicateKey, input }),
-  });
-  if (!submitResp.ok) {
-    const err = await submitResp.json().catch(() => ({}));
-    throw new Error(`Replicate submit ${submitResp.status}: ${err.detail || err.title || JSON.stringify(err)}`);
-  }
-  const submitData = await submitResp.json();
-  const predictionId = submitData.id;
-  if (!predictionId) throw new Error('Replicate: no prediction ID returned.');
-
-  // Poll until succeeded
-  const MAX_POLLS = 200;   // 200 × 3s = 10 min max
-  const POLL_MS   = 3000;
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise(r => setTimeout(r, POLL_MS));
-    onStatus?.(`⟳ Generuji… (${(i + 1) * 3}s)`);
-
-    const statusResp = await fetch(`${proxyUrl}/replicate/wan27/status`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ replicateKey, predictionId }),
-    });
-    if (!statusResp.ok) continue;
-    const statusData = await statusResp.json();
-
-    if (statusData.status === 'failed') {
-      throw new Error(`Replicate WAN 2.7 failed: ${statusData.error || 'unknown error'}`);
-    }
-    if (statusData.status === 'succeeded' && statusData.output?.length) {
-      const imgUrl = statusData.output[0];
-      onStatus?.('⟳ Stahuji obrázek…');
-
-      const imgResp = await fetch(imgUrl);
-      if (!imgResp.ok) throw new Error(`WAN 2.7: download failed (${imgResp.status})`);
-      const blob = await imgResp.blob();
-      const mimeType = blob.type || 'image/webp';
-      const base64 = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result.split(',')[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(blob);
-      });
-
-      // Detekuj skutečné rozměry z blob
-      const actualDims = await new Promise(resolve => {
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload  = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url); };
-        img.onerror = () => { resolve({ w: 0, h: 0 }); URL.revokeObjectURL(url); };
-        img.src = url;
-      });
-
-      return {
-        type:     'wan27r',
-        images:   [base64],
-        mimeType,
-        model:    model.name,
-        modelKey: getModelKey(model),
-        seed:     statusData.input?.seed != null ? String(statusData.input.seed) : (snap.seed || '—'),
-        size:     actualDims.w ? `${actualDims.w}×${actualDims.h}` : size.replace('*', '×'),
-        ratio:    computedRatio,   // simplified: "16:9" z size stringu
-      };
-    }
-  }
-  throw new Error('Replicate WAN 2.7: timeout — generation did not complete within 10 minutes.');
-}
-
 // ═══════════════════════════════════════════════════════
 // FREEPIK/MAGNIFIC — shared polling helper
 // Polls /magnific/status and returns the result image URL
@@ -384,7 +278,7 @@ async function callFreepikRelight(freepikKey, proxyUrl, imageB64, opts = {}) {
     light_transfer_strength: opts.light_transfer_strength ?? 100,
     change_background:  opts.change_background || false,
     style:              opts.style             || 'smooth',
-    interpolate_from_original: opts.interpolate || false,
+    interpolate:        opts.interpolate       || false,
   };
   const resp = await fetch(`${proxyUrl}/magnific/relight`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -434,4 +328,112 @@ async function callFreepikSkinEnhancer(freepikKey, proxyUrl, imageB64, opts = {}
   if (!task_id) throw new Error('Skin Enhancer: no task_id');
   const url = await _pollFreepikTask(proxyUrl, freepikKey, task_id, 'skin_enhancer');
   return _fetchFreepikResult(url);
+}
+
+// ══════════════════════════════════════════════════════════
+// SEGMIND — WAN 2.7 Image (via Segmind API)
+// Worker endpoint: POST /segmind/image (sync passthrough)
+// Segmind uses OpenAI-like messages format
+// Image URLs in response expire after 24h — must download immediately
+// ══════════════════════════════════════════════════════════
+
+async function callSegmindWan27(segmindKey, proxyUrl, prompt, model, refs, snap, onStatus) {
+  const isEdit = !!model.editModel;
+  const modelId = model.id;  // wan2.7-image or wan2.7-image-pro
+
+  // Build messages content array
+  const content = [];
+  content.push({ text: prompt, type: 'text' });
+
+  // Edit mode: upload ref images to R2 → get public URLs → add to content
+  if (isEdit && refs?.length) {
+    onStatus?.('⟳ Uploading refs…');
+    for (let i = 0; i < Math.min(refs.length, 9); i++) {
+      const ref = refs[i];
+      const apiRef = await getRefDataForApi(ref, REF_MAX_PX);
+      // Convert base64 → Blob → upload to R2
+      const binary = atob(apiRef.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+      const blob = new Blob([bytes], { type: apiRef.mimeType });
+      const uploadResp = await fetch(`${proxyUrl}/r2/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': apiRef.mimeType },
+        body: blob,
+      });
+      if (!uploadResp.ok) throw new Error(`R2 upload failed for ref ${i + 1}: ${uploadResp.status}`);
+      const { url } = await uploadResp.json();
+      if (!url) throw new Error(`R2 upload: no URL for ref ${i + 1}`);
+      content.push({ image: url, type: 'image' });
+    }
+  }
+
+  // Build parameters — Segmind uses preset sizes ("1K", "2K", "4K"), not pixel strings
+  // Segmind also requires top-level `prompt` field (messages alone not enough)
+  const parameters = { watermark: false, prompt };
+  if (!isEdit) {
+    // Convert pixel string "2048*1152" → preset "1K"/"2K"/"4K"
+    const sizeStr = snap.size || '2048*1152';
+    const maxDim = Math.max(...sizeStr.split('*').map(Number));
+    parameters.size = maxDim > 2048 ? '4K' : maxDim > 1280 ? '2K' : '1K';
+    if (snap.negPrompt) parameters.negative_prompt = snap.negPrompt;
+  }
+  if (snap.seed) parameters.seed = parseInt(snap.seed);
+
+  // Submit to Worker → Segmind
+  onStatus?.('⟳ Generating…');
+  const resp = await fetch(`${proxyUrl}/segmind/image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiKey: segmindKey,
+      model: modelId,
+      messages: [{ role: 'user', content }],
+      parameters,
+    }),
+  });
+
+  // Segmind returns raw image binary (PNG) on success, JSON on error
+  const ct = resp.headers.get('content-type') || '';
+  if (!resp.ok || ct.includes('application/json')) {
+    const err = await resp.json().catch(() => ({}));
+    const detail = err.message || err.output?.message || err.error || JSON.stringify(err).slice(0, 300);
+    throw new Error(`Segmind ${resp.status}: ${detail}`);
+  }
+
+  // Read binary image response
+  onStatus?.('⟳ Processing…');
+  const blob = await resp.blob();
+  const mimeType = blob.type || 'image/png';
+  const base64 = await new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result.split(',')[1]);
+    reader.onerror = rej;
+    reader.readAsDataURL(blob);
+  });
+
+  // Detect actual dimensions
+  const actualDims = await new Promise(resolve => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url); };
+    img.onerror = () => { resolve({ w: 0, h: 0 }); URL.revokeObjectURL(url); };
+    img.src = url;
+  });
+
+  const sizeStr = actualDims.w ? `${actualDims.w}×${actualDims.h}` : (snap.size || '2048×1152').replace('*', '×');
+  function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+  const g = actualDims.w && actualDims.h ? gcd(actualDims.w, actualDims.h) : 1;
+  const ratioStr = actualDims.w ? `${actualDims.w/g}:${actualDims.h/g}` : '—';
+
+  return {
+    type:     'wan27r',
+    images:   [base64],
+    mimeType,
+    model:    model.name,
+    modelKey: getModelKey(model),
+    seed:     snap.seed ?? '—',
+    size:     sizeStr,
+    ratio:    ratioStr,
+  };
 }

@@ -279,6 +279,59 @@ const VIDEO_MODELS = {
     desc: 'I2V · Start + End frame · Native audio · Up to 12s · $0.26/5s · ByteDance',
   },
 
+  // ── Seedance 2.0 — ByteDance via fal.ai ─────────────────
+  // Unified multimodal architecture: text + image + video + audio inputs
+  // Multi-shot via prompt: [lens switch], timeline [0-3s]..., or "Shot 1: ... Shot 2: ..."
+  // R2V refs in prompt: [Image1], [Video1], [Audio1]
+  // generate_audio: always explicit (default ON = unexpected cost)
+  // duration: STRING ("4"–"15" or "auto"), resolution: "480p"|"720p"
+  seedance2_t2v: {
+    name: 'Seedance 2.0', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    desc: 'T2V · Multi-shot · Native audio · Up to 15s · $0.30/s · ByteDance',
+  },
+  seedance2_i2v: {
+    name: 'Seedance 2.0', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Keyframes',
+    desc: 'I2V · Start + End frame · Native audio · Up to 15s · $0.30/s',
+  },
+  seedance2_r2v: {
+    name: 'Seedance 2.0', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/reference-to-video',
+    refMode: 'seedance2_r2v', maxRefs: 9, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Image refs (up to 9)',
+    desc: 'R2V · 9 imgs + 3 videos + 3 audio · Multi-modal · $0.30/s',
+  },
+  seedance2f_t2v: {
+    name: 'Seedance 2.0 Fast', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/fast/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    desc: 'T2V Fast · Multi-shot · Lower latency · $0.24/s',
+  },
+  seedance2f_i2v: {
+    name: 'Seedance 2.0 Fast', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/fast/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Keyframes',
+    desc: 'I2V Fast · Start + End frame · $0.24/s',
+  },
+  seedance2f_r2v: {
+    name: 'Seedance 2.0 Fast', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/fast/reference-to-video',
+    refMode: 'seedance2_r2v', maxRefs: 9, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Image refs (up to 9)',
+    desc: 'R2V Fast · 9 imgs + 3 videos + 3 audio · $0.18/s',
+  },
+
   // ── Vidu Q3 — Shengshu via fal.ai ───────────────────────
   // duration: INTEGER (not string!) · audio field: 'audio' (not generate_audio)
   // I2V: image_url (start) + optional end_image_url → same endpoint
@@ -527,6 +580,17 @@ const KLING_GROUPS = {
       { key: 'seedance15_i2v', label: 'I2V · Start + End frame · $0.26/5s' },
     ],
   },
+  seedance2: {
+    default: 'seedance2_t2v',
+    variants: [
+      { key: 'seedance2_t2v',  label: 'T2V · Text to Video · $0.30/s' },
+      { key: 'seedance2_i2v',  label: 'I2V · Start + End frame · $0.30/s' },
+      { key: 'seedance2_r2v',  label: 'R2V · Multi-modal refs · $0.30/s' },
+      { key: 'seedance2f_t2v', label: 'T2V Fast · $0.24/s' },
+      { key: 'seedance2f_i2v', label: 'I2V Fast · $0.24/s' },
+      { key: 'seedance2f_r2v', label: 'R2V Fast · $0.18/s' },
+    ],
+  },
   vidu_q3: {
     default: 'vidu_q3_t2v',
     variants: [
@@ -649,6 +713,38 @@ const MAGNIFIC_VIDEO_MODELS = {
 };
 
 // ── Global video state ───────────────────────────────────
+
+// Per-model spend key lookup for accurate spending tracking
+// Audio flag doubles price for Kling models that support native audio
+function _getVideoSpendKey(modelKey, hasAudio) {
+  // Kling V3
+  if (modelKey.startsWith('kling_v3_v2v')) return '_kling_mc';
+  if (modelKey.startsWith('kling_v3') && modelKey.includes('_pro')) return hasAudio ? '_kling_v3_pro_audio' : '_kling_v3_pro';
+  if (modelKey.startsWith('kling_v3')) return hasAudio ? '_kling_v3_std_audio' : '_kling_v3_std';
+  // Kling O3
+  if (modelKey.startsWith('kling_o3') && modelKey.includes('_pro')) return hasAudio ? '_kling_o3_pro_audio' : '_kling_o3_pro';
+  if (modelKey.startsWith('kling_o3')) return hasAudio ? '_kling_o3_std_audio' : '_kling_o3_std';
+  // Kling O1
+  if (modelKey === 'kling_o1_kf') return '_kling_o1';
+  // Kling 2.6
+  if (modelKey.startsWith('kling_26')) return hasAudio ? '_kling_26_audio' : '_kling_26';
+  // Kling 2.5 Turbo (labeled as 2.1 Master in GIS)
+  if (modelKey.startsWith('kling_25t')) return '_kling_25t';
+  // Kling 2.1 Standard
+  if (modelKey.startsWith('kling_21')) return '_kling_21_std';
+  // Kling 1.6
+  if (modelKey.startsWith('kling_16')) return '_kling_16';
+  // Seedance 1.5
+  if (modelKey.startsWith('seedance15')) return '_seedance15';
+  // Vidu Q3
+  if (modelKey.startsWith('vidu_q3')) return '_vidu_q3';
+  // WAN 2.6
+  if (modelKey.startsWith('wan26')) {
+    const res = document.getElementById('wanResolution')?.value || '720p';
+    return res === '1080p' ? '_wan26_1080p' : '_wan26_720p';
+  }
+  return '_fal_video'; // fallback
+}
 let videoCurrentFolder = 'all';
 let videoSelectedIds = new Set();
 let videoSearchTimer = null;
@@ -661,6 +757,8 @@ let videoMotionVideoId = null;   // V2V: gallery DB video ID (from gallery pick)
 let topazSrcVideoId    = null;   // Topaz/Magnific: source video gallery ID
 let wan27eSrcVideoId   = null;   // WAN 2.7 Video Edit: source video gallery ID
 let wan27vSrcVideoId   = null;   // WAN 2.7 I2V: optional source video for extension
+// Seedance 2.0 R2V: 3 source video slots (uploaded to R2 → URLs sent as video_urls[])
+let sd2VidSrc = [null, null, null]; // [videoId1, videoId2, videoId3]
 
 // ── Shared: extract video URL from fal.ai response object ──
 function _extractFalVideoUrl(obj) {
@@ -972,6 +1070,24 @@ async function wan27eSetSource(videoId) { wan27eSrcVideoId = videoId; await _src
 async function wan27eDescribeSource() { _srcSlotDescribe('wan27eSrcImg'); }
 async function wan27ePickFromGallery() { switchView('video'); toast('Select a video, then click ▷ Use on it', 'ok'); }
 
+// ── Seedance 2.0 R2V: 3 source video slots ──────────────
+const _sd2VidIds = [
+  { info:'sd2VidSrc1Info', thumb:'sd2VidSrc1Thumb', img:'sd2VidSrc1Img', meta:'sd2VidSrc1Meta', clearBtn:'sd2VidSrc1ClearBtn', describeBtn:'sd2VidSrc1DescribeBtn' },
+  { info:'sd2VidSrc2Info', thumb:'sd2VidSrc2Thumb', img:'sd2VidSrc2Img', meta:'sd2VidSrc2Meta', clearBtn:'sd2VidSrc2ClearBtn', describeBtn:'sd2VidSrc2DescribeBtn' },
+  { info:'sd2VidSrc3Info', thumb:'sd2VidSrc3Thumb', img:'sd2VidSrc3Img', meta:'sd2VidSrc3Meta', clearBtn:'sd2VidSrc3ClearBtn', describeBtn:'sd2VidSrc3DescribeBtn' },
+];
+function sd2VidClear(i) { sd2VidSrc[i] = null; _srcSlotClear(_sd2VidIds[i]); }
+async function sd2VidSet(i, videoId) { sd2VidSrc[i] = videoId; await _srcSlotSet(_sd2VidIds[i], videoId); }
+async function sd2VidDescribe(i) { _srcSlotDescribe(_sd2VidIds[i].img); }
+function sd2VidPick() { switchView('video'); toast('Select a video, then click ▷ Use on it', 'ok'); }
+// Routes "▷ Use" from gallery → next empty R2V slot
+async function sd2VidUseFromGallery(videoId) {
+  const slot = sd2VidSrc.indexOf(null);
+  if (slot === -1) { toast('All 3 video slots full — clear one first', 'err'); return; }
+  await sd2VidSet(slot, videoId);
+  toast(`Video ref ${slot + 1} set`, 'ok');
+}
+
 // Called from ✦ Topaz card button — selects source + switches to Topaz model in panel
 async function openTopazFromGallery(videoId) {
   switchView('gen');
@@ -1011,6 +1127,8 @@ async function useVideoFromGallery(videoId) {
   } else if (VIDEO_MODELS[activeKey]?.type === 'wan27e_video') {
     await wan27eSetSource(videoId);
     toast('Source video set for WAN 2.7 Edit', 'ok');
+  } else if (VIDEO_MODELS[activeKey]?.refMode === 'seedance2_r2v') {
+    await sd2VidUseFromGallery(videoId);
   } else if (VIDEO_MODELS[activeKey]?.refMode === 'video_ref') {
     await v2vSetFromGallery(videoId);
     toast('Motion reference video set', 'ok');
@@ -1341,6 +1459,9 @@ function _applyVideoModel(key) {
     } else if (refNote && m.refMode === 'wan_r2v') {
       refNote.textContent = 'Add image/video refs. Reference them as Character1, Character2... in your prompt.';
       refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'seedance2_r2v') {
+      refNote.innerHTML = 'Image refs → <b>[Image1]</b>, <b>[Image2]</b>... in prompt. Videos &amp; audio via panel above.';
+      refNote.style.display = 'block';
     } else if (refNote && m.refMode === 'video_ref') {
       refNote.textContent = 'Upload action video above for motion reference. Character image below is optional.';
       refNote.style.display = 'block';
@@ -1516,6 +1637,21 @@ function _applyVideoModel(key) {
     if (mcRow) mcRow.style.display = m.supportsMultiClip ? '' : 'none';
   }
 
+  // Seedance 2.0 params panel
+  const sd2Params = document.getElementById('seedance2Params');
+  const isSd2 = m.type === 'seedance2_video';
+  if (sd2Params) sd2Params.style.display = isSd2 ? '' : 'none';
+  if (isSd2) {
+    _setRow('videoCfgRow',     false);
+    _setRow('videoDurRow',     false);
+    _setRow('videoResInfoRow', false);
+    _setRow('videoCountRow',   false);
+    // R2V video/audio slots: only for seedance2_r2v refMode
+    const isR2V = m.refMode === 'seedance2_r2v';
+    const sd2R2VSection = document.getElementById('sd2R2VSection');
+    if (sd2R2VSection) sd2R2VSection.style.display = isR2V ? '' : 'none';
+  }
+
   updateVideoResInfo();
 }
 
@@ -1582,7 +1718,7 @@ function updateVideoResInfo() {
   if (!m) return;
 
   const hasResSwitcher = m.type === 'veo' || m.type === 'luma_video' || m.type === 'wan_video';
-  const hasOwnPanel    = m.type === 'wan27_video' || m.type === 'wan27e_video';
+  const hasOwnPanel    = m.type === 'wan27_video' || m.type === 'wan27e_video' || m.type === 'seedance2_video';
   if (resInfoRow) resInfoRow.style.display = (hasResSwitcher || hasOwnPanel) ? 'none' : '';
   if (!resEl || hasResSwitcher || hasOwnPanel) return;
 
@@ -1659,8 +1795,12 @@ function getVideoRefDisplayLabel(r, idx, m) {
   const mode = m?.refMode || '';
   if (mode === 'keyframe' || mode === 'single_end') return idx === 0 ? 'Start' : 'End';
   if (mode === 'single')    return 'Start';
-  if (mode === 'multi')     return `Element${idx + 1}`;   // Kling O3: fixed API name
+  if (mode === 'multi') {
+    if (m?.pixverseMode === 'fusion') return `@pic${idx + 1}`;
+    return `Element${idx + 1}`;
+  }
   if (mode === 'wan_r2v')   return `Character${idx + 1}`; // Wan R2V: fixed API name
+  if (mode === 'seedance2_r2v') return `[Image${idx + 1}]`; // Seedance 2.0 R2V
   if (mode === 'video_ref') return 'Character ref';
   return r.userLabel || r.autoName || `Ref ${idx + 1}`;
 }
@@ -1669,20 +1809,27 @@ function getVideoRefDisplayLabel(r, idx, m) {
 // (without prefix — prefix is added by getVideoRefMentionPrefix)
 function getVideoRefMentionText(r, idx, m) {
   const mode = m?.refMode || '';
-  if (mode === 'multi')   return `Element${idx + 1}`;
+  if (mode === 'multi') {
+    // PixVerse Fusion: @pic1 format; Kling Elements: @Element1
+    if (m?.pixverseMode === 'fusion') return `pic${idx + 1}`;
+    return `Element${idx + 1}`;
+  }
   if (mode === 'wan_r2v') return `Character${idx + 1}`;
+  if (mode === 'seedance2_r2v') return `Image${idx + 1}]`; // closing ] — prefix adds [
   return (r.userLabel || r.autoName || `ref${idx + 1}`).replace(/\s+/g, '_');
 }
 
 // Returns the trigger prefix for the model — '@' for most, '' for Wan R2V (uses plain words)
 function getVideoRefMentionPrefix(m) {
-  return m?.refMode === 'wan_r2v' ? '' : '@';
+  if (m?.refMode === 'wan_r2v') return '';
+  if (m?.refMode === 'seedance2_r2v') return '[';
+  return '@';
 }
 
 // Returns true for refModes where the thumbnail label is model-fixed (not user-editable)
 function isVideoRefLabelFixed(m) {
   const mode = m?.refMode || '';
-  return ['keyframe', 'single_end', 'single', 'multi', 'wan_r2v', 'video_ref'].includes(mode);
+  return ['keyframe', 'single_end', 'single', 'multi', 'wan_r2v', 'seedance2_r2v', 'video_ref'].includes(mode);
 }
 
 function renderVideoRefPanel() {
@@ -1919,7 +2066,7 @@ async function generateVideo() {
   const promptOptional = veoFramesMode ||
     (model.type !== 'luma_video' && model.type !== 'kling_video' && model.type !== 'pixverse_video' &&
      (refMode === 'single_end' || refMode === 'single' || refMode === 'keyframe' ||
-      refMode === 'wan_r2v' || refMode === 'multi'));
+      refMode === 'wan_r2v' || refMode === 'seedance2_r2v' || refMode === 'multi'));
   if (!rawVideoPrompt && !promptOptional) { toast('Enter a prompt', 'err'); return; }
   // Append style + camera suffix
   const vStyleSuffix = buildStyleSuffix('flux');
@@ -2005,6 +2152,21 @@ async function generateVideo() {
     seed:         document.getElementById('wan27eSeed')?.value?.trim() || null,
   } : null;
 
+  // Seedance 2.0 snap
+  const sd2Snap = model.type === 'seedance2_video' ? {
+    duration:      document.getElementById('sd2Duration')?.value || '5',
+    autoDuration:  document.getElementById('sd2DurAuto')?.checked || false,
+    resolution:    document.querySelector('input[name="sd2Res"]:checked')?.value || '720p',
+    seed:          document.getElementById('sd2Seed')?.value?.trim() || null,
+    // R2V: source video IDs + audio URLs
+    vidSrcIds:     [...sd2VidSrc],
+    audioUrls: [
+      document.getElementById('sd2AudioUrl1')?.value?.trim() || '',
+      document.getElementById('sd2AudioUrl2')?.value?.trim() || '',
+      document.getElementById('sd2AudioUrl3')?.value?.trim() || '',
+    ].filter(Boolean),
+  } : null;
+
   // Submit count jobs (parallel)
   const jobs = [];
   // Snapshot current refs at submit time — include imageData for resilience against asset deletion
@@ -2034,7 +2196,7 @@ async function generateVideo() {
       pixverseKey: (localStorage.getItem('gis_pixverse_apikey') || '').trim(),
       veoResolution, veoRefMode, veoDuration,
       lumaResolution, lumaDurationSel, lumaLoop, lumaColorMode, lumaCharRefAssetId,
-      wan27vSnap, wan27eSnap,
+      wan27vSnap, wan27eSnap, sd2Snap,
       status: 'pending', startedAt: Date.now(),
       motionVideoUrl,
       videoRefsSnapshot: videoRefsAtSubmit,
@@ -2196,6 +2358,7 @@ async function runVideoJob(job) {
   if (model.type === 'wan27_video')      return callWan27Video(job);
   if (model.type === 'wan27e_video')     return callWan27eVideo(job);
   if (model.type === 'pixverse_video')   return callPixverseVideo(job);
+  if (model.type === 'seedance2_video')  return callSeedance2Video(job);
   // seedance_video uses the same fal.ai queue path below
 
   // ── Kling / fal.ai path ──────────────────────────────────
@@ -2298,12 +2461,15 @@ async function runVideoJob(job) {
   console.log('[GIS Video] Submitting payload:', JSON.stringify(logPayload));
   const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(falKey, model.endpoint, payload, job, { label: model.name, timeoutMin: 20 });
 
+  // Determine per-model spend key — no more generic $0.04 fallback
+  const spendKey = _getVideoSpendKey(job.modelKey, !!job.enableAudio);
+
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
     model: job.model.name, modelKey: job.modelKey, prompt: job.prompt,
     params: { duration: job.duration, aspectRatio: job.aspectRatio, enableAudio: job.enableAudio, cfgScale: job.cfgScale },
     duration: job.duration,
     cdnUrl: videoUrl,
-  }, job, ['fal', '_fal_video', 1, job.duration || 5]);
+  }, job, ['fal', spendKey, 1, job.duration || 5]);
   toast(`Video generated · ${elapsed}s`, 'ok');
 }
 
@@ -3850,6 +4016,115 @@ async function callWan27eVideo(job) {
   toast(`WAN 2.7 Edit done · ${elapsed}s`, 'ok');
 }
 
+// ── Seedance 2.0 — fal.ai queue (direct, no proxy) ──────
+// Handles T2V, I2V (start+end frame), R2V (images + videos + audio)
+// Multi-shot: controlled via prompt ([lens switch], timeline [0-3s]..., Shot 1:...)
+// R2V refs in prompt: [Image1], [Video1], [Audio1]
+async function callSeedance2Video(job) {
+  const { model, modelKey, prompt, aspectRatio, enableAudio, falKey,
+          videoRefsSnapshot, sd2Snap } = job;
+
+  if (!falKey) throw new Error('fal.ai API key missing. Add it in Setup tab.');
+
+  const endpoint   = model.endpoint;
+  const durVal     = sd2Snap?.autoDuration ? 'auto' : (sd2Snap?.duration || '5');
+  const resolution = sd2Snap?.resolution || '720p';
+  const seed       = sd2Snap?.seed ? parseInt(sd2Snap.seed) : undefined;
+  const isI2V      = model.refMode === 'single_end';
+  const isR2V      = model.refMode === 'seedance2_r2v';
+
+  const payload = {
+    prompt:         prompt || '',
+    duration:       durVal,   // STRING — "4"–"15" or "auto"
+    resolution,
+    generate_audio: !!enableAudio,
+  };
+  // aspect_ratio: T2V always, I2V/R2V only if not auto
+  if (!isI2V || aspectRatio !== 'auto') payload.aspect_ratio = aspectRatio;
+  if (seed !== undefined) payload.seed = seed;
+
+  // ── I2V: start + optional end frame ──
+  if (isI2V) {
+    const loadRef = async (snap) => {
+      if (!snap) return null;
+      let imgData = snap.imageData;
+      if (!imgData && snap.assetId) {
+        const asset = await dbGet('assets', snap.assetId);
+        imgData = asset?.imageData;
+      }
+      if (!imgData) return null;
+      const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+      return `data:${compressed.mimeType};base64,${compressed.data}`;
+    };
+    const startUri = await loadRef(videoRefsSnapshot?.[0]);
+    const endUri   = await loadRef(videoRefsSnapshot?.[1]);
+    if (!startUri) throw new Error('Start frame (first ref) required for Seedance 2.0 I2V.');
+    payload.image_url = startUri;
+    if (endUri) payload.end_image_url = endUri;
+  }
+
+  // ── R2V: image refs + video refs + audio URLs ──
+  if (isR2V) {
+    // Image refs from videoRefs (standard GIS image assets)
+    const imageUrls = [];
+    for (const snap of (videoRefsSnapshot || [])) {
+      let imgData = snap.imageData;
+      if (!imgData && snap.assetId) {
+        const asset = await dbGet('assets', snap.assetId);
+        imgData = asset?.imageData;
+      }
+      if (imgData) {
+        const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+        imageUrls.push(`data:${compressed.mimeType};base64,${compressed.data}`);
+      }
+    }
+    if (imageUrls.length > 0) payload.image_urls = imageUrls;
+
+    // Video refs — load from gallery DB, upload to R2 for public URLs
+    const videoUrls = [];
+    const proxyUrl = job.proxyUrl || getProxyUrl();
+    for (const vidId of (sd2Snap?.vidSrcIds || [])) {
+      if (!vidId) continue;
+      const full = await dbGet('videos', vidId).catch(() => null);
+      if (!full?.videoData) continue;
+      updateVideoPlaceholderStatus(job, `UPLOADING VIDEO REF…`);
+      const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
+      const url = await uploadVideoToFal(blob, falKey);
+      videoUrls.push(url);
+    }
+    if (videoUrls.length > 0) payload.video_urls = videoUrls;
+
+    // Audio URLs — direct paste from user
+    const audioUrls = (sd2Snap?.audioUrls || []).filter(Boolean);
+    if (audioUrls.length > 0) payload.audio_urls = audioUrls;
+  }
+
+  // Submit, poll, download via shared helper
+  const logPayload = {...payload};
+  ['image_url','end_image_url'].forEach(k => { if (logPayload[k]) logPayload[k] = logPayload[k].slice(0, 40) + '…'; });
+  if (logPayload.image_urls) logPayload.image_urls = logPayload.image_urls.map(u => u.slice(0, 40) + '…');
+  console.log('[Seedance2] submit →', endpoint, JSON.stringify(logPayload));
+
+  const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(
+    falKey, endpoint, payload, job, { label: model.name, timeoutMin: 25 }
+  );
+
+  // Price key: standard vs fast, R2V fast is cheaper
+  const isFast = endpoint.includes('/fast/');
+  const priceKey = isR2V && isFast ? '_seedance2_r2v_fast'
+                 : isFast          ? '_seedance2_fast'
+                 :                   '_seedance2_std';
+  const durNum = parseInt(durVal) || 5;
+
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt: job.prompt,
+    params: { duration: durVal, resolution, seed: seed || null, enableAudio },
+    duration: durNum,
+    cdnUrl: videoUrl,
+  }, job, ['fal', priceKey, 1, durNum]);
+  toast(`Seedance 2.0 done · ${elapsed}s`, 'ok');
+}
+
 // ── Describe video ref image ──────────────────────────────
 async function describeVideoRef(idx) {
   const ref = videoRefs[idx];
@@ -4093,8 +4368,11 @@ function videoPromptModelToUserLabels(prompt, activeRefs, prevM) {
   const mode = prevM.refMode || '';
 
   if (mode === 'multi') {
-    // @Element1, @Element2 → @UserLabel
-    return prompt.replace(/@Element(\d+)/gi, (full, n) => {
+    // PixVerse Fusion: @pic1 → @UserLabel; Kling: @Element1 → @UserLabel
+    const pattern = prevM?.pixverseMode === 'fusion'
+      ? /@pic(\d+)\b/gi
+      : /@Element(\d+)/gi;
+    return prompt.replace(pattern, (full, n) => {
       const idx = parseInt(n) - 1;
       const ref = activeRefs[idx];
       if (!ref) return full;
@@ -4106,6 +4384,17 @@ function videoPromptModelToUserLabels(prompt, activeRefs, prevM) {
   if (mode === 'wan_r2v') {
     // Character1, Character2 → @UserLabel (no @ prefix in WAN R2V)
     return prompt.replace(/\bCharacter(\d+)\b/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  if (mode === 'seedance2_r2v') {
+    // [Image1], [Image2] → @UserLabel
+    return prompt.replace(/\[Image(\d+)\]/gi, (full, n) => {
       const idx = parseInt(n) - 1;
       const ref = activeRefs[idx];
       if (!ref) return full;
@@ -4140,10 +4429,11 @@ function videoPromptUserLabelsToModel(prompt, activeRefs, newM) {
   }
 
   if (mode === 'multi') {
-    // @UserLabel → @Element{N+1}
+    // PixVerse Fusion: @UserLabel → @pic{N+1}; Kling: @UserLabel → @Element{N+1}
+    const isFusion = newM?.pixverseMode === 'fusion';
     return prompt.replace(/@([\w]+)/g, (full, mention) => {
       const idx = findIdx(mention);
-      return idx >= 0 ? `@Element${idx + 1}` : full;
+      return idx >= 0 ? (isFusion ? `@pic${idx + 1}` : `@Element${idx + 1}`) : full;
     });
   }
 
@@ -4152,6 +4442,14 @@ function videoPromptUserLabelsToModel(prompt, activeRefs, newM) {
     return prompt.replace(/@([\w]+)/g, (full, mention) => {
       const idx = findIdx(mention);
       return idx >= 0 ? `Character${idx + 1}` : full;
+    });
+  }
+
+  if (mode === 'seedance2_r2v') {
+    // @UserLabel → [Image{N+1}]
+    return prompt.replace(/@([\w]+)/g, (full, mention) => {
+      const idx = findIdx(mention);
+      return idx >= 0 ? `[Image${idx + 1}]` : full;
     });
   }
 
@@ -4167,7 +4465,7 @@ function rewriteVideoPromptForModel(prevM, newM) {
   if (!videoRefs.length) return;
 
   // Modes that use @mention naming
-  const mentionModes = ['multi', 'wan_r2v'];
+  const mentionModes = ['multi', 'wan_r2v', 'seedance2_r2v'];
   const prevMode = prevM?.refMode || '';
   const newMode  = newM?.refMode  || '';
   if (!mentionModes.includes(prevMode) && !mentionModes.includes(newMode)) return;

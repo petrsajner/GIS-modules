@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════
 // GIS Proxy — Cloudflare Worker
-// Verze: 2026-12 (+PixVerse C1 video routes)
+// Verze: 2026-13 (+Segmind WAN 2.7 image, -Replicate)
 //
 // Slouží jako CORS proxy pro providery, kteří blokují přímé
 // browser requesty z file:// origin.
@@ -38,12 +38,13 @@
 //   POST /topaz/image/submit     → Topaz image: multipart submit → process_id
 //   POST /topaz/image/status     → Topaz image: status check
 //   POST /topaz/image/download   → Topaz image: stream result→browser
-//   POST /replicate/wan27/submit → Replicate WAN 2.7 prediction submit
-//   POST /replicate/wan27/status → Replicate WAN 2.7 prediction status
+//   POST /replicate/wan27/submit → [REMOVED — migrated to Segmind]
+//   POST /replicate/wan27/status → [REMOVED]
 //   POST /pixverse/t2v           → PixVerse C1 text-to-video submit
 //   POST /pixverse/i2v           → PixVerse C1 image-to-video submit
 //   POST /pixverse/upload-image  → PixVerse upload image → img_id
 //   POST /pixverse/status        → PixVerse video status poll
+//   POST /segmind/image          → Segmind WAN 2.7 image T2I + Edit (sync)
 //   GET  /health                 → health check
 // ══════════════════════════════════════════════════════════
 
@@ -73,25 +74,17 @@ import { handleTopazVideoSubmit,
 import { handleTopazImageSubmit,
          handleTopazImageStatus,
          handleTopazImageDownload }               from './handlers/topaz-image.js';
-import { handleReplicateWan27Submit,
-         handleReplicateWan27Status }             from './handlers/replicate-wan27.js';
-import { handleReplicateWan27vSubmit,
-         handleReplicateWan27vStatus }            from './handlers/replicate-wan27v.js';
-import { handleReplicateWan27eSubmit,
-         handleReplicateWan27eStatus,
-         handleReplicateFilesUpload,
-         handleReplicateVideoServe,
-         handleReplicateUploadVideo }             from './handlers/replicate-wan27e.js';
 import { handlePixverseT2V, handlePixverseI2V,
          handlePixverseTransition, handlePixverseFusion,
          handlePixverseUploadImage,
          handlePixverseStatus }                   from './handlers/pixverse.js';
+import { handleSegmindImage }                     from './handlers/segmind.js';
 
 // ── CORS hlavičky — povoleno pro file:// a všechny origins ──
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-goog-api-key, X-Fal-Key, X-Replicate-Key, X-Content-Length, X-Filename',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-goog-api-key, X-Fal-Key, X-Content-Length, X-Filename',
 };
 
 function corsResponse(body, status = 200, extra = {}) {
@@ -116,7 +109,7 @@ export default {
     if (path === '/health' || path === '/') {
       return corsResponse(JSON.stringify({
         status: 'ok',
-        version: '2026-12',
+        version: '2026-13',
         routes: [
           'POST /xai/generate',
           'POST /luma/generate',
@@ -147,12 +140,7 @@ export default {
           'POST /topaz/image/submit',
           'POST /topaz/image/status',
           'POST /topaz/image/download',
-          'POST /replicate/wan27/submit',
-          'POST /replicate/wan27/status',
-          'POST /replicate/wan27v/submit',
-          'POST /replicate/wan27v/status',
-          'POST /replicate/wan27e/submit',
-          'POST /replicate/wan27e/status',
+          'POST /segmind/image',
           'POST /pixverse/t2v',
           'POST /pixverse/i2v',
           'POST /pixverse/transition',
@@ -164,15 +152,6 @@ export default {
     }
 
     // ── GET routes (before POST-only check) ─────────────
-    // DashScope fetches video/image URLs via GET — must allow before POST check
-    if (request.method === 'GET' && path.startsWith('/replicate/video/') && path.endsWith('/source.mp4')) {
-      const fileId = path.split('/')[3];
-      return handleReplicateVideoServe(request, fileId);
-    }
-    if (request.method === 'GET' && path.startsWith('/replicate/image/') && path.endsWith('/ref.jpg')) {
-      const fileId = path.split('/')[3];
-      return handleReplicateVideoServe(request, fileId);
-    }
     // Magnific video file — serves R2 video as public HTTPS for Freepik
     if (request.method === 'GET' && path.startsWith('/magnific/video-file/')) {
       return withCors(await handleMagnificVideoFile(request, env));
@@ -231,17 +210,8 @@ export default {
       if (path === '/topaz/image/status')       return withCors(await handleTopazImageStatus(request));
       if (path === '/topaz/image/download')     return withCors(await handleTopazImageDownload(request));
 
-      // ── Replicate WAN 2.7 image ────────────────────────
-      if (path === '/replicate/wan27/submit')    return withCors(await handleReplicateWan27Submit(request));
-      if (path === '/replicate/wan27/status')    return withCors(await handleReplicateWan27Status(request));
-
-      // ── Replicate WAN 2.7 I2V ─────────────────────────────
-      if (path === '/replicate/wan27v/submit')   return withCors(await handleReplicateWan27vSubmit(request));
-      if (path === '/replicate/wan27v/status')   return withCors(await handleReplicateWan27vStatus(request));
-      if (path === '/replicate/wan27e/submit')   return withCors(await handleReplicateWan27eSubmit(request));
-      if (path === '/replicate/wan27e/status')   return withCors(await handleReplicateWan27eStatus(request));
-      if (path === '/replicate/files/upload')    return withCors(await handleReplicateFilesUpload(request));
-      if (path === '/replicate/upload/video')    return withCors(await handleReplicateUploadVideo(request));
+      // ── Segmind WAN 2.7 image ─────────────────────────────
+      if (path === '/segmind/image')              return withCors(await handleSegmindImage(request));
 
       // ── PixVerse C1 video ──────────────────────────────
       if (path === '/pixverse/t2v')              return withCors(await handlePixverseT2V(request));
