@@ -1310,6 +1310,10 @@ async function reuseJobFromGallery(item) {
       const accEl = document.getElementById(accMap[p.acceleration] || 'qwa_reg');
       if (accEl) accEl.checked = true;
     }
+    if (p.negPrompt !== undefined && model.negPrompt) {
+      const el = document.getElementById('qwen2Neg');
+      if (el) el.value = p.negPrompt;
+    }
   }
 
   // Obnovit reference ze snapshotu

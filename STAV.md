@@ -1,70 +1,59 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v196en
-## Příští verze: v197en
+## Aktuální verze: v197en
+## Příští verze: v198en
 ## Datum: 2026-04-12
 ## Worker verze: 2026-14 (+Replicate WAN 2.7 Image, zachován Segmind legacy)
 
 ---
 
-## Co je v196en (oproti v195en)
+## Co je v197en (oproti v196en)
 
-### 1. WAN 2.7 Image: migrace ze Segmind zpět na Replicate
-- **Důvod:** Segmind WAN 2.7 Image endpoint nepodporuje aspect ratio ani custom pixel rozměry — pouze square presety (1K/2K/4K). Replicate (`wan-video/wan-2.7-image`) podporuje 15 specifických pixel stringů pro 5 aspect ratios × 3 tiers.
-- **Provider:** Replicate API (async prediction → poll)
-- **Auth:** `Bearer` token (localStorage: `gis_replicate_apikey`)
-- **Model IDs:** `wan-video/wan-2.7-image` (standard, max 2K), `wan-video/wan-2.7-image-pro` (Pro, max 4K)
-- **API flow:** GIS → Worker POST `/replicate/wan27i/submit` → Replicate creates prediction → GIS polls POST `/replicate/wan27i/status` → output = array of image URLs → GIS fetches image → base64 → gallery
-- **Size parametr:** pixel string z whitelistu (např. `"2048*1152"`) pro T2I, nebo tier preset (`"2K"`) pro Edit mode a unsupported aspects (fallback → square)
-- **Replicate size whitelist (ověřený z playgroundu):**
-  ```
-  Presets: "1K", "2K", "4K"
-  1:1  → 1024*1024, 2048*2048, 4096*4096
-  16:9 → 1280*720,  2048*1152, 4096*2304
-  9:16 → 720*1280,  1152*2048, 2304*4096
-  4:3  → 1024*768,  2048*1536, 4096*3072
-  3:4  → 768*1024,  1536*2048, 3072*4096
-  ```
-  Aspect ratios 3:2, 2:3, 21:9, 4:5, 1:4 NEJSOU v whitelistu.
-- **Edit mode:** posílá `input.size = tier preset` (model bere aspect z input image, tier určuje výstupní plochu)
-- **Edit mode 4K:** nedostupný (Replicate: "4K only for text-to-image")
-- **Ref limit:** zvýšen z 2048px na 4096px pro WAN 2.7 edit refs
-- **`callReplicateWan27()`** v proxy.js — submit → poll → fetch image → base64
+### 1. Upscale pre-flight resolution checks
+- **Recraft Crisp:** pre-flight na 4,194,304 pixelů (4 MP) — potvrzeno API errorem `max_resolution: 4194304`
+- **Clarity:** pre-flight na 25 MP output (testováno: 16.7 MP OK, 67 MP FAIL)
+- **SeedVR2:** safety net 64 MP input
+- **Modální dialog:** ikona ⬆, bez "Go to Setup" tlačítka, `pre-line` pro víceřádkový text
+- **Odstraněn:** starý catch-all 8000px check (blokoval i Topaz/Magnific)
 
-### 2. UI čištění WAN 2.7 params panel
-- **Resolution:** 1K/2K/4K toggle (jako NB Pro) + žlutý info text s přesnými pixely
-- **Pixel info:** automaticky se aktualizuje při změně tier i hlavního aspect selectu
-- **Aspect ratio:** hlavní sdílený select, neduplicuje se v params panelu
-- **Aspect filtrování:** WAN 2.7 T2I zobrazí pouze 5 podporovaných aspects (1:1, 16:9, 9:16, 4:3, 3:4). Nepodporované (3:2, 2:3, 21:9, 4:5, 1:4) skryté. Při přepnutí na jiný model se všechny vrátí.
-- **Aspect pro edit:** celý `aspectRatioCtrl` schovaný pro WAN 2.7 edit (model bere aspect z input)
-- **4K Pro:** viditelný pouze pro Pro T2I modely (ne edit)
-- **Negative prompt:** přesunut pod hlavní prompt textarea (mimo Parameters sekci), auto-resize (1 řádek → roste), `min-height:0` override globálního CSS
-- **Image count:** přesunut nad Save To (mimo Parameters sekci)
-- **Thinking mode:** default checked (Replicate default je ON)
-- **Odebrány:** Safety checker checkbox, wan27Aspect select, wan27Pixels select, API info label
-- **Ref limit info:** WAN 2.7 edit zobrazuje "Max 4096px" (ostatní modely "Max 2048px")
+### 2. Recraft Crisp: PNG → JPEG konverze
+- **Problém:** Recraft API má hard limit 5,242,880 B (5 MB) file size. PNG obrázky (i menší rozlišení) tento limit snadno překročí.
+- **Řešení:** `_toJpeg()` helper — canvas-based konverze s progresivní kvalitou: q92 → q85 → q75. Pokud i q75 > 5 MB → throw Error.
+- **Console log:** `[GIS Upscale] Recraft Crisp: PNG 8.2 MB → JPEG q92 1.4 MB`
+- **Vizuální kvalita:** JPEG q92 je pro upscaler vstup nerozlišitelný od PNG — model stejně rekonstruuje detaily.
 
-### 3. Replicate API key zpět v Setup
-- **Nová sekce:** "Replicate API Key" s popisem "WAN 2.7 Image (custom aspect ratios, 4K Pro)"
-- **localStorage:** `gis_replicate_apikey` (zachovaný z předchozích verzí)
-- **Export/Import:** přidán do API Keys Backup
-- **Spending:** `replicate` provider přidán do SPEND_PROVIDERS
+### 3. Upscale error visibility fix
+- **Problém:** `job.pendingCards` nebylo nastaveno pro upscale joby → catch blok v `runJob` iteroval přes `[]` → `showErrorPlaceholder` se nezavolal → placeholder karta visela do nekonečna s "generating" statusem.
+- **Fix:** `if (!job.pendingCards) job.pendingCards = [cardEl];` v generate.js
+- **Console.error:** Plná neoříznutá chybová hláška + raw JSON response v konzoli pro debugging: `[GIS] Job error:` a `[GIS Upscale]`
+- **422 hint:** fal.ai 422 chyby doplněny o hint `"image may be too large (WxH). Try Topaz Gigapixel or Magnific."`
 
-### 4. Worker v2026-14
-- **Nový handler:** `handlers/replicate-wan27i.js` (2 routes: submit + status)
-  - POST `/replicate/wan27i/submit` → `{ apiKey, model, input }` → Replicate API → `{ id, status }`
-  - POST `/replicate/wan27i/status` → `{ apiKey, id }` → Replicate API → `{ status, output, error }`
-- **Zachováno:** Segmind `/segmind/image` route (legacy compat)
-- **Odstraněno:** staré Replicate routes (wan27/wan27v/wan27e — 8 routes + 3 imports + 2 GET routes)
-- **Verze:** 2026-14
+### 4. showApiKeyWarning rozšíření
+- **Nové `opts` parametr:** `{ icon, hideSetup }` — pro upscale warningy: ikona ⬆ místo 🔑, skryté "Go to Setup" tlačítko
+- **`white-space: pre-line`** — respektuje `\n` v textu zprávy
 
-### 5. Empty prompt warning
-- **Změna:** `toast('Enter a prompt')` → `showApiKeyWarning('Prompt empty', ...)` — velký modální dialog místo malého toastu v rohu
+### 5. Qwen Image 2 — negative prompt
+- **Nový parametr:** `negative_prompt` v API payloadu (T2I + Edit)
+- **UI:** Collapsible textarea (▸/▾ toggle), defaultně zavřená, s "(prefilled)" indikátorem
+- **Default:** `blurry, low quality, distorted, deformed, oversaturated, watermark, ugly, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn face, duplicate, out of frame, worst quality, jpeg artifacts`
+- **Rerun:** negPrompt se obnovuje z gallery metadata
+- **Return object:** `negPrompt` přidán do `callQwen2` return
 
-### 6. Recraft Crisp upscale diagnostika
-- **Problém:** upscale proces doběhl ve frontě ale karta zůstala "generating", výsledek se neobjevil v galerii
-- **Přidáno:** `console.log` s response keys, detekce queue response (vs sync), 60s timeout na image download (`AbortController`), detailní error messages s URL a response snippet
-- **Status:** diagnostický kód přidán, root cause zatím neidentifikován — čeká na reprodukci s novým logováním
+### 6. Qwen Image 2 Edit — multi-ref compositing
+- **maxRefs:** zvýšen z 1 na 4 (Qwen 2.0 Edit podporuje až 4 vstupních obrázků)
+- **Ref downscale:** area-based 4 MP cap (`maxArea: 4194304`) místo starého 2048px checkboxu
+- **Ref label:** "Input images (edit · compositing)"
+- **Info text:** "Max 4 MP · Auto-resized · up to 4 images · Instructions in prompt"
+- **Nový parametr `maxArea`** v `_compressRefToJpeg` a `_refAsJpeg` — `Math.sqrt(maxArea / (w*h))` scale, zachovává aspect ratio
+
+### 7. Pre-filled negative prompts pro všechny modely
+- **Z-Image Base:** `blurry, low quality, distorted, deformed, ugly, watermark, text, signature, logo, extra fingers, extra limbs, fused fingers, missing fingers, deformed hands, bad anatomy, disfigured, poorly drawn face, mutation, extra head, duplicate, out of frame, worst quality, jpeg artifacts, grainy`
+- **WAN 2.7 T2I:** `low quality, blurry, distorted, deformed, ugly, watermark, text, logo, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn, mutation, duplicate, out of frame, worst quality, jpeg artifacts`
+- **Qwen Image 2 (all):** viz bod 5 výše
+- **Všechny collapsible** (▸/▾ toggle, defaultně zavřené, "(prefilled)" badge)
+
+### 8. Dead code cleanup
+- **Odstraněno:** `callWan27()` z fal.js (59 řádků) — WAN 2.7 Image je kompletně na Replicate (`callReplicateWan27` v proxy.js). `callWan27eVideo` v video.js zůstává (video edit přes fal.ai, jiná funkce).
 
 ---
 
@@ -72,61 +61,88 @@
 
 | Modul | Řádků | Popis změn |
 |-------|-------|------------|
-| models.js | 576 | WAN 2.7 provider: segmind → replicate, IDs: wan-video/wan-2.7-image(-pro) |
-| template.html | ~5200 | WAN 2.7 params panel přestavěn, neg prompt pod prompt, image count nad Save To, Replicate key v Setup, model descriptions "Replicate", aspect options filtrování |
-| model-select.js | ~395 | _WAN27_PIXELS whitelist (5 aspects), _wan27FilterAspects(), _wan27UpdateRes() s edit/T2I info, aspect ctrl hide pro edit, ref limit text "4096px" |
-| generate.js | ~900 | replicateKey místo segmindKey, sizeTier + size ve snap, callReplicateWan27 dispatch, empty prompt modal |
-| proxy.js | ~435 | callReplicateWan27() (submit → poll → fetch), ref limit 4096, nahradil callSegmindWan27 |
-| setup.js | ~315 | Replicate key init + handler + export/import |
-| spending.js | ~218 | 'replicate' v SPEND_PROVIDERS |
-| output-render.js | ~1700 | Recraft Crisp diagnostika: console.log, queue detection, AbortController timeout, error detail |
-
-## Worker soubory
-
-| Soubor | Řádků | Popis |
-|--------|-------|-------|
-| index.js | ~250 | v2026-14, +Replicate WAN 2.7 Image (2 routes), -old Replicate (8 routes), zachován Segmind |
-| handlers/replicate-wan27i.js | ~77 | NOVÝ — Replicate WAN 2.7 Image submit + status |
-
-### Worker deploy stav
-- `handlers/replicate-wan27i.js` — NOVÝ, nasazený
-- `handlers/segmind.js` — zachován (legacy compat)
-- `handlers/replicate-wan27.js` — SMAZAT (dead code)
-- `handlers/replicate-wan27v.js` — SMAZAT (dead code)
-- `handlers/replicate-wan27e.js` — SMAZAT (dead code)
+| models.js | ~576 | Qwen 2: `negPrompt: true` (všechny 4 modely), `maxRefs: 4` (edit modely) |
+| template.html | ~5210 | Collapsible `qwen2NegRow` textarea, updated edit descriptions "up to 4 refs" |
+| model-select.js | ~408 | Pre-fill neg prompt defaults pro Z-Image/WAN/Qwen; show/hide qwen2NegRow; Qwen 2 Edit ref label+info text "4 MP"; ref info per-type dispatch |
+| generate.js | ~902 | `pendingCards` fix pro upscale, `console.error` v catch bloku |
+| fal.js | ~634 | Qwen 2: `negative_prompt` v payloadu, multi-ref `image_urls` (up to 4), `_refAsJpeg` s `maxArea` param, `_compressRefToJpeg` s `maxArea` support, dead `callWan27` odstraněn |
+| gallery.js | ~2000 | Qwen 2 rerun: obnoví `negPrompt` do `qwen2Neg` textarea |
+| output-render.js | ~1776 | Recraft Crisp: PNG→JPEG konverze (`_toJpeg` helper, progresivní kvalita), 4 MP pre-flight check, Clarity 25 MP pre-flight, SeedVR2 64 MP safety net, `console.error` pro debugging, 422 hint |
+| styles.js | ~810 | `showApiKeyWarning(title, msg, opts)` — volitelný icon, hideSetup, pre-line |
 
 ---
 
-## Známé problémy / TODO pro v197en
+## Recraft Crisp — ověřené limity (z testů 12. 4. 2026)
 
-### Recraft Crisp upscale — nefunkční (diagnostika přidána)
-- Upscale přes Recraft Crisp doběhne ve frontě ale karta zůstane "generating"
-- Diagnostický kód přidán v v196en — čeká na reprodukci s F12 konzolí
-- Topaz upscale funguje správně (na stejném obrázku)
-- Možné příčiny: fal.run endpoint vrací queue response místo sync, CORS na CDN URL, timeout na stahování
+| Constraint | Limit | Zdroj |
+|------------|-------|-------|
+| File size | 5,242,880 B (5 MB) | API error: `file_too_large`, `max_size: 5242880` |
+| Pixel resolution | 4,194,304 px (4 MP) | API error: `image_too_large`, `max_resolution: 4194304` |
+| Max dimension | ~2048 px per side (vyplývá z 4 MP) | — |
 
-### Pending z v194en
-1. Fix copyright to 2026 — `GIS_COPYRIGHT` a všechny výskyty "2025" v branding textech
-2. Rename output HTML z `google-image-studio_vXXen.html` → `gis_vXXen.html` — fix v `build.js`
+**Flow:** PNG → JPEG q92 (→q85→q75 fallback) → 4 MP area check → submit
+
+---
+
+## Clarity — ověřené limity
+
+| Test | Input | Factor | Output MP | Výsledek |
+|------|-------|--------|-----------|----------|
+| OK | 2741×1530 | 2× | 16.7 MP | ✅ Succeeded |
+| FAIL | 5480×3056 | 2× | 67 MP | ❌ 422: image too large |
+
+**Pre-flight:** output MP > 25 → modální dialog
+
+---
+
+## Qwen Image 2 — ověřené limity
+
+| Constraint | Limit | Zdroj |
+|------------|-------|-------|
+| Input resolution | 4,194,304 px (4 MP) | API error (stejný jako Recraft) |
+| Ref count (Edit) | 4 obrázky | API docs |
+| File size | fal.ai standard (10 MB) | — |
+
+**Ref downscale:** `_refAsJpeg(r, null, null, 4194304)` — area-based, zachovává aspect ratio
+
+---
+
+## Runway Gen-4 — VÝZKUM PROVEDEN (12. 4. 2026, neimplementováno)
+
+**Shrnutí:** Runway Gen-4 API výzkum kompletní. Image (gen4_image, gen4_image_turbo) + Video (gen4.5, gen4_turbo, gen4_aleph V2V). Vyžaduje proxy (žádný CORS). @tag reference systém pro character consistency. Cenově konkurenceschopný (gen4_turbo video $0.25/5s vs Kling Pro $0.28). Implementační odhad: ~2-3 sessions. Čeká na rozhodnutí.
+
+Detaily v `API_MODELS.md` a `DECISIONS.md`.
+
+---
+
+## Známé problémy / TODO pro v198en
+
+### Blesk ikona (⚡) u assetů — zbytečná
+- `assets.js:278` — `srcTag` zobrazuje ⚡ pro generated, ↑ pro uploaded
+- Většina obrázků v GIS je AI generovaná → indikátor nepřináší info
+- **Odebrat při příští editaci** — nechat vizuální prostor pro důležitější informace
+
+### Pending z v194en — HOTOVO
+1. ~~Fix copyright to 2026~~ — HOTOVO v v196en
+2. ~~Rename output HTML~~ — HOTOVO v v196en
 
 ---
 
 ## TODO (prioritní pořadí)
 
-1. **Recraft Crisp upscale fix** (diagnostika přidána, čeká na reprodukci)
-2. Style Library "My Presets"
-3. Z-Image Edit (`fal-ai/z-image/edit`)
-4. Clarity 8×/16× via proxy
-5. Claid.ai via proxy
-6. WAN audio (DashScope)
-7. Vidu Q3 Turbo (`fal-ai/vidu/q3/turbo/*`)
-8. Wan 2.6 R2V
-9. Seedance 2.0 (HOTOVO v v195en)
-10. Ideogram V3
-11. Recraft V4
-12. GPT Image 1.5
-13. Hailuo 2.3
-14. Use button for V2V models
+1. Style Library "My Presets"
+2. Z-Image Edit (`fal-ai/z-image/edit`)
+3. Clarity 8×/16× via proxy
+4. Claid.ai via proxy
+5. WAN audio (DashScope)
+6. Vidu Q3 Turbo (`fal-ai/vidu/q3/turbo/*`)
+7. Wan 2.6 R2V
+8. Ideogram V3
+9. Recraft V4
+10. GPT Image 1.5
+11. Hailuo 2.3
+12. Use button for V2V models
+13. Runway Gen-4 Image + Video (výzkum hotový, čeká na rozhodnutí)
 
 ---
 
@@ -210,7 +226,7 @@ Presets: "1K", "2K", "4K"
 - **Replicate auth:** `Bearer` token; fal.ai: `Key` token; Segmind: `x-api-key` header.
 - **Replicate WAN 2.7 size:** whitelist pixel stringů, ne libovolné rozměry. Viz sekce výše.
 - **OpenRouter (Claude Sonnet 4.6)** je PRIMARY agent pro všechny tool features. Gemini Flash je POUZE fallback.
-- **Rozhodnutí nedělat za Petra** — prezentovat možnosti a nechat ho rozhodnout.
+- **Rozhodnutí nedělat za Petra** — prezentovat možnosti a nechat ho rozhodnout. Neuspěchat implementaci — nechat uživatele zadat práci po výzkumu.
 
 ---
 

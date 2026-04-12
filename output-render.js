@@ -295,13 +295,6 @@ function parseDimsStr(str) {
 
 // Upscale — shows mode+factor dialog then adds to queue
 async function upscaleWithFactor(b64data, currentDims) {
-  // fal.ai upscalers have no hard resolution cap — but warn if already very large
-  const MAX_LONG_SIDE = 8000;
-  const longSide = currentDims ? Math.max(currentDims.w, currentDims.h) : 0;
-  if (longSide >= MAX_LONG_SIDE) {
-    toast(`Image is already high resolution (${fmtDims(currentDims)}), upscale not recommended.`, 'err');
-    return;
-  }
 
   const result = await new Promise(resolve => {
     const overlay = document.createElement('div');
@@ -728,6 +721,45 @@ async function upscaleWithFactor(b64data, currentDims) {
 
   if (!result.confirmed) return;
 
+  // ── Pre-flight resolution checks per upscale mode ──
+  const _upOpts = { icon: '⬆', hideSetup: true };
+  if (currentDims) {
+    const inputMP = (currentDims.w * currentDims.h) / 1e6;
+    const dimStr = fmtDims(currentDims);
+
+    if (result.mode === 'crisp') {
+      // Recraft Crisp: max 4,194,304 pixels (4 MP) — confirmed by API error. File size handled by PNG→JPEG conversion.
+      const inputPx = currentDims.w * currentDims.h;
+      if (inputPx > 4194304) {
+        showApiKeyWarning('Image too large for Recraft Crisp',
+          `Max input: 4 MP (4,194,304 pixels).\nYour image: ${dimStr} (${inputMP.toFixed(1)} MP).\n\nUse SeedVR2, Topaz Gigapixel, or Magnific instead.`, _upOpts);
+        return;
+      }
+    }
+
+    if (result.mode === 'clarity') {
+      // Clarity via fal.run: practical output limit ~25 MP (tested: 16.7 MP OK, 67 MP FAIL)
+      const factor = result.factor || 2;
+      const outMP = inputMP * (factor * factor);
+      if (outMP > 25) {
+        const outW = currentDims.w * factor;
+        const outH = currentDims.h * factor;
+        showApiKeyWarning(`Output too large for Clarity ${factor}×`,
+          `Output would be ~${outW}×${outH} (${outMP.toFixed(1)} MP).\nMax ~25 MP on fal.ai.\n\nReduce factor or use Topaz Gigapixel.`, _upOpts);
+        return;
+      }
+    }
+
+    if (result.mode === 'seedvr') {
+      // SeedVR2: target-resolution based — very lenient, just extreme safety net
+      if (inputMP > 64) {
+        showApiKeyWarning('Image too large for SeedVR2',
+          `Your image: ${dimStr} (${inputMP.toFixed(1)} MP).\nMax practical input ~64 MP.`, _upOpts);
+        return;
+      }
+    }
+  }
+
   const falKey = document.getElementById('fluxApiKey')?.value?.trim() || '';
   const freepikKey = (localStorage.getItem('gis_freepik_apikey') || '').trim();
   const topazKey   = (localStorage.getItem('gis_topaz_apikey') || '').trim();
@@ -799,6 +831,23 @@ async function runUpscaleJob(job, placeholderEl = null) {
   }
 }
 
+// Convert base64 PNG → base64 JPEG via canvas (for APIs with file size limits)
+function _toJpeg(b64png, quality = 1.0) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      const jpegUrl = c.toDataURL('image/jpeg', quality);
+      resolve(jpegUrl.split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('JPEG conversion failed'));
+    img.src = `data:image/png;base64,${b64png}`;
+  });
+}
+
 // fal.ai upscale — Recraft Crisp, SeedVR2, or Clarity Upscaler
 async function runFalUpscaleJob(job, placeholderEl = null) {
   const { b64data, currentDims, falKey, upscaleMode, upscaleFactor, upscalePrompt, upscaleCreativity, upscaleResemblance, upscaleSeedvrRes, upscaleNoiseScale, upscaleSteps } = job;
@@ -813,14 +862,34 @@ async function runFalUpscaleJob(job, placeholderEl = null) {
       ? 'https://fal.run/fal-ai/seedvr/upscale/image'
       : 'https://fal.run/fal-ai/clarity-upscaler';
 
-  const dataUri = `data:image/png;base64,${b64data}`;
+  // Recraft Crisp: convert PNG→JPEG to stay under 5 MB file size limit
+  // Upscaler regenerates detail, so 92% quality is perfectly fine as input
+  const MAX_CRISP_BYTES = 5242880; // 5 MB
+  let imageDataUri;
+  if (isCrisp) {
+    const pngMB = (b64data.length * 3 / 4 / 1e6).toFixed(1);
+    let jpegB64, jpegBytes, usedQ;
+    for (const q of [0.92, 0.85, 0.75]) {
+      jpegB64 = await _toJpeg(b64data, q);
+      jpegBytes = Math.floor(jpegB64.length * 3 / 4);
+      usedQ = q;
+      if (jpegBytes <= MAX_CRISP_BYTES) break;
+    }
+    console.log(`[GIS Upscale] Recraft Crisp: PNG ${pngMB} MB → JPEG q${Math.round(usedQ * 100)} ${(jpegBytes / 1e6).toFixed(1)} MB`);
+    if (jpegBytes > MAX_CRISP_BYTES) {
+      throw new Error(`Image too large for Recraft Crisp even as JPEG q75 (${(jpegBytes / 1e6).toFixed(1)} MB, max 5 MB). Use Topaz Gigapixel or Magnific.`);
+    }
+    imageDataUri = `data:image/jpeg;base64,${jpegB64}`;
+  } else {
+    imageDataUri = `data:image/png;base64,${b64data}`;
+  }
 
   let payload;
   if (isCrisp) {
-    payload = { image_url: dataUri };
+    payload = { image_url: imageDataUri };
   } else if (isSeedvr) {
     payload = {
-      image_url: dataUri,
+      image_url: imageDataUri,
       upscale_mode: 'target',
       target_resolution: upscaleSeedvrRes || '1080p',
       noise_scale: upscaleNoiseScale ?? 0.1,
@@ -829,7 +898,7 @@ async function runFalUpscaleJob(job, placeholderEl = null) {
     };
   } else {
     payload = {
-      image_url: dataUri,
+      image_url: imageDataUri,
       upscale_factor: upscaleFactor || 2,
       prompt: upscalePrompt || 'masterpiece, best quality, highres',
       creativity: upscaleCreativity ?? 0.35,
@@ -862,7 +931,13 @@ async function runFalUpscaleJob(job, placeholderEl = null) {
     } else {
       errMsg = err.detail || err.message || (typeof err === 'string' ? err : JSON.stringify(err));
     }
-    throw new Error(`fal.ai ${submitResp.status}: ${errMsg}`);
+    // Add hint for 422 (validation / image too large)
+    const hint = submitResp.status === 422
+      ? ` — image may be too large (${fmtDims(currentDims)}). Try Topaz Gigapixel or Magnific.`
+      : '';
+    const fullMsg = `fal.ai ${submitResp.status}: ${errMsg}${hint}`;
+    console.error('[GIS Upscale]', fullMsg, '\nRaw:', JSON.stringify(err));
+    throw new Error(fullMsg);
   }
 
   const result = await submitResp.json();

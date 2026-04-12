@@ -1,9 +1,49 @@
 # GIS — API MODELS
-*Aktualizace po v171en · 2. 4. 2026*
+*Aktualizace po v197en · 12. 4. 2026*
 
 ---
 
-## AKTUALIZACE v164–v171en (2. 4. 2026)
+## AKTUALIZACE v197en (12. 4. 2026)
+
+---
+
+### Qwen Image 2 — negative_prompt + multi-ref edit
+
+**Nový parametr:** `negative_prompt` (string) — podporován všemi 4 Qwen 2 modely (T2I + Edit).
+
+**Multi-ref Edit:** `image_urls` array — až 4 obrázky pro compositing (dříve jen 1).
+
+**Ref downscale:** Area-based 4 MP cap (`maxArea: 4194304`) — ne fixní pixel dimension.
+
+**Aktualizované modely v models.js:**
+```javascript
+qwen2_std:      { negPrompt: true, maxRefs: 0 }     // T2I, neg prompt
+qwen2_pro:      { negPrompt: true, maxRefs: 0 }     // T2I Pro, neg prompt
+qwen2_edit:     { negPrompt: true, maxRefs: 4 }     // Edit, multi-ref
+qwen2_pro_edit: { negPrompt: true, maxRefs: 4 }     // Edit Pro, multi-ref
+```
+
+**Default negative prompt (prefilled):**
+`blurry, low quality, distorted, deformed, oversaturated, watermark, ugly, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn face, duplicate, out of frame, worst quality, jpeg artifacts`
+
+---
+
+### Recraft Crisp Upscale — ověřené limity
+
+**File size:** 5,242,880 B (5 MB) → řešeno PNG→JPEG konverzí (q92→q85→q75)
+**Pixel resolution:** 4,194,304 px (4 MP) → pre-flight modální dialog
+**Max dimension:** ~2048 px per side (vyplývá z 4 MP limitu)
+
+---
+
+### Clarity Upscale — ověřený limit
+
+**Praktický output limit:** ~25 MP (testováno: 16.7 MP OK, 67 MP FAIL)
+**Pre-flight:** `inputMP * factor² > 25` → modální dialog
+
+---
+
+## AKTUALIZACE v164–v196en (historické)
 
 ---
 
@@ -179,7 +219,7 @@ fal-ai/kling-image/v3:          $0.014/img
 fal-ai/kling-image/o3:          $0.025/img
 fal-ai/z-image/base:            $0.030/img
 fal-ai/z-image/turbo:           $0.025/img
-fal-ai/qwen-image-2/*:          $0.020–$0.035/img
+fal-ai/qwen-image-2/*:          $0.035/img (std/edit), $0.075/img (pro)
 ```
 
 **fal.ai (video, per second):**
@@ -355,7 +395,7 @@ POST /magnific/status       → handleMagnificStatus s upscaler_type
 
 ---
 
-## Runway Gen-4 Image + Video — VÝZKUM (11. 4. 2026, neimplementováno)
+## Runway Gen-4 Image + Video — VÝZKUM (12. 4. 2026, neimplementováno)
 
 ### Dostupné modely
 

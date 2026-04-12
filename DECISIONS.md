@@ -1,6 +1,80 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 12. 4. 2026 · v196en*
+*Aktualizováno 12. 4. 2026 · v197en*
+
+---
+
+## Recraft Crisp upscale — PNG→JPEG + 4 MP pre-flight (12. 4. 2026)
+
+**Problém:** Recraft Crisp upscale selhával na 422 pro obrázky >5 MB file size a >4 MP pixel resolution. Placeholder karta zůstala viset "generating" do nekonečna — chyba nebyla viditelná v UI.
+
+**Zjištěné limity (z API error responses):**
+1. File size: `max_size: 5242880` (5 MB) — PNG obrázky 2741×1530 překračovaly
+2. Pixel resolution: `max_resolution: 4194304` (4 MP) — obrázky 4096×2286 překračovaly
+
+**Rozhodnutí file size:** PNG→JPEG konverze před odesláním. Canvas `toDataURL('image/jpeg', quality)` s progresivní kvalitou: q92 → q85 → q75. Pro upscaler INPUT je JPEG q92 vizuálně nerozlišitelný od PNG — model rekonstruuje detaily. Tím se PNG 8+ MB zmenší na JPEG ~1.5 MB.
+
+**Rozhodnutí pixel resolution:** Pre-flight check `w * h > 4194304` → modální dialog s ⬆ ikonou (bez "Go to Setup") s doporučením alternativ (SeedVR2/Topaz/Magnific).
+
+**Rozhodnutí error visibility:** 
+1. `job.pendingCards = [cardEl]` — fix aby catch blok mohl zavolat `showErrorPlaceholder`
+2. `console.error('[GIS]...')` s plnou neoříznutou hláškou + raw JSON
+3. 422 hint v error message
+
+**Poučení:**
+- Testovat limity empiricky, ne předpokládat z dokumentace
+- Error handling pro upscale musí nastavit `pendingCards` — jinak karta visí navždy
+- Plné chybové hlášky do console.error pro debugging (UI je ořízne)
+
+---
+
+## Qwen Image 2 — negative_prompt + multi-ref edit (12. 4. 2026)
+
+**Problém:** Qwen 2 API podporuje `negative_prompt` ale GIS ho neposílal. Edit modely podporují `image_urls` array (až 4 obrázky pro compositing) ale GIS posílal jen 1.
+
+**Rozhodnutí negative prompt:**
+- Přidat `negative_prompt` do API payloadu pro všechny 4 Qwen 2 modely (T2I + Edit)
+- Pre-fill s research-backed defaults (community best practices)
+- Collapsible UI — zavřené defaultně, "(prefilled)" indikátor
+
+**Rozhodnutí multi-ref:**
+- `maxRefs: 4` pro edit modely (API limit)
+- Ref downscale: area-based 4 MP cap (`maxArea: 4194304` v `_compressRefToJpeg`) místo starého 2048px checkboxu
+- Area-based downscale zachovává aspect ratio: `scale = sqrt(maxArea / (w*h))`
+
+**Rozhodnutí collapsible negative prompt UI:**
+- Platí pro všechny modely s neg prompt (Z-Image Base, WAN 2.7, Qwen 2)
+- ▸/▾ toggle na labelu, textarea skrytá defaultně
+- "(prefilled)" badge — uživatel ví že je předvyplněno bez nutnosti rozkliknutí
+- Snazší smazat předvyplněné výrazy než vymýšlet nové
+
+---
+
+## Dead code cleanup — callWan27 (12. 4. 2026)
+
+**Problém:** `callWan27()` v fal.js (59 řádků) byl pozůstatek z migrace na Replicate (v196en). WAN 2.7 Image je kompletně na Replicate — `generate.js` volá `callReplicateWan27` (proxy.js), nikdy `callWan27` (fal.js).
+
+**Rozhodnutí:** Odstranit dead code. `callWan27eVideo` ve video.js ZŮSTÁVÁ — to je video edit přes fal.ai, zcela jiná funkce.
+
+---
+
+## Clarity upscale — empirický limit 25 MP output (12. 4. 2026)
+
+**Problém:** Clarity upscaler selhával na velké výstupy. Potřeba zjistit praktický limit.
+
+**Testováno:**
+- Input 2741×1530, factor 2× → output 5482×3060 (~16.7 MP) → ✅ OK
+- Input 5480×3056, factor 2× → output 10960×6112 (~67 MP) → ❌ 422 "image too large"
+
+**Rozhodnutí:** Pre-flight check na output > 25 MP s modálním dialogem. Konzervativní limit (16.7 funguje, 67 ne — skutečný limit je někde mezi).
+
+---
+
+## Runway Gen-4 — výzkum proveden, čeká na rozhodnutí (12. 4. 2026)
+
+**Stav:** Kompletní API výzkum. Image (gen4_image $0.05–0.08, turbo $0.02) + Video (gen4.5 $0.60/5s, gen4_turbo $0.25/5s, Aleph V2V $0.75/5s). Character consistency nejlepší na trhu. @tag ref systém. CORS blokováno → nutný proxy. Implementační odhad ~2-3 sessions.
+
+**Rozhodnutí:** Odloženo — čeká na Petrovo rozhodnutí zda investovat effort.
 
 ---
 

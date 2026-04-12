@@ -295,6 +295,7 @@ const MODELS = {
     seed: true,
     steps: true,      // default 25, range 1–50
     guidance: true,   // default 5.0
+    negPrompt: true,
     acceleration: true,
     promptExpansion: true,
     editModel: false,
@@ -309,6 +310,7 @@ const MODELS = {
     seed: true,
     steps: true,      // default 35, range 1–50
     guidance: true,   // default 7.0
+    negPrompt: true,
     acceleration: true,
     promptExpansion: true,
     editModel: false,
@@ -319,11 +321,12 @@ const MODELS = {
     type: 'qwen2',
     provider: 'fal',
     refs: true,
-    maxRefs: 1,
-    editModel: true,  // ref panel = vstupní obrázek pro instrukční editaci
+    maxRefs: 4,       // multi-image compositing (up to 4 refs)
+    editModel: true,  // ref panel = vstupní obrázky pro instrukční editaci
     seed: true,
     steps: true,      // default 25
     guidance: true,   // default 4.5
+    negPrompt: true,
     acceleration: false,
     promptExpansion: false,
   },
@@ -333,11 +336,12 @@ const MODELS = {
     type: 'qwen2',
     provider: 'fal',
     refs: true,
-    maxRefs: 1,
+    maxRefs: 4,       // multi-image compositing (up to 4 refs)
     editModel: true,
     seed: true,
     steps: true,      // default 35
     guidance: true,   // default 5.0
+    negPrompt: true,
     acceleration: false,
     promptExpansion: false,
   },

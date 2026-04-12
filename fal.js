@@ -146,9 +146,10 @@ async function _falQueueViaProxy(falKey, endpointPath, payload, onStatus, signal
 // ── Compress ref image to JPEG 100% quality before sending ───────────────────
 // Keeps full resolution by default — just re-encodes to JPEG to reduce payload.
 // Optional maxDim: downscale longest side to this value (e.g. 3840 for UHD).
+// Optional maxArea: downscale total pixel area (e.g. 4194304 for 4 MP Qwen2 limit).
 // A 5K PNG can be 30–50MB raw; same pixels as JPEG 100% = 3–6MB, safely under
 // fal.ai's 10MB per-image limit. For Kling, additionally cap at UHD (3840px).
-async function _compressRefToJpeg(apiRef, maxDim = null) {
+async function _compressRefToJpeg(apiRef, maxDim = null, maxArea = null) {
   if (!apiRef?.data) return apiRef;
   return new Promise(resolve => {
     const img = new Image();
@@ -159,6 +160,12 @@ async function _compressRefToJpeg(apiRef, maxDim = null) {
       if (maxDim && (w > maxDim || h > maxDim)) {
         if (w >= h) { h = Math.round(h * maxDim / w); w = maxDim; }
         else        { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      // Downscale if maxArea set and pixel count exceeds it (maintains aspect ratio)
+      if (maxArea && (w * h > maxArea)) {
+        const scale = Math.sqrt(maxArea / (w * h));
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
       }
       const canvas = document.createElement('canvas');
       canvas.width  = w;
@@ -174,9 +181,10 @@ async function _compressRefToJpeg(apiRef, maxDim = null) {
 
 // Drop-in replacement for getRefDataForApi that also JPEG-compresses the result.
 // maxDim: optional cap on longest side (e.g. 3840 for Kling UHD limit)
-async function _refAsJpeg(ref, maxPx, maxDim = null) {
+// maxArea: optional cap on total pixels (e.g. 4194304 for Qwen2 4 MP limit)
+async function _refAsJpeg(ref, maxPx, maxDim = null, maxArea = null) {
   const apiRef = await getRefDataForApi(ref, maxPx);
-  return _compressRefToJpeg(apiRef, maxDim);
+  return _compressRefToJpeg(apiRef, maxDim, maxArea);
 }
 async function _downloadFalImage(url, onStatus, sizeHint) {
   onStatus?.(`⟳ Downloading image${sizeHint ? ` ${sizeHint}` : ''}…`);
@@ -412,85 +420,29 @@ async function callZImage(apiKey, prompt, model, refs, snap, onStatus) {
 }
 
 // ═══════════════════════════════════════════════════════
-// WAN 2.7 (fal.ai path) — queue
-// NOTE: Active wan27r models use callReplicateWan27 (proxy.js).
-// ═══════════════════════════════════════════════════════
-async function callWan27(apiKey, prompt, model, refs, snap, onStatus) {
-  const isEdit       = !!model.editModel;
-  const endpointPath = model.id;
-  let payload;
-
-  if (isEdit) {
-    if (!refs || refs.length === 0) throw new Error('WAN 2.7 Edit: upload input image to the ref panel.');
-    // fal.ai WAN edit uses image_urls[] (array), NOT image_url (single)
-    // Support 1-4 refs — reference as 'image 1', 'image 2'... in prompt
-    const imageUrls = [];
-    for (const ref of refs.slice(0, 4)) {
-      const apiRef = await _refAsJpeg(ref, REF_MAX_PX);
-      imageUrls.push(`data:${apiRef.mimeType};base64,${apiRef.data}`);
-    }
-    payload = {
-      prompt,
-      image_urls:            imageUrls,
-      enable_safety_checker: snap.safety !== false,
-    };
-    if (snap.seed) payload.seed = parseInt(snap.seed);
-  } else {
-    const [imgW, imgH] = (snap.imageSize || '1280×720').split('×').map(Number);
-    payload = {
-      prompt,
-      image_size:            { width: imgW, height: imgH },
-      max_images:            snap.count || 1,
-      enable_safety_checker: snap.safety !== false,
-    };
-    if (snap.negPrompt) payload.negative_prompt = snap.negPrompt;
-    if (snap.seed)      payload.seed = parseInt(snap.seed);
-    if (refs && refs.length > 0) {
-      const apiRef = await _refAsJpeg(refs[0], REF_MAX_PX);
-      payload.image_url = `data:${apiRef.mimeType};base64,${apiRef.data}`;
-    }
-  }
-
-  const data   = await _falQueue(apiKey, endpointPath, payload, onStatus);
-  const images = data.images || [];
-  if (!images.length || !images[0]?.url) throw new Error('fal.ai WAN 2.7: no image in result.');
-  const imageObj = images[0];
-
-  const { base64, mimeType } = await _downloadFalImage(imageObj.url, onStatus);
-
-  return {
-    type:     'wan27',
-    images:   [base64],
-    mimeType,
-    model:    model.name,
-    modelKey: getModelKey(model),
-    seed:     data.seed ?? snap.seed ?? '—',
-    size:     `${imageObj.width || 1280}×${imageObj.height || 720}`,
-    ratio:    `${imageObj.width || 1280}:${imageObj.height || 720}`,
-  };
-}
-
-// ═══════════════════════════════════════════════════════
 // QWEN IMAGE 2 — Alibaba Tongyi via fal.ai queue
 // ═══════════════════════════════════════════════════════
 async function callQwen2(apiKey, prompt, model, refs, snap, onStatus) {
   const isEdit       = !!model.editModel;
-  const editRef      = isEdit && refs && refs.length > 0 ? refs[0] : null;
   const endpointPath = model.id;
   let payload;
 
   if (isEdit) {
-    if (!editRef) throw new Error('Qwen2 Edit: upload input image to the ref panel.');
-    const apiRef    = await _refAsJpeg(editRef, 'setting');
+    if (!refs || refs.length === 0) throw new Error('Qwen2 Edit: upload at least one image to the ref panel.');
+    // Multi-ref: convert all refs to JPEG data URIs (up to 4), max 4 MP each
+    const limited = refs.slice(0, 4);
+    const apiRefs = await Promise.all(limited.map(r => _refAsJpeg(r, null, null, 4194304)));
+    const imageUrls = apiRefs.map(r => `data:${r.mimeType};base64,${r.data}`);
+    // Use first ref's dimensions for output size
     const inputDims = await new Promise(resolve => {
       const img = new Image();
       img.onload  = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
       img.onerror = () => resolve(null);
-      img.src = `data:${apiRef.mimeType};base64,${apiRef.data}`;
+      img.src = imageUrls[0];
     });
     payload = {
       prompt,
-      image_urls:            [`data:${apiRef.mimeType};base64,${apiRef.data}`],
+      image_urls:            imageUrls,
       num_inference_steps:   snap.steps || 25,
       guidance_scale:        snap.guidance ?? 5.0,
       num_images:            1,
@@ -499,6 +451,7 @@ async function callQwen2(apiKey, prompt, model, refs, snap, onStatus) {
     };
     if (inputDims) payload.image_size = { width: inputDims.width, height: inputDims.height };
     if (snap.seed) payload.seed = parseInt(snap.seed);
+    if (snap.negPrompt) payload.negative_prompt = snap.negPrompt;
   } else {
     const qwTier = snap.resolution === '2K' ? 2048 : 1664;
     payload = {
@@ -513,6 +466,7 @@ async function callQwen2(apiKey, prompt, model, refs, snap, onStatus) {
     };
     if (snap.seed)            payload.seed = parseInt(snap.seed);
     if (snap.promptExpansion) payload.enable_prompt_expansion = true;
+    if (snap.negPrompt)       payload.negative_prompt = snap.negPrompt;
   }
 
   const data = await _falQueue(apiKey, endpointPath, payload, onStatus);
@@ -536,6 +490,7 @@ async function callQwen2(apiKey, prompt, model, refs, snap, onStatus) {
     ratio:        `${actualW}:${actualH}`,
     steps:        snap.steps,
     guidance:     snap.guidance,
+    negPrompt:    snap.negPrompt,
     acceleration: snap.acceleration,
   };
 }

@@ -785,9 +785,15 @@ function buildCameraSuffix() {
 // API KEY WARNING
 // ═══════════════════════════════════════════════════════
 
-function showApiKeyWarning(title, msg) {
+function showApiKeyWarning(title, msg, opts) {
   document.getElementById('akwTitle').textContent = title;
-  document.getElementById('akwMsg').textContent = msg;
+  const msgEl = document.getElementById('akwMsg');
+  msgEl.textContent = msg;
+  msgEl.style.whiteSpace = opts ? 'pre-line' : '';
+  const iconEl = document.querySelector('#apiKeyWarning .akw-icon');
+  if (iconEl) iconEl.textContent = opts?.icon || '🔑';
+  const setupBtn = document.querySelector('#apiKeyWarning .akw-btn-primary');
+  if (setupBtn) setupBtn.style.display = opts?.hideSetup ? 'none' : '';
   document.getElementById('apiKeyWarning').classList.add('show');
 }
 

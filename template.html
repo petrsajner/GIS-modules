@@ -2123,8 +2123,8 @@ select.inpaint-num option { background:#fff; color:#111; }
           <option disabled>──────────────────</option>
           <option value="qwen2_std">Qwen Image 2 — fal.ai · $0.035/img · T2I</option>
           <option value="qwen2_pro">Qwen Image 2 Pro — fal.ai · $0.075/img · T2I · highest quality</option>
-          <option value="qwen2_edit">Qwen Image 2 Edit — fal.ai · $0.035/img · instruction edit</option>
-          <option value="qwen2_pro_edit">Qwen Image 2 Pro Edit — fal.ai · $0.075/img · edit · highest quality</option>
+          <option value="qwen2_edit">Qwen Image 2 Edit — fal.ai · $0.035/img · instruction edit · up to 4 refs</option>
+          <option value="qwen2_pro_edit">Qwen Image 2 Pro Edit — fal.ai · $0.075/img · edit · highest quality · up to 4 refs</option>
           <option disabled>──────────────────</option>
           <option value="grok_imagine">Grok Imagine — xAI · $0.07/img · T2I</option>
           <option disabled>──────────────────</option>
@@ -2163,10 +2163,10 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div id="cameraTags" style="display:flex;flex-wrap:wrap;gap:5px;padding-top:3px;min-height:0;"></div>
         <!-- Negative prompt — shown for models that support it, directly under prompt -->
         <div id="wan27NegRow" style="display:none;padding-top:8px;">
-          <div style="font-size:10px;color:var(--dim2);margin-bottom:3px;">Negative prompt</div>
-          <textarea id="wan27Neg" rows="1" placeholder="blurry, distorted, low quality…"
-            oninput="this.style.height='';this.style.height=Math.max(24,this.scrollHeight)+'px'"
-            style="width:100%;height:24px;min-height:0;background:var(--s2);border:1px solid var(--border);color:var(--dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 9px;outline:none;resize:none;overflow:hidden;line-height:18px;box-sizing:border-box;"></textarea>
+          <div style="font-size:10px;color:var(--dim2);cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
+            onclick="var t=this.nextElementSibling;var o=t.style.display!=='none';t.style.display=o?'none':'';this.firstElementChild.textContent=o?'▸':'▾'"><span>▸</span> Negative prompt <span style="color:var(--dim);font-size:9px;opacity:.6">(prefilled)</span></div>
+          <textarea id="wan27Neg" rows="1" style="display:none;width:100%;height:24px;min-height:0;background:var(--s2);border:1px solid var(--border);color:var(--dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 9px;outline:none;resize:none;overflow:hidden;line-height:18px;box-sizing:border-box;margin-top:4px;"
+            oninput="this.style.height='';this.style.height=Math.max(24,this.scrollHeight)+'px'"></textarea>
         </div>
       </div>
 
@@ -2507,11 +2507,11 @@ select.inpaint-num option { background:#fff; color:#111; }
               style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
           </div>
 
-          <!-- Negative prompt (jen Base) -->
+          <!-- Negative prompt (jen Base) — collapsible -->
           <div class="ctrl" id="zimageNegRow">
-            <div class="ctrl-label">Negative prompt</div>
-            <textarea id="zimageNeg" placeholder="blurry, low quality, distorted..."
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:7px 9px;outline:none;resize:vertical;min-height:60px;line-height:1.5;"></textarea>
+            <div class="ctrl-label" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
+              onclick="var t=this.nextElementSibling;var o=t.style.display!=='none';t.style.display=o?'none':'';this.firstElementChild.textContent=o?'▸':'▾'"><span>▸</span> Negative prompt <span style="color:var(--dim2);font-weight:400;font-size:9px;opacity:.6">(prefilled)</span></div>
+            <textarea id="zimageNeg" style="display:none;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:7px 9px;outline:none;resize:vertical;min-height:44px;line-height:1.5;margin-top:4px;"></textarea>
           </div>
 
           <!-- Acceleration -->
@@ -2592,6 +2592,13 @@ select.inpaint-num option { background:#fff; color:#111; }
             <input type="range" id="qwen2Guidance" min="1" max="10" value="5" step="0.5"
               oninput="document.getElementById('qwen2GuidanceVal').textContent=parseFloat(this.value).toFixed(1)"
               style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
+          </div>
+
+          <!-- Negative prompt — collapsible -->
+          <div class="ctrl" id="qwen2NegRow">
+            <div class="ctrl-label" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
+              onclick="var t=this.nextElementSibling;var o=t.style.display!=='none';t.style.display=o?'none':'';this.firstElementChild.textContent=o?'▸':'▾'"><span>▸</span> Negative prompt <span style="color:var(--dim2);font-weight:400;font-size:9px;opacity:.6">(prefilled)</span></div>
+            <textarea id="qwen2Neg" style="display:none;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:7px 9px;outline:none;resize:vertical;min-height:44px;line-height:1.5;margin-top:4px;"></textarea>
           </div>
 
           <!-- Image count (jen T2I) -->

@@ -61,6 +61,9 @@ function selectModel(key) {
     document.getElementById('wan27ThinkingRow').style.display = isEdit ? 'none' : '';
     document.getElementById('wan27CountRow').style.display    = isEdit ? 'none' : '';
     document.getElementById('wan27NegRow').style.display      = (!isEdit && m.negPrompt) ? '' : 'none';
+    // Pre-fill negative prompt (research-backed defaults)
+    const negEl = document.getElementById('wan27Neg');
+    if (negEl && m.negPrompt && !isEdit) negEl.value = 'low quality, blurry, distorted, deformed, ugly, watermark, text, logo, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn, mutation, duplicate, out of frame, worst quality, jpeg artifacts';
     document.getElementById('wan27SizeRow').style.display     = '';
     // Hide aspect ratio for edit (model takes aspect from input image)
     document.getElementById('aspectRatioCtrl').style.display  = isEdit ? 'none' : '';
@@ -107,14 +110,17 @@ function selectModel(key) {
             : m.freepikTool === 'relight'
             ? 'Refs: [0] Source · [1] Lighting ref (opt)'
             : 'Input image (required)')
+        : m.type === 'qwen2' ? 'Input images (edit · compositing)'
         : 'Input image (edit)')
     : isI2IModel ? 'Input image (I2I)'
     : m.type === 'proxy_mystic' ? 'Refs: [0] Structure · [1] Style'
     : 'Reference images';
   if (refI2INote) {
     if (m.editModel) {
-      const maxPx = m.type === 'wan27r' ? '4096' : '2048';
-      refI2INote.textContent = 'Max ' + maxPx + 'px · Larger images auto-resized · Instructions in prompt';
+      const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to 4 images · Instructions in prompt'
+                 : m.type === 'wan27r' ? 'Max 4096px · Larger images auto-resized · Instructions in prompt'
+                 :                       'Max 2048px · Larger images auto-resized · Instructions in prompt';
+      refI2INote.textContent = info;
       refI2INote.style.display = '';
     } else if (m.i2iModel) {
       refI2INote.textContent = 'Max 2048px · Larger images auto-resized · No image = T2I';
@@ -193,6 +199,9 @@ function selectModel(key) {
 
     if (guidRow) guidRow.style.display = m.guidance  ? '' : 'none';
     if (negRow)  negRow.style.display  = m.negPrompt ? '' : 'none';
+    // Pre-fill negative prompt for Base (research-backed defaults)
+    const negEl = document.getElementById('zimageNeg');
+    if (negEl && m.negPrompt) negEl.value = 'blurry, low quality, distorted, deformed, ugly, watermark, text, signature, logo, extra fingers, extra limbs, fused fingers, missing fingers, deformed hands, bad anatomy, disfigured, poorly drawn face, mutation, extra head, duplicate, out of frame, worst quality, jpeg artifacts, grainy';
 
     // Vždy resetovat na doporučené defaulty při přepnutí modelu
     if (stepsEl) {
@@ -250,6 +259,11 @@ function selectModel(key) {
     // Reset seed
     const seedEl = document.getElementById('qwen2Seed');
     if (seedEl) seedEl.value = '';
+    // Negative prompt: show + set default
+    const negRow = document.getElementById('qwen2NegRow');
+    const negEl  = document.getElementById('qwen2Neg');
+    if (negRow) negRow.style.display = m.negPrompt ? '' : 'none';
+    if (negEl && m.negPrompt) negEl.value = 'blurry, low quality, distorted, deformed, oversaturated, watermark, ugly, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn face, duplicate, out of frame, worst quality, jpeg artifacts';
   }
 
   // ── Kling: počítadlo listeners ──

@@ -134,6 +134,7 @@ async function generate() {
       resolution:      document.querySelector('input[name="qwen2Res"]:checked')?.value || '1K',
       steps:           parseInt(document.getElementById('qwen2Steps')?.value || '25'),
       guidance:        parseFloat(document.getElementById('qwen2Guidance')?.value || '5'),
+      negPrompt:       document.getElementById('qwen2Neg')?.value?.trim() || '',
       acceleration:    document.querySelector('input[name="qwen2Accel"]:checked')?.value || 'regular',
       promptExpansion: document.getElementById('qwen2Expand')?.checked || false,
       safety:          document.getElementById('qwen2Safety')?.checked !== false,
@@ -389,6 +390,7 @@ async function runJob(job) {
     if (job.isUpscale) {
       // Upscale: placeholder + waitingní na výsledek
       const cardEl = job.pendingCards?.[0] || createPlaceholderCard(job, 0);
+      if (!job.pendingCards) job.pendingCards = [cardEl];
       await withRetry(() => runUpscaleJob(job, cardEl), job);
 
     } else if (job.model.type === 'gemini') {
@@ -756,6 +758,7 @@ async function runJob(job) {
   } catch(e) {
     job.status = 'error';
     job.errorMsg = e.message;
+    console.error('[GIS] Job error:', job.label || job.modelId, '\n', e.message);
     renderQueue();
     // Show static error card for any remaining placeholder cards — no err-box
     (job.pendingCards || []).forEach(card => {
