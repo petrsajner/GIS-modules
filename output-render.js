@@ -868,11 +868,29 @@ async function runFalUpscaleJob(job, placeholderEl = null) {
   const result = await submitResp.json();
 
   // fal.run sync endpoint returns result directly
-  const imageObj = result?.image || result?.images?.[0];
-  if (!imageObj?.url) throw new Error('fal.ai upscale: no output image');
+  // Debug: log response structure to help diagnose failures
+  console.log('[Upscale] fal.run response keys:', Object.keys(result), 'status:', result.status);
 
-  // Fetch result image as base64
-  const imgResp = await fetch(imageObj.url);
+  // If fal.ai returned a queue response instead of sync result, error out clearly
+  if (result.request_id && !result.image && !result.images) {
+    throw new Error(`fal.ai upscale: got queue response (status: ${result.status || 'unknown'}) instead of sync result. request_id: ${result.request_id}`);
+  }
+
+  const imageObj = result?.image || result?.images?.[0];
+  if (!imageObj?.url) throw new Error('fal.ai upscale: no output image URL in response: ' + JSON.stringify(result).slice(0, 200));
+
+  // Fetch result image as base64 (with 60s timeout)
+  const fetchCtrl = new AbortController();
+  const fetchTimeout = setTimeout(() => fetchCtrl.abort(), 60000);
+  let imgResp;
+  try {
+    imgResp = await fetch(imageObj.url, { signal: fetchCtrl.signal });
+  } catch (fetchErr) {
+    throw new Error(`fal.ai upscale: image download failed — ${fetchErr.message} (URL: ${imageObj.url.slice(0, 100)})`);
+  } finally {
+    clearTimeout(fetchTimeout);
+  }
+  if (!imgResp.ok) throw new Error(`fal.ai upscale: image download HTTP ${imgResp.status}`);
   const imgBlob = await imgResp.blob();
   const imgData = await new Promise((res, rej) => {
     const reader = new FileReader();

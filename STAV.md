@@ -1,87 +1,70 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v195en
-## Příští verze: v196en
+## Aktuální verze: v196en
+## Příští verze: v197en
 ## Datum: 2026-04-12
-## Worker verze: 2026-13 (+Segmind, -Replicate)
+## Worker verze: 2026-14 (+Replicate WAN 2.7 Image, zachován Segmind legacy)
 
 ---
 
-## Co je v195en (oproti v194en)
+## Co je v196en (oproti v195en)
 
-### 1. Seedance 2.0 — 6 video modelů
-- **Modely:** T2V/I2V/R2V × Standard + Fast (6 kombinací)
-- **Endpointy:** `bytedance/seedance-2.0/{text-to-video|image-to-video|reference-to-video}` + `/fast/`
-- **Multi-shot via prompt:** `[lens switch]`, timeline `[0-3s]...`, `Shot 1:...` (čistě prompt-driven, žádný API parametr)
-- **R2V:** 9 image refs + 3 video slots (R2 upload → URLs) + 3 audio URL paste inputs
-- **`callSeedance2Video()`** v video.js — T2V/I2V/R2V dispatch
-- **`seedance2Params` panel:** duration slider 4–15s + Auto, resolution 480p/720p radio, seed, R2V sekce
-- **Spending:** `_seedance2_std` ($0.303/s), `_seedance2_fast` ($0.242/s), `_seedance2_r2v_fast` ($0.181/s)
-
-### 2. Video ref renaming systém
-- **Seedance 2.0 R2V:** `[Image1]`, `[Video1]`, `[Audio1]` s prefixem `[` a live rewrite
-- **PixVerse Fusion fix:** `@pic1` (bylo `@Element1`) — display label, mention text, bidirectional rewrite opraveny
-- **Funkce upraveny:** `getVideoRefDisplayLabel`, `getVideoRefMentionText`, `getVideoRefMentionPrefix`, `isVideoRefLabelFixed`, `videoPromptModelToUserLabels`, `videoPromptUserLabelsToModel`, `rewriteVideoPromptForModel`
-
-### 3. Filter layout fix
-- `.gal-filter-models` — odstraněn `max-width:420px`
-- `.gal-filter-group:first-child` — přidán `flex:1` → MODEL chipy zabírají celou šířku, DATE zůstává kompaktní vpravo
-
-### 4. Video spending overhaul
-- **Nahrazeno:** single `_fal_video: $0.040/s` → 25+ per-model cenových klíčů
-- **`_getVideoSpendKey(modelKey, hasAudio)`** v video.js — mapuje model + audio flag → správný cenový tier
-- **Kling V3:** Std $0.084/$0.126, Pro $0.112/$0.168; O3: Std $0.168/$0.224, Pro $0.224/$0.280
-- **Seedance 1.5:** $0.052; Vidu Q3: $0.077; WAN 2.6: $0.050/$0.100
-- **PixVerse spending fix:** `switchView('setup')` volá `initSpendingUI()` pro refresh
-
-### 5. WAN 2.7 Image: migrace na Segmind
-- **Provider:** Segmind API (`https://api.segmind.com/v1/{model}`)
-- **Auth:** `x-api-key` header
-- **Model IDs:** `wan2.7-image` (standard, 2K), `wan2.7-image-pro` (Pro, 4K)
-- **API styl:** synchronní — vrací surový PNG binární soubor přímo (ne JSON s URL)
-- **Payload formát:**
-  ```json
-  {
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "prompt"}]}],
-    "prompt": "prompt text (top-level, required)",
-    "size": "2K",
-    "watermark": false,
-    "negative_prompt": "...",
-    "seed": 42
-  }
+### 1. WAN 2.7 Image: migrace ze Segmind zpět na Replicate
+- **Důvod:** Segmind WAN 2.7 Image endpoint nepodporuje aspect ratio ani custom pixel rozměry — pouze square presety (1K/2K/4K). Replicate (`wan-video/wan-2.7-image`) podporuje 15 specifických pixel stringů pro 5 aspect ratios × 3 tiers.
+- **Provider:** Replicate API (async prediction → poll)
+- **Auth:** `Bearer` token (localStorage: `gis_replicate_apikey`)
+- **Model IDs:** `wan-video/wan-2.7-image` (standard, max 2K), `wan-video/wan-2.7-image-pro` (Pro, max 4K)
+- **API flow:** GIS → Worker POST `/replicate/wan27i/submit` → Replicate creates prediction → GIS polls POST `/replicate/wan27i/status` → output = array of image URLs → GIS fetches image → base64 → gallery
+- **Size parametr:** pixel string z whitelistu (např. `"2048*1152"`) pro T2I, nebo tier preset (`"2K"`) pro Edit mode a unsupported aspects (fallback → square)
+- **Replicate size whitelist (ověřený z playgroundu):**
   ```
-- **Size parametr:** preset stringy "1K" / "2K" / "4K" (ne pixel hodnoty)
-- **Response:** raw PNG binary (Content-Type: image/png)
-- **Edit mode:** refs jako image URLs v messages content (upload přes R2)
-- **`callSegmindWan27()`** v proxy.js — builds payload, R2 upload pro edit refs, reads binary blob → base64
-- **Segmind API key** v Setup (localStorage: `gis_segmind_apikey`)
-- **Registrace:** https://www.segmind.com/api-keys
+  Presets: "1K", "2K", "4K"
+  1:1  → 1024*1024, 2048*2048, 4096*4096
+  16:9 → 1280*720,  2048*1152, 4096*2304
+  9:16 → 720*1280,  1152*2048, 2304*4096
+  4:3  → 1024*768,  2048*1536, 4096*3072
+  3:4  → 768*1024,  1536*2048, 3072*4096
+  ```
+  Aspect ratios 3:2, 2:3, 21:9, 4:5, 1:4 NEJSOU v whitelistu.
+- **Edit mode:** posílá `input.size = tier preset` (model bere aspect z input image, tier určuje výstupní plochu)
+- **Edit mode 4K:** nedostupný (Replicate: "4K only for text-to-image")
+- **Ref limit:** zvýšen z 2048px na 4096px pro WAN 2.7 edit refs
+- **`callReplicateWan27()`** v proxy.js — submit → poll → fetch image → base64
 
-### 6. Replicate kompletně odstraněn
-- 0 referencí v celém GIS kódu
-- Odstraněno z proxy.js: `callReplicateWan27()` (~100 řádků)
-- Odstraněno ze setup.js: Replicate API key
-- Odstraněno z template.html: Replicate key UI sekce
-- Odstraněno ze spending.js: `replicate` z SPEND_PROVIDERS
-- Worker: odstraněny 3 importy + 8 routes pro replicate-wan27/wan27v/wan27e handlery
-- Worker: odstraněny 2 GET routes pro /replicate/video/ a /replicate/image/ serving
+### 2. UI čištění WAN 2.7 params panel
+- **Resolution:** 1K/2K/4K toggle (jako NB Pro) + žlutý info text s přesnými pixely
+- **Pixel info:** automaticky se aktualizuje při změně tier i hlavního aspect selectu
+- **Aspect ratio:** hlavní sdílený select, neduplicuje se v params panelu
+- **Aspect filtrování:** WAN 2.7 T2I zobrazí pouze 5 podporovaných aspects (1:1, 16:9, 9:16, 4:3, 3:4). Nepodporované (3:2, 2:3, 21:9, 4:5, 1:4) skryté. Při přepnutí na jiný model se všechny vrátí.
+- **Aspect pro edit:** celý `aspectRatioCtrl` schovaný pro WAN 2.7 edit (model bere aspect z input)
+- **4K Pro:** viditelný pouze pro Pro T2I modely (ne edit)
+- **Negative prompt:** přesunut pod hlavní prompt textarea (mimo Parameters sekci), auto-resize (1 řádek → roste), `min-height:0` override globálního CSS
+- **Image count:** přesunut nad Save To (mimo Parameters sekci)
+- **Thinking mode:** default checked (Replicate default je ON)
+- **Odebrány:** Safety checker checkbox, wan27Aspect select, wan27Pixels select, API info label
+- **Ref limit info:** WAN 2.7 edit zobrazuje "Max 4096px" (ostatní modely "Max 2048px")
 
-### 7. WAN 2.7 params panel fix
-- **Bug:** `wan27Params` panel existoval v template.html ale `model-select.js` ho nikdy nezobrazoval
-- **Fix:** přidán toggle `document.getElementById('wan27Params').style.display = m.type === 'wan27r' ? '' : 'none'`
-- **T2I zobrazuje:** Resolution (1K/2K/4K optgroups), Thinking mode, Image count 1–4, Negative prompt, Seed, Safety
-- **Edit mode:** skrývá T2I-only řádky (Resolution, Thinking, Count, Neg prompt)
-- **Pro 4K options:** `data-pro` atribut na option elementech, skryté pro Standard modely
-- **Resolution select:** organizován v optgroups (1K, 2K, 4K Pro only)
+### 3. Replicate API key zpět v Setup
+- **Nová sekce:** "Replicate API Key" s popisem "WAN 2.7 Image (custom aspect ratios, 4K Pro)"
+- **localStorage:** `gis_replicate_apikey` (zachovaný z předchozích verzí)
+- **Export/Import:** přidán do API Keys Backup
+- **Spending:** `replicate` provider přidán do SPEND_PROVIDERS
 
-### 8. apiKeyWarning modal fix
-- **Bug:** CSS pro `#apiKeyWarning` modal existovalo ale HTML element chyběl kompletně
-- **Důsledek:** `showApiKeyWarning()` crashovala s TypeError (`null.textContent`), `generate()` tiše selhala
-- **Fix:** přidán kompletní `<div id="apiKeyWarning">` modal s `akwTitle`, `akwMsg`, tlačítky "→ Go to Setup" a "Close"
+### 4. Worker v2026-14
+- **Nový handler:** `handlers/replicate-wan27i.js` (2 routes: submit + status)
+  - POST `/replicate/wan27i/submit` → `{ apiKey, model, input }` → Replicate API → `{ id, status }`
+  - POST `/replicate/wan27i/status` → `{ apiKey, id }` → Replicate API → `{ status, output, error }`
+- **Zachováno:** Segmind `/segmind/image` route (legacy compat)
+- **Odstraněno:** staré Replicate routes (wan27/wan27v/wan27e — 8 routes + 3 imports + 2 GET routes)
+- **Verze:** 2026-14
 
-### 9. fal.js WAN 2.7 Edit fix
-- **Bug:** `callWan27` edit branch posílal `image_url` (string) ale fal.ai endpoint vyžaduje `image_urls` (array)
-- **Fix:** změněno na array, podporuje 1–4 refs
+### 5. Empty prompt warning
+- **Změna:** `toast('Enter a prompt')` → `showApiKeyWarning('Prompt empty', ...)` — velký modální dialog místo malého toastu v rohu
+
+### 6. Recraft Crisp upscale diagnostika
+- **Problém:** upscale proces doběhl ve frontě ale karta zůstala "generating", výsledek se neobjevil v galerii
+- **Přidáno:** `console.log` s response keys, detekce queue response (vs sync), 60s timeout na image download (`AbortController`), detailní error messages s URL a response snippet
+- **Status:** diagnostický kód přidán, root cause zatím neidentifikován — čeká na reprodukci s novým logováním
 
 ---
 
@@ -89,44 +72,38 @@
 
 | Modul | Řádků | Popis změn |
 |-------|-------|------------|
-| video.js | 4921 | Seedance 2.0, spending key lookup, R2V slots |
-| template.html | 5216 | Seedance 2 panel, filter CSS, WAN 2.7 params, apiKeyWarning modal, Segmind Setup, 4K options |
-| spending.js | 218 | 25+ video spend keys, segmind provider |
-| models.js | 576 | Seedance 2.0 modely, WAN 2.7 → Segmind (provider, IDs, maxRefs:9) |
-| generate.js | 898 | Segmind key validation, callSegmindWan27 dispatch |
-| setup.js | 311 | Segmind key init + handler, removed Replicate |
-| model-select.js | 313 | wan27Params toggle, edit/Pro row visibility, spending refresh |
-| proxy.js | 449 | callSegmindWan27 (binary response handling), removed callReplicateWan27 |
-| fal.js | 677 | WAN 2.7 edit image_urls fix |
+| models.js | 576 | WAN 2.7 provider: segmind → replicate, IDs: wan-video/wan-2.7-image(-pro) |
+| template.html | ~5200 | WAN 2.7 params panel přestavěn, neg prompt pod prompt, image count nad Save To, Replicate key v Setup, model descriptions "Replicate", aspect options filtrování |
+| model-select.js | ~395 | _WAN27_PIXELS whitelist (5 aspects), _wan27FilterAspects(), _wan27UpdateRes() s edit/T2I info, aspect ctrl hide pro edit, ref limit text "4096px" |
+| generate.js | ~900 | replicateKey místo segmindKey, sizeTier + size ve snap, callReplicateWan27 dispatch, empty prompt modal |
+| proxy.js | ~435 | callReplicateWan27() (submit → poll → fetch), ref limit 4096, nahradil callSegmindWan27 |
+| setup.js | ~315 | Replicate key init + handler + export/import |
+| spending.js | ~218 | 'replicate' v SPEND_PROVIDERS |
+| output-render.js | ~1700 | Recraft Crisp diagnostika: console.log, queue detection, AbortController timeout, error detail |
 
 ## Worker soubory
 
 | Soubor | Řádků | Popis |
 |--------|-------|-------|
-| index.js | 243 | v2026-13, +Segmind route (1), -Replicate (8 routes + 3 imports) |
-| handlers/segmind.js | 60 | NOVÝ — Segmind passthrough, binary image response |
+| index.js | ~250 | v2026-14, +Replicate WAN 2.7 Image (2 routes), -old Replicate (8 routes), zachován Segmind |
+| handlers/replicate-wan27i.js | ~77 | NOVÝ — Replicate WAN 2.7 Image submit + status |
 
 ### Worker deploy stav
-- `handlers/segmind.js` — NOVÝ, nasazený
+- `handlers/replicate-wan27i.js` — NOVÝ, nasazený
+- `handlers/segmind.js` — zachován (legacy compat)
 - `handlers/replicate-wan27.js` — SMAZAT (dead code)
 - `handlers/replicate-wan27v.js` — SMAZAT (dead code)
 - `handlers/replicate-wan27e.js` — SMAZAT (dead code)
 
 ---
 
-## Známé problémy / TODO pro v196en
+## Známé problémy / TODO pro v197en
 
-### Segmind parametry — vyžaduje další ladění
-- **Ověřit Thinking mode:** parametr `thinking_mode` — potřeba zjistit zda Segmind ho podporuje a pod jakým názvem
-- **Ověřit n (batch count):** Segmind pravděpodobně nepodporuje `n` parametr — aktuálně odstraněn, count řeší paralelní volání
-- **Ověřit 4K resolution:** Pro model by měl podporovat "4K" preset — neotestováno
-- **Ověřit Edit mode:** ref images přes R2 upload → URLs v messages content — neotestováno
-- **Size mapping precision:** aktuálně `maxDim > 2048 → "4K"`, `> 1280 → "2K"`, else `"1K"` — ověřit zda Segmind akceptuje tyto presets
-- **Seed v response:** Segmind vrací binary PNG, ne JSON — seed z response nedostupný, ukládáme pouze user-zadaný seed
-
-### Template.html popisky — stále říkají "fal.ai"
-- Řádky ~2119-2122: WAN 2.7 model options v image select stále mají popis "fal.ai"
-- Změnit na "Segmind"
+### Recraft Crisp upscale — nefunkční (diagnostika přidána)
+- Upscale přes Recraft Crisp doběhne ve frontě ale karta zůstane "generating"
+- Diagnostický kód přidán v v196en — čeká na reprodukci s F12 konzolí
+- Topaz upscale funguje správně (na stejném obrázku)
+- Možné příčiny: fal.run endpoint vrací queue response místo sync, CORS na CDN URL, timeout na stahování
 
 ### Pending z v194en
 1. Fix copyright to 2026 — `GIS_COPYRIGHT` a všechny výskyty "2025" v branding textech
@@ -136,7 +113,7 @@
 
 ## TODO (prioritní pořadí)
 
-1. **Doladění Segmind parametrů** (viz výše)
+1. **Recraft Crisp upscale fix** (diagnostika přidána, čeká na reprodukci)
 2. Style Library "My Presets"
 3. Z-Image Edit (`fal-ai/z-image/edit`)
 4. Clarity 8×/16× via proxy
@@ -144,50 +121,69 @@
 6. WAN audio (DashScope)
 7. Vidu Q3 Turbo (`fal-ai/vidu/q3/turbo/*`)
 8. Wan 2.6 R2V
-9. Ideogram V3
-10. Recraft V4
-11. GPT Image 1.5
-12. Hailuo 2.3
-13. Use button for V2V models
+9. Seedance 2.0 (HOTOVO v v195en)
+10. Ideogram V3
+11. Recraft V4
+12. GPT Image 1.5
+13. Hailuo 2.3
+14. Use button for V2V models
 
 ---
 
 ## Klíčové technické detaily
 
-### Segmind API formát (potvrzený a funkční)
+### Replicate API formát (potvrzený a funkční)
 ```
-POST https://api.segmind.com/v1/wan2.7-image-pro
-Headers: x-api-key: KEY, Content-Type: application/json
+# Submit prediction
+POST https://api.replicate.com/v1/models/wan-video/wan-2.7-image/predictions
+Headers: Authorization: Bearer TOKEN, Content-Type: application/json
 Body: {
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "prompt"}]}],
-    "prompt": "prompt text",
-    "size": "2K",
-    "watermark": false,
-    "negative_prompt": "...",
-    "seed": 42
+    "input": {
+        "prompt": "...",
+        "size": "2048*1152",     // pixel string z whitelistu NEBO preset "2K"
+        "thinking_mode": true,    // default ON pro Pro
+        "negative_prompt": "...",
+        "seed": 42,
+        "images": ["url1", ...]  // pouze pro edit mode
+    }
 }
-Response: raw PNG binary (Content-Type: image/png)
+Response: { "id": "xxx", "status": "starting" }
+
+# Poll status
+GET https://api.replicate.com/v1/predictions/{id}
+Headers: Authorization: Bearer TOKEN
+Response (done): { "status": "succeeded", "output": ["https://...url1.png"] }
+Response (fail): { "status": "failed", "error": "..." }
 ```
 
-### Segmind Worker handler (`handlers/segmind.js`)
-- Přijímá `{ apiKey, model, messages, parameters }` z GIS
-- Spreaduje `parameters` na top-level: `Object.assign(sgPayload, parameters)`
-- Posílá na `https://api.segmind.com/v1/${model}` s `x-api-key` headerem
-- Detekuje `Content-Type: image/*` → passthrough binary s CORS headers
-- JSON responses (errory) parsuje a forwarduje normálně
+### Replicate WAN 2.7 size whitelist
+```
+Presets: "1K", "2K", "4K"
+1:1  → 1024*1024, 2048*2048, 4096*4096
+16:9 → 1280*720,  2048*1152, 4096*2304
+9:16 → 720*1280,  1152*2048, 2304*4096
+4:3  → 1024*768,  2048*1536, 4096*3072
+3:4  → 768*1024,  1536*2048, 3072*4096
+⚠ 3:2, 2:3, 21:9, 4:5, 1:4 — NEMAJÍ pixel stringy, pouze preset (→ square)
+```
 
-### callSegmindWan27 v proxy.js
-- Builds messages + top-level `prompt` (Segmind vyžaduje obojí)
-- Edit mode: upload refs přes R2 (`POST /r2/upload`) → public URLs v messages content
-- Konvertuje pixel strings na presets: `maxDim > 2048 → "4K"`, `> 1280 → "2K"`, else `"1K"`
-- Čte binary response jako blob → base64
-- Detekuje rozměry výsledného obrázku přes `new Image()` pro metadata
+### Replicate WAN 2.7 Edit chování
+- `size` parametr určuje výstupní **plochu** (v pixelech²), aspect ratio přebírá z **vstupního obrázku**
+- Příklad: input 1376×768 (16:9), size "2K" (~4.2M px) → output ~2741×1530
+- 4K resolution nedostupné pro edit (Replicate omezení)
+- Refs upload přes R2 → public HTTPS URLs → `input.images` array
+
+### Worker handler (`handlers/replicate-wan27i.js`)
+- POST `/replicate/wan27i/submit` — přijímá `{ apiKey, model, input }`, forwarduje na Replicate `/v1/models/{model}/predictions`
+- POST `/replicate/wan27i/status` — přijímá `{ apiKey, id }`, forwarduje na Replicate `/v1/predictions/{id}`
+- Vrací `{ id, status }` resp. `{ status, output, error }`
+- Error passthrough: `data.detail || data.title || JSON.stringify(data)`
 
 ### Architektura providerů pro WAN 2.7
 | Feature | Provider | Stav |
 |---------|----------|------|
-| WAN 2.7 Image T2I | Segmind (proxy) | ✅ Funkční |
-| WAN 2.7 Image Edit | Segmind (proxy) | ⚠ Neotestováno |
+| WAN 2.7 Image T2I | Replicate (proxy) | ✅ Funkční, 5 aspect ratios |
+| WAN 2.7 Image Edit | Replicate (proxy) | ✅ Funkční, aspect z input image |
 | WAN 2.7 Video I2V | fal.ai (direct) | ✅ Funkční |
 | WAN 2.7 Video T2V | fal.ai (direct) | ✅ Funkční |
 | WAN 2.7 Video Edit | fal.ai (direct) | ✅ Funkční |
@@ -200,8 +196,9 @@ Response: raw PNG binary (Content-Type: image/png)
 - **Session start:** (1) načíst `STAV.md` z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) build s `node build.js NNNen → dist/`.
 - **Syntax check:** `awk '/<script>$/...' | node --input-type=module` → OK = "window is not defined"
 - **NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele.**
-- **Vždy důkladně prozkoumat** (web search, probe APIs) než prohlásit že něco nejde.
+- **Vždy důkladně prozkoumat** (web search, probe APIs, check Replicate playground) než prohlásit že něco nejde.
 - **Research API maturity a regionální dostupnost** před integrací nových modelů.
+- **Research přesný API whitelist** (size, aspect) — VŽDY kontrolovat playground/docs, ne předpokládat z README.
 - **fal.ai vs. direct APIs:** fal.ai je ~15–30 % dražší ale preferovaný pro nepravidelné použití. Přímé provider APIs preferovány když CORS-kompatibilní. Proxy (CF Worker) povinný když ani jedno nefunguje.
 - **Worker free tier:** 30s wall-clock limit — nikdy nepollovat uvnitř Workeru.
 - **Snap count v `addToQueue`:** každý nový model musí mít svůj count field v count expresi.
@@ -211,9 +208,7 @@ Response: raw PNG binary (Content-Type: image/png)
 - **fal-inpaint.js** (NE `fal.js`) je Worker handler pro fal.ai queue. Import: `'./handlers/fal-inpaint.js'`.
 - **PixVerse gotchas:** I2V endpoint je `/video/img/generate` (NE `/image/`). `multi_clip_switch` API je INVERTED.
 - **Replicate auth:** `Bearer` token; fal.ai: `Key` token; Segmind: `x-api-key` header.
-- **Segmind response:** raw binary image (PNG), ne JSON. Worker musí passthrough binary s CORS headers.
-- **Segmind size:** preset stringy "1K"/"2K"/"4K", ne pixel hodnoty.
-- **Segmind prompt:** vyžaduje top-level `prompt` pole navíc k messages formátu.
+- **Replicate WAN 2.7 size:** whitelist pixel stringů, ne libovolné rozměry. Viz sekce výše.
 - **OpenRouter (Claude Sonnet 4.6)** je PRIMARY agent pro všechny tool features. Gemini Flash je POUZE fallback.
 - **Rozhodnutí nedělat za Petra** — prezentovat možnosti a nechat ho rozhodnout.
 
@@ -223,6 +218,6 @@ Response: raw PNG binary (Content-Type: image/png)
 
 - **Kódová báze:** `petrsajner/GIS-modules` na GitHubu
 - **Proxy:** Cloudflare Workers na `gis-proxy.petr-gis.workers.dev`; R2 bucket `gis-magnific-videos`
-- **AI provideři:** fal.ai, Google Gemini/Imagen, Luma, Kling, Segmind (WAN 2.7 Image), Freepik/Magnific, Topaz, PixVerse, xAI/Grok, OpenRouter
+- **AI provideři:** fal.ai, Google Gemini/Imagen, Luma, Kling, Replicate (WAN 2.7 Image), Freepik/Magnific, Topaz, PixVerse, xAI/Grok, OpenRouter
 - **Dokumenty:** `STAV.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `API_MODELS.md`, `COPYRIGHT_PROTECTION.md`
 - **Kontakt:** info.genimagestudio@gmail.com; LinkedIn: linkedin.com/in/sajner

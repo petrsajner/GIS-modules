@@ -117,7 +117,7 @@ const SPEND_PRICES = {
   '_topaz_slm':    0.008,  // Starlight Mini
 
   // ── WAN 2.7 image via fal.ai (per image) ───────────────
-  '_wan27_image':            0.030,   // WAN 2.7 image via fal.ai (estimate)
+  '_wan27_image':            0.030,   // WAN 2.7 image via Replicate (estimate)
 
   // ── OpenRouter — Claude Sonnet 4.6 (per call) ──────
   '_or_prompt':   0.003,   // AI Prompt text (~500 in + 500 out tokens)
@@ -139,7 +139,7 @@ const SPEND_PRICES = {
   '_seedance2_r2v_fast':  0.181,  // Fast R2V with video inputs $0.1814/s
 };
 
-const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'openrouter', 'pixverse', 'segmind'];
+const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'openrouter', 'pixverse', 'segmind', 'replicate'];
 
 function _spendKey(provider) {
   return `gis_spend_${provider}`;

@@ -2116,10 +2116,10 @@ select.inpaint-num option { background:#fff; color:#111; }
           <option value="zimage_base">Z-Image Base — fal.ai · $0.005/MP · CFG · neg.prompt</option>
           <option value="zimage_turbo">Z-Image Turbo — fal.ai · $0.005/MP · ultra-fast · opt. I2I</option>
 
-          <option value="wan27_std">WAN 2.7 — fal.ai · T2I · opt. ref · Alibaba</option>
-          <option value="wan27_pro">WAN 2.7 Pro — fal.ai · T2I · highest quality · Alibaba</option>
-          <option value="wan27_edit">WAN 2.7 Edit — fal.ai · instruction edit · ref required</option>
-          <option value="wan27_pro_edit">WAN 2.7 Pro Edit — fal.ai · instruction edit · highest quality</option>
+          <option value="wan27_std">WAN 2.7 — Replicate · T2I · opt. ref · Alibaba</option>
+          <option value="wan27_pro">WAN 2.7 Pro — Replicate · T2I · highest quality · Alibaba</option>
+          <option value="wan27_edit">WAN 2.7 Edit — Replicate · instruction edit · ref required</option>
+          <option value="wan27_pro_edit">WAN 2.7 Pro Edit — Replicate · instruction edit · highest quality</option>
           <option disabled>──────────────────</option>
           <option value="qwen2_std">Qwen Image 2 — fal.ai · $0.035/img · T2I</option>
           <option value="qwen2_pro">Qwen Image 2 Pro — fal.ai · $0.075/img · T2I · highest quality</option>
@@ -2161,6 +2161,13 @@ select.inpaint-num option { background:#fff; color:#111; }
         <!-- Aktivní style + camera tagy — uvnitř psec pro správný padding -->
         <div id="styleTags" style="display:flex;flex-wrap:wrap;gap:5px;padding-top:6px;min-height:0;"></div>
         <div id="cameraTags" style="display:flex;flex-wrap:wrap;gap:5px;padding-top:3px;min-height:0;"></div>
+        <!-- Negative prompt — shown for models that support it, directly under prompt -->
+        <div id="wan27NegRow" style="display:none;padding-top:8px;">
+          <div style="font-size:10px;color:var(--dim2);margin-bottom:3px;">Negative prompt</div>
+          <textarea id="wan27Neg" rows="1" placeholder="blurry, distorted, low quality…"
+            oninput="this.style.height='';this.style.height=Math.max(24,this.scrollHeight)+'px'"
+            style="width:100%;height:24px;min-height:0;background:var(--s2);border:1px solid var(--border);color:var(--dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 9px;outline:none;resize:none;overflow:hidden;line-height:18px;box-sizing:border-box;"></textarea>
+        </div>
       </div>
 
       <!-- Reference images — expanded inline (Varianta C) -->
@@ -2531,60 +2538,22 @@ select.inpaint-num option { background:#fff; color:#111; }
         <!-- ═══ WAN 2.7 params ═══ -->
         <div id="wan27Params" style="display:none">
 
-          <!-- Resolution — pixel values for Segmind API -->
+          <!-- Resolution — 1K/2K/4K toggle (like NB Pro) -->
           <div class="ctrl" id="wan27SizeRow">
-            <div class="ctrl-label">Resolution</div>
-            <select id="wan27Size" onchange="onWan27SizeChange(this.value)"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-              <optgroup label="── 1K ──">
-                <option value="1280*720">1280×720 — 16:9 HD</option>
-                <option value="720*1280">720×1280 — 9:16 Portrait</option>
-                <option value="1024*1024">1024×1024 — 1:1 Square</option>
-                <option value="1024*768">1024×768 — 4:3</option>
-                <option value="768*1024">768×1024 — 3:4</option>
-              </optgroup>
-              <optgroup label="── 2K ──">
-                <option value="2048*1152" selected>2048×1152 — 16:9 2K</option>
-                <option value="1152*2048">1152×2048 — 9:16 2K</option>
-                <option value="2048*2048">2048×2048 — 1:1 2K</option>
-                <option value="2048*1536">2048×1536 — 4:3 2K</option>
-                <option value="1536*2048">1536×2048 — 3:4 2K</option>
-              </optgroup>
-              <optgroup label="── 4K (Pro only) ──">
-                <option value="3840*2160" data-pro>3840×2160 — 16:9 4K</option>
-                <option value="2160*3840" data-pro>2160×3840 — 9:16 4K</option>
-                <option value="4096*4096" data-pro>4096×4096 — 1:1 4K</option>
-                <option value="3840*2880" data-pro>3840×2880 — 4:3 4K</option>
-                <option value="2880*3840" data-pro>2880×3840 — 3:4 4K</option>
-              </optgroup>
-            </select>
-            <div style="font-size:11px;color:var(--dim2);margin-top:4px;">Aspect ratio: <span id="wan27RatioInfo" style="color:var(--accent);">16:9</span></div>
-          </div>
-
-          <!-- Thinking mode (T2I only — Segmind/DashScope) -->
-          <div class="ctrl" id="wan27ThinkingRow">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-              <input type="checkbox" id="wan27Thinking" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Thinking mode <span style="color:var(--dim2)">(better composition, slower)</span></span>
-            </label>
-          </div>
-
-          <!-- Image count (T2I only) -->
-          <div class="ctrl" id="wan27CountRow">
-            <div class="ctrl-label">Image count</div>
+            <div class="ctrl-label">Resolution <span class="cv" id="wan27ResInfo">2K</span></div>
             <div class="toggle-row">
-              <input type="radio" name="wan27Count" id="w27c1" value="1" checked><label for="w27c1">1</label>
-              <input type="radio" name="wan27Count" id="w27c2" value="2"><label for="w27c2">2</label>
-              <input type="radio" name="wan27Count" id="w27c3" value="3"><label for="w27c3">3</label>
-              <input type="radio" name="wan27Count" id="w27c4" value="4"><label for="w27c4">4</label>
+              <input type="radio" name="wan27Tier" id="w27t1k" value="1K" onchange="_wan27UpdateRes()"><label for="w27t1k">1K</label>
+              <input type="radio" name="wan27Tier" id="w27t2k" value="2K" checked onchange="_wan27UpdateRes()"><label for="w27t2k">2K</label>
+              <input type="radio" name="wan27Tier" id="w27t4k" value="4K" onchange="_wan27UpdateRes()"><label for="w27t4k" id="w27t4kLabel">4K</label>
             </div>
           </div>
 
-          <!-- Negative prompt (T2I only) -->
-          <div class="ctrl" id="wan27NegRow">
-            <div class="ctrl-label">Negative prompt</div>
-            <textarea id="wan27Neg" rows="2" placeholder="blurry, distorted, low quality…"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;resize:vertical;"></textarea>
+          <!-- Thinking mode (T2I only) -->
+          <div class="ctrl" id="wan27ThinkingRow">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input type="checkbox" id="wan27Thinking" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+              <span style="font-size:11px;color:var(--dim);">Thinking mode <span style="color:var(--dim2)">(better composition, slower)</span></span>
+            </label>
           </div>
 
           <!-- Seed -->
@@ -2592,14 +2561,6 @@ select.inpaint-num option { background:#fff; color:#111; }
             <div class="ctrl-label">Seed <span style="font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;">(empty = random)</span></div>
             <input type="number" id="wan27Seed" placeholder="42" min="0" max="2147483647"
               style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <!-- Safety -->
-          <div class="ctrl">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-              <input type="checkbox" id="wan27Safety" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
-            </label>
           </div>
 
         </div>
@@ -2943,6 +2904,17 @@ select.inpaint-num option { background:#fff; color:#111; }
         </div>
 
       </div><!-- /psec params -->
+
+      <!-- WAN 2.7 Image count — shown for T2I, placed above Save To -->
+      <div id="wan27CountRow" style="display:none;padding:0 14px 6px;">
+        <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px;">Image count</div>
+        <div class="toggle-row">
+          <input type="radio" name="wan27Count" id="w27c1" value="1" checked><label for="w27c1">1</label>
+          <input type="radio" name="wan27Count" id="w27c2" value="2"><label for="w27c2">2</label>
+          <input type="radio" name="wan27Count" id="w27c3" value="3"><label for="w27c3">3</label>
+          <input type="radio" name="wan27Count" id="w27c4" value="4"><label for="w27c4">4</label>
+        </div>
+      </div>
 
       <!-- Uložit do + Generate -->
       <div style="padding:0 14px 8px; display:flex; align-items:center; gap:8px;">
@@ -4221,6 +4193,19 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div class="dot" id="setupSegmindDot"></div>
       </div>
       <div id="spendBlock_segmind" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
+    </div>
+
+    <!-- Replicate API Key -->
+    <div style="margin-bottom:0; padding:16px 16px 12px;">
+      <div style="font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600;">Replicate API Key</div>
+      <div style="font-size:10px; color:var(--dim2); margin-bottom:8px;">WAN 2.7 Image (custom aspect ratios, 4K Pro) · <a href="https://replicate.com/account/api-tokens" target="_blank" style="color:var(--accent);">Get key →</a></div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="password" id="setupReplicateKey" placeholder="r8_..." autocomplete="off"
+          oninput="onSetupReplicateKey(this.value)"
+          style="flex:1; background:var(--bg2); color:var(--fg); border:1px solid var(--border); padding:7px 10px; font-family:'IBM Plex Mono',monospace; font-size:12px; outline:none;">
+        <div class="dot" id="setupReplicateDot"></div>
+      </div>
+      <div id="spendBlock_replicate" style="margin-top:8px; padding:7px 10px; background:var(--bg2); border:1px solid var(--border);"></div>
     </div>
 
     <!-- OpenRouter API Key -->

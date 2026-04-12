@@ -60,10 +60,27 @@ function selectModel(key) {
     const isPro  = m.id?.includes('-pro');
     document.getElementById('wan27ThinkingRow').style.display = isEdit ? 'none' : '';
     document.getElementById('wan27CountRow').style.display    = isEdit ? 'none' : '';
-    document.getElementById('wan27NegRow').style.display      = (isEdit || !m.negPrompt) ? 'none' : '';
-    document.getElementById('wan27SizeRow').style.display     = isEdit ? 'none' : '';
-    // Pro 4K options visibility
-    document.querySelectorAll('#wan27Size option[data-pro]').forEach(o => o.style.display = isPro ? '' : 'none');
+    document.getElementById('wan27NegRow').style.display      = (!isEdit && m.negPrompt) ? '' : 'none';
+    document.getElementById('wan27SizeRow').style.display     = '';
+    // Hide aspect ratio for edit (model takes aspect from input image)
+    document.getElementById('aspectRatioCtrl').style.display  = isEdit ? 'none' : '';
+    // Pro: show 4K only for T2I
+    const t4k = document.getElementById('w27t4k');
+    const t4kL = document.getElementById('w27t4kLabel');
+    const show4K = isPro && !isEdit;
+    if (t4k) { t4k.style.display = show4K ? '' : 'none'; if (t4kL) t4kL.style.display = show4K ? '' : 'none'; }
+    if (!show4K && t4k?.checked) { document.getElementById('w27t2k').checked = true; }
+    // Filter aspect options to only show supported ratios
+    if (!isEdit) _wan27FilterAspects(true);
+    _wan27UpdateRes();
+  } else {
+    // Restore all aspects + show aspect ctrl for other models
+    _wan27FilterAspects(false);
+    document.getElementById('aspectRatioCtrl').style.display = '';
+    const negRow = document.getElementById('wan27NegRow');
+    if (negRow) negRow.style.display = 'none';
+    const cntRow = document.getElementById('wan27CountRow');
+    if (cntRow) cntRow.style.display = 'none';
   }
   document.getElementById('mysticParams').style.display      = m.type === 'proxy_mystic'      ? '' : 'none';
   document.getElementById('freepikEditParams').style.display = m.type === 'proxy_freepik_edit' ? '' : 'none';
@@ -96,7 +113,8 @@ function selectModel(key) {
     : 'Reference images';
   if (refI2INote) {
     if (m.editModel) {
-      refI2INote.textContent = 'Max 2048px · Larger images auto-resized · Instructions in prompt';
+      const maxPx = m.type === 'wan27r' ? '4096' : '2048';
+      refI2INote.textContent = 'Max ' + maxPx + 'px · Larger images auto-resized · Instructions in prompt';
       refI2INote.style.display = '';
     } else if (m.i2iModel) {
       refI2INote.textContent = 'Max 2048px · Larger images auto-resized · No image = T2I';
@@ -311,3 +329,66 @@ function switchView(v) {
   if (v === 'video') { refreshVideoGalleryUI(); }
 }
 
+
+// ── WAN 2.7 Resolution — tier + main aspect → pixel info ──
+
+// Replicate WAN 2.7 whitelist — only these pixel strings are accepted
+const _WAN27_PIXELS = {
+  '16:9': { '1K': '1280*720',  '2K': '2048*1152', '4K': '4096*2304' },
+  '9:16': { '1K': '720*1280',  '2K': '1152*2048', '4K': '2304*4096' },
+  '1:1':  { '1K': '1024*1024', '2K': '2048*2048', '4K': '4096*4096' },
+  '4:3':  { '1K': '1024*768',  '2K': '2048*1536', '4K': '4096*3072' },
+  '3:4':  { '1K': '768*1024',  '2K': '1536*2048', '4K': '3072*4096' },
+};
+
+function _wan27GetTier() {
+  return document.querySelector('input[name="wan27Tier"]:checked')?.value || '2K';
+}
+
+// Get size string for Replicate API — pixel string or tier preset fallback
+function _wan27GetSize() {
+  const tier = _wan27GetTier();
+  const aspect = document.getElementById('aspectRatio')?.value || '16:9';
+  const px = _WAN27_PIXELS[aspect]?.[tier];
+  return px || tier; // unsupported aspect → send preset (square)
+}
+
+// Update the pixel info label next to Resolution heading
+function _wan27UpdateRes() {
+  const tier = _wan27GetTier();
+  const aspect = document.getElementById('aspectRatio')?.value || '16:9';
+  const m = typeof currentModel !== 'undefined' ? MODELS[currentModel] : null;
+  const isEdit = m?.editModel;
+  const px = _WAN27_PIXELS[aspect]?.[tier];
+  const info = document.getElementById('wan27ResInfo');
+  if (!info) return;
+  if (isEdit) {
+    info.textContent = tier + ' (aspect from input image)';
+  } else if (px) {
+    info.textContent = tier + '  ' + px.replace('*', '×');
+  } else {
+    info.textContent = tier + ' (square — ' + aspect + ' not supported)';
+  }
+}
+
+// Listen for main aspect ratio changes → update pixel info
+document.getElementById('aspectRatio')?.addEventListener('change', () => {
+  if (document.getElementById('wan27Params')?.style.display !== 'none') _wan27UpdateRes();
+});
+
+// Show/hide aspect ratio options based on WAN 2.7 whitelist
+function _wan27FilterAspects(restrict) {
+  const sel = document.getElementById('aspectRatio');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    if (restrict) {
+      opt.style.display = _WAN27_PIXELS[opt.value] ? '' : 'none';
+    } else {
+      opt.style.display = '';
+    }
+  }
+  // If current selection is hidden, switch to 16:9
+  if (restrict && !_WAN27_PIXELS[sel.value]) {
+    sel.value = '16:9';
+  }
+}

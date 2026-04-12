@@ -238,10 +238,10 @@ const MODELS = {
   // Edit: up to 9 refs, instruction-based editing
   // Auth: x-api-key header, sync response
   wan27_std: {
-    id: 'wan2.7-image',
+    id: 'wan-video/wan-2.7-image',
     name: 'WAN 2.7',
     type: 'wan27r',
-    provider: 'segmind',
+    provider: 'replicate',
     refs: false,
     maxRefs: 0,
     editModel: false,
@@ -249,10 +249,10 @@ const MODELS = {
     negPrompt: true,
   },
   wan27_pro: {
-    id: 'wan2.7-image-pro',
+    id: 'wan-video/wan-2.7-image-pro',
     name: 'WAN 2.7 Pro',
     type: 'wan27r',
-    provider: 'segmind',
+    provider: 'replicate',
     refs: false,
     maxRefs: 0,
     editModel: false,
@@ -260,10 +260,10 @@ const MODELS = {
     negPrompt: true,
   },
   wan27_edit: {
-    id: 'wan2.7-image',
+    id: 'wan-video/wan-2.7-image',
     name: 'WAN 2.7 Edit',
     type: 'wan27r',
-    provider: 'segmind',
+    provider: 'replicate',
     refs: true,
     maxRefs: 9,
     editModel: true,
@@ -271,10 +271,10 @@ const MODELS = {
     negPrompt: false,
   },
   wan27_pro_edit: {
-    id: 'wan2.7-image-pro',
+    id: 'wan-video/wan-2.7-image-pro',
     name: 'WAN 2.7 Pro Edit',
     type: 'wan27r',
-    provider: 'segmind',
+    provider: 'replicate',
     refs: true,
     maxRefs: 9,
     editModel: true,

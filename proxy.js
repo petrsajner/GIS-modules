@@ -337,21 +337,30 @@ async function callFreepikSkinEnhancer(freepikKey, proxyUrl, imageB64, opts = {}
 // Image URLs in response expire after 24h — must download immediately
 // ══════════════════════════════════════════════════════════
 
-async function callSegmindWan27(segmindKey, proxyUrl, prompt, model, refs, snap, onStatus) {
+async function callReplicateWan27(replicateKey, proxyUrl, prompt, model, refs, snap, onStatus) {
   const isEdit = !!model.editModel;
-  const modelId = model.id;  // wan2.7-image or wan2.7-image-pro
+  const modelSlug = model.id;  // wan-video/wan-2.7-image or wan-video/wan-2.7-image-pro
 
-  // Build messages content array
-  const content = [];
-  content.push({ text: prompt, type: 'text' });
+  // Build Replicate input
+  const input = { prompt };
+  if (!isEdit) {
+    // T2I: pixel string "2048*1152" or preset "2K" (for unsupported aspects)
+    input.size = snap.size || '2048*1152';
+    if (snap.thinking) input.thinking_mode = true;
+    if (snap.negPrompt) input.negative_prompt = snap.negPrompt;
+  } else {
+    // Edit: tier preset only — model uses input image aspect, tier controls output area
+    input.size = snap.sizeTier || '2K';
+  }
+  if (snap.seed) input.seed = parseInt(snap.seed);
 
-  // Edit mode: upload ref images to R2 → get public URLs → add to content
+  // Edit mode: upload ref images to R2 → get public URLs
   if (isEdit && refs?.length) {
     onStatus?.('⟳ Uploading refs…');
+    const imageUrls = [];
     for (let i = 0; i < Math.min(refs.length, 9); i++) {
       const ref = refs[i];
-      const apiRef = await getRefDataForApi(ref, REF_MAX_PX);
-      // Convert base64 → Blob → upload to R2
+      const apiRef = await getRefDataForApi(ref, 4096); // WAN 2.7 supports up to 4K
       const binary = atob(apiRef.data);
       const bytes = new Uint8Array(binary.length);
       for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
@@ -364,71 +373,59 @@ async function callSegmindWan27(segmindKey, proxyUrl, prompt, model, refs, snap,
       if (!uploadResp.ok) throw new Error(`R2 upload failed for ref ${i + 1}: ${uploadResp.status}`);
       const { url } = await uploadResp.json();
       if (!url) throw new Error(`R2 upload: no URL for ref ${i + 1}`);
-      content.push({ image: url, type: 'image' });
+      imageUrls.push(url);
     }
+    input.images = imageUrls;
   }
 
-  // Build parameters — Segmind uses preset sizes ("1K", "2K", "4K"), not pixel strings
-  // Segmind also requires top-level `prompt` field (messages alone not enough)
-  const parameters = { watermark: false, prompt };
-  if (!isEdit) {
-    // Convert pixel string "2048*1152" → preset "1K"/"2K"/"4K"
-    const sizeStr = snap.size || '2048*1152';
-    const maxDim = Math.max(...sizeStr.split('*').map(Number));
-    parameters.size = maxDim > 2048 ? '4K' : maxDim > 1280 ? '2K' : '1K';
-    if (snap.negPrompt) parameters.negative_prompt = snap.negPrompt;
-  }
-  if (snap.seed) parameters.seed = parseInt(snap.seed);
-
-  // Submit to Worker → Segmind
-  onStatus?.('⟳ Generating…');
-  const resp = await fetch(`${proxyUrl}/segmind/image`, {
+  // Submit prediction via Worker proxy
+  onStatus?.('⟳ Submitting…');
+  const submitResp = await fetch(`${proxyUrl}/replicate/wan27i/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      apiKey: segmindKey,
-      model: modelId,
-      messages: [{ role: 'user', content }],
-      parameters,
-    }),
+    body: JSON.stringify({ apiKey: replicateKey, model: modelSlug, input }),
   });
-
-  // Segmind returns raw image binary (PNG) on success, JSON on error
-  const ct = resp.headers.get('content-type') || '';
-  if (!resp.ok || ct.includes('application/json')) {
-    const err = await resp.json().catch(() => ({}));
-    const detail = err.message || err.output?.message || err.error || JSON.stringify(err).slice(0, 300);
-    throw new Error(`Segmind ${resp.status}: ${detail}`);
+  if (!submitResp.ok) {
+    const err = await submitResp.json().catch(() => ({}));
+    const detail = err.error || err.detail || err.message || err.title || JSON.stringify(err).slice(0, 500);
+    throw new Error(`Replicate submit ${submitResp.status}: ${detail}`);
   }
+  const { id: predictionId } = await submitResp.json();
+  if (!predictionId) throw new Error('Replicate: no prediction ID returned');
 
-  // Read binary image response
-  onStatus?.('⟳ Processing…');
-  const blob = await resp.blob();
-  const mimeType = blob.type || 'image/png';
-  const base64 = await new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res(reader.result.split(',')[1]);
-    reader.onerror = rej;
-    reader.readAsDataURL(blob);
-  });
+  // Poll for completion
+  onStatus?.('⟳ Generating…');
+  let output = null;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const pollResp = await fetch(`${proxyUrl}/replicate/wan27i/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: replicateKey, id: predictionId }),
+    });
+    if (!pollResp.ok) continue;
+    const poll = await pollResp.json();
+    if (poll.status === 'succeeded') { output = poll.output; break; }
+    if (poll.status === 'failed' || poll.status === 'canceled') {
+      throw new Error(`Replicate ${poll.status}: ${poll.error || 'unknown error'}`);
+    }
+    if (poll.status === 'processing') onStatus?.('⟳ Processing…');
+  }
+  if (!output) throw new Error('Replicate: prediction timed out');
 
-  // Detect actual dimensions
-  const actualDims = await new Promise(resolve => {
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload  = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url); };
-    img.onerror = () => { resolve({ w: 0, h: 0 }); URL.revokeObjectURL(url); };
-    img.src = url;
-  });
+  // output is array of image URLs — fetch first one
+  const imageUrl = Array.isArray(output) ? output[0] : output;
+  onStatus?.('⟳ Downloading…');
+  const { imageData, mimeType, width, height } = await _fetchFreepikResult(imageUrl);
 
-  const sizeStr = actualDims.w ? `${actualDims.w}×${actualDims.h}` : (snap.size || '2048×1152').replace('*', '×');
+  const sizeStr = width && height ? `${width}×${height}` : (snap.size || '2048*1152').replace('*', '×');
   function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
-  const g = actualDims.w && actualDims.h ? gcd(actualDims.w, actualDims.h) : 1;
-  const ratioStr = actualDims.w ? `${actualDims.w/g}:${actualDims.h/g}` : '—';
+  const g = width && height ? gcd(width, height) : 1;
+  const ratioStr = width ? `${width/g}:${height/g}` : '—';
 
   return {
     type:     'wan27r',
-    images:   [base64],
+    images:   [imageData],
     mimeType,
     model:    model.name,
     modelKey: getModelKey(model),

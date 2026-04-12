@@ -6,7 +6,7 @@ async function generate() {
   const apiKey = document.getElementById('apiKey').value.trim();
   const rawPrompt = document.getElementById('prompt').value.trim();
   if (!apiKey) { showApiKeyWarning('Google API Key missing', 'This model requires a Google API key. Add it in the Setup tab to start generating.'); return; }
-  if (!rawPrompt && selectedStyles.size === 0) { toast('Enter a prompt or select a style', 'err'); return; }
+  if (!rawPrompt && selectedStyles.size === 0) { showApiKeyWarning('Prompt empty', 'Enter a prompt or select a style before generating.'); return; }
 
   const m = MODELS[currentModel];
   // Preprocessing: @mentions → model-specific format
@@ -144,19 +144,20 @@ async function generate() {
     addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, qwen2Snap, qwen2Count });
 
   } else if (m.type === 'wan27r') {
-    const segmindKey = (localStorage.getItem('gis_segmind_apikey') || '').trim();
+    const replicateKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
     const proxyUrl     = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
-    if (!segmindKey) { showApiKeyWarning('Segmind API Key missing', 'WAN 2.7 Image requires a Segmind API key. Add it in the Setup tab.'); return; }
+    if (!replicateKey) { showApiKeyWarning('Replicate API Key missing', 'WAN 2.7 Image requires a Replicate API key. Add it in the Setup tab.'); return; }
     if (!proxyUrl)     { showApiKeyWarning('Proxy URL missing', 'WAN 2.7 Image requires the GIS proxy URL. Add it in the Setup tab.'); return; }
     const wan27Snap = {
-      size:         document.getElementById('wan27Size')?.value || '2048*1152',
+      sizeTier:     _wan27GetTier(),
+      size:         _wan27GetSize(),
       count:        m.editModel ? 1 : parseInt(document.querySelector('input[name="wan27Count"]:checked')?.value || '1'),
       thinking:     !m.editModel && (document.getElementById('wan27Thinking')?.checked || false),
       seed:         document.getElementById('wan27Seed')?.value.trim() || null,
       negPrompt:    document.getElementById('wan27Neg')?.value?.trim() || '',
       targetFolder: document.getElementById('targetFolder').value,
     };
-    addToQueue({ segmindKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, wan27Snap });
+    addToQueue({ replicateKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, wan27Snap });
 
   } else if (m.type === 'proxy_xai') {
     const xaiKey   = (localStorage.getItem('gis_xai_apikey') || '').trim();
@@ -618,7 +619,7 @@ async function runJob(job) {
           if (tb) tb.textContent = '';
           const snapForCall = { ...job.wan27Snap };
           if (snapForCall.seed) snapForCall.seed = String(parseInt(snapForCall.seed) + i);
-          return callSegmindWan27(job.segmindKey, job.proxyUrl, job.prompt, job.model, job.refsCopy, snapForCall,
+          return callReplicateWan27(job.replicateKey, job.proxyUrl, job.prompt, job.model, job.refsCopy, snapForCall,
             (s) => updatePlaceholderThinking(cardEl, s));
         }, job))
       );
@@ -628,7 +629,7 @@ async function runJob(job) {
         if (r.status === 'fulfilled') {
           const galId = await saveToGallery(r.value, job.prompt, job.wan27Snap?.targetFolder, job.refsCopy, job.rawPrompt, job);
           await replacePlaceholder(cardEl, r.value, job.prompt, galId);
-          trackSpend('segmind', '_wan27_image');
+          trackSpend('replicate', '_wan27_image');
         } else {
           showErrorPlaceholder(cardEl, job, r.reason?.message || String(r.reason));
         }

@@ -14,11 +14,11 @@ Z-Image I2I = výhradně Turbo: `fal-ai/z-image/turbo/image-to-image`.
 
 ---
 
-### WAN 2.7 Image — Replicate API (v165–v168)
+### WAN 2.7 Image — Replicate API (v165–v168, v196en+)
 
-**Endpoint:** `wan-video/wan-2.7-image` na Replicate (`api.replicate.com`)
+**Endpoint:** `wan-video/wan-2.7-image` + `wan-video/wan-2.7-image-pro` na Replicate
 
-**CORS:** Blokováno → přes GIS proxy Worker
+**CORS:** Blokováno → přes GIS proxy Worker (`/replicate/wan27i/submit`, `/replicate/wan27i/status`)
 
 **Auth:** `Authorization: Bearer {replicateKey}`
 
@@ -30,48 +30,70 @@ GET  https://api.replicate.com/v1/predictions/{id}
 → { status, output[] }   ← output je ARRAY URL stringů
 ```
 
-**Parametry (potvrzeno):**
+**Parametry (potvrzeno v196en):**
 ```javascript
 {
   input: {
-    prompt:        string,           // required
-    images:        string[],         // optional — data URI pro edit mode (max 4)
-    size:          string,           // "1280*720" | "2048*1152" | ... (hvězdička!)
-    num_outputs:   number,           // 1 (vždy 1 — paralelismus v GIS)
-    thinking_mode: boolean,          // optional, jen T2I Pro
-    seed:          number,           // optional
+    prompt:           string,    // required
+    images:           string[],  // optional — URLs pro edit mode (max 9, via R2 upload)
+    size:             string,    // pixel string "2048*1152" NEBO preset "2K"
+    num_outputs:      number,    // 1 (vždy 1 — paralelismus v GIS)
+    thinking_mode:    boolean,   // default ON, T2I only
+    negative_prompt:  string,    // optional, T2I only
+    seed:             number,    // optional
   }
 }
 // output: array of URL strings
 ```
 
-**Dostupné size hodnoty:**
+**Size whitelist (ověřený z Replicate playgroundu 12.4.2026):**
 ```
-1280*720   (16:9 HD)     720*1280  (9:16 Portrait)
-2048*1152  (16:9 2K)     1152*2048 (9:16 2K)
-1024*1024  (1:1 Square)  2048*2048 (1:1 2K)
-1024*768   (4:3)         2048*1536 (4:3 2K)
-768*1024   (3:4)         1536*2048 (3:4 2K)
+Presets:  "1K", "2K", "4K"
+1:1  →  1024*1024,  2048*2048,  4096*4096
+16:9 →  1280*720,   2048*1152,  4096*2304
+9:16 →  720*1280,   1152*2048,  2304*4096
+4:3  →  1024*768,   2048*1536,  4096*3072
+3:4  →  768*1024,   1536*2048,  3072*4096
+⚠ 3:2, 2:3, 21:9, 4:5, 1:4 — NEMAJÍ pixel stringy!
 ```
 
-**Cena:** $0.030/image
+**Standard vs Pro:**
+- Standard: max 2K, thinking_mode dostupný
+- Pro: max 4K (T2I only), thinking_mode dostupný
+- 4K NENÍ dostupné pro edit mode (Replicate omezení)
+
+**Edit mode chování:**
+- `size` parametr → tier preset ("1K"/"2K"), určuje výstupní plochu
+- Aspect ratio přebírán z vstupního obrázku
+- Příklad: input 1376×768 + size "2K" → output ~2741×1530
+- Ref limit: 4096px (zvýšen z 2048px)
+
+**Cena:** ~$0.030/image (per-second GPU billing)
 
 **GIS typ:** `wan27r`, provider: `replicate`
 
 **Modely:**
 ```
-wan27_std      — T2I Standard
-wan27_pro      — T2I Pro (thinking_mode: true)
-wan27_edit     — Edit (images[] required, max 4 refs)
-wan27_pro_edit — Edit Pro
+wan27_std      — T2I Standard (max 2K, 5 aspects)
+wan27_pro      — T2I Pro (max 4K, thinking, 5 aspects)
+wan27_edit     — Edit (images[] required, max 9 refs, aspect z input)
+wan27_pro_edit — Edit Pro (max 2K edit, aspect z input)
 ```
 
 **Pozor:**
 - `size` používá hvězdičku (`2048*1152`), ne `×`
+- Validace proti whitelistu — nepodporované hodnoty → 422
 - `num_outputs: 1` vždy — paralelismus = N samostatných predictions
-- `negative_prompt` NEexistuje na Replicate WAN 2.7 image
+- Edit mode: 4K nedostupné, aspect z input image (ne ze selectu)
+
+**Historie providerů:**
+- v165–v168: Replicate (první integrace)
+- v169–v194: fal.ai (nízké rozlišení)
+- v195: Segmind (square only — žádný aspect ratio)
+- v196+: zpět Replicate (5 aspect ratios, ověřený whitelist)
 
 ---
+
 
 ### WAN 2.7 I2V — Replicate API (v171)
 

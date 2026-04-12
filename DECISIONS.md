@@ -1,6 +1,42 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 9. 4. 2026 · v190en*
+*Aktualizováno 12. 4. 2026 · v196en*
+
+---
+
+## WAN 2.7 Image: Segmind → Replicate (12. 4. 2026)
+
+**Problém:** Segmind WAN 2.7 Image endpoint nepodporuje aspect ratio. Pouze square presety (1K=1024², 2K=2048², 4K=4096²). Parametry `aspect_ratio`, `ratio`, `width`, `height`, `size: "custom"` — žádný z nich nefunguje. Oficiální llms.txt potvrzuje: pouze `size: "1K"/"2K"` (standard) nebo `"1K"/"2K"/"4K"` (Pro).
+
+**Výzkum alternativ:**
+1. **Segmind** — square only, bez aspect ratio
+2. **Replicate** (`wan-video/wan-2.7-image`) — 15 pixel stringů pro 5 aspects × 3 tiers + presets
+3. **DashScope** (Alibaba Cloud direct) — plná flexibilita custom pixelů, ale vyžaduje Alibaba Cloud účet
+4. **WaveSpeedAI** — custom 512–4096px, ale neznámý provider
+5. **fal.ai** — custom rozměry fungovaly dříve, ale nízké max rozlišení (důvod odchodu)
+
+**Rozhodnutí:** Replicate — podporuje 5 aspect ratios na pixel úrovni, máme existující API klíč, Bearer auth pattern známý. Model 6 dní starý ale 11K+ runs.
+
+**Replicate size whitelist (ověřený z playgroundu):**
+- 1:1, 16:9, 9:16, 4:3, 3:4 — pixelové stringy pro 1K/2K/4K
+- 3:2, 2:3, 21:9, 4:5, 1:4 — NEJSOU v whitelistu (fallback na preset = square)
+- README sliboval "custom dimensions like 1920*1080" ale validátor odmítal hodnoty mimo whitelist
+
+**Edit mode resolution:** Model bere aspect z input image, `size` tier určuje output plochu. Příklad: input 1376×768 + size "2K" → output 2741×1530. 4K nedostupný pro edit (Replicate omezení).
+
+**UI rozhodnutí:**
+- Nabídnout pouze podporované aspects (5 ze 10), nepodporované skrýt
+- Edit mode: aspect ctrl schovat (irelevantní), resolution tier zobrazit
+- Negative prompt přesunut pod hlavní prompt (auto-resize 1 řádek)
+- Image count přesunut nad Save To
+
+**Poučení:**
+- VŽDY kontrolovat playground/API schema, ne jen README
+- Size whitelisty se liší mezi providery i mezi modely stejného provideru
+- Error message z Replicate 422 obsahuje kompletní whitelist — ale na output kartě je oříznutá
+
+---
+
 
 ---
 
