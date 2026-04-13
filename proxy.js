@@ -2,8 +2,10 @@
 // PROXY PROVIDERS — xAI + Luma (via Cloudflare Workers)
 // ══════════════════════════════════════════════════════════
 
-// Grok Imagine — xAI synchronous T2I via Worker proxy
+// Grok Imagine / Grok Imagine Pro — xAI synchronous T2I + Edit via Worker proxy
 // Worker endpoint: POST /xai/generate
+// T2I: no refs → /v1/images/generations
+// Edit: 1–5 refs → /v1/images/edits (multi-image merge/edit)
 // Response: { images: [{ b64_data, mime_type }] }
 async function callProxyXaiMulti(apiKey, proxyUrl, prompt, model, refs, snap) {
   const count       = snap?.grokCount   || 1;
@@ -20,10 +22,14 @@ async function callProxyXaiMulti(apiKey, proxyUrl, prompt, model, refs, snap) {
     resolution,
   };
 
-  // I2I: first ref → image_url
+  // Edit mode: 1–5 refs → image_urls array of data URIs
   if (refs && refs.length > 0) {
-    const apiRef = await getRefDataForApi(refs[0], 'setting');
-    payload.image_url = `data:${apiRef.mimeType};base64,${apiRef.data}`;
+    const urls = [];
+    for (const r of refs) {
+      const apiRef = await getRefDataForApi(r, 'setting');
+      urls.push(`data:${apiRef.mimeType};base64,${apiRef.data}`);
+    }
+    payload.image_urls = urls;
   }
 
   const resp = await fetch(`${proxyUrl}/xai/generate`, {

@@ -1,32 +1,23 @@
 // ─────────────────────────────────────────────
 // xAI Grok Imagine provider
-// Model: grok-imagine-image
-// T2I:  POST /v1/images/generations
-// I2I:  totéž + image: { url: "data:..." }
-// resolution: "1k" (default) | "2k" (vyšší kvalita, extra_body parametr)
+// Models: grok-imagine-image, grok-imagine-image-pro
+// T2I:    POST /v1/images/generations   (no refs)
+// Edit:   POST /v1/images/edits         (1–5 refs)
+// resolution: "1k" (default) | "2k"
+// response_format: "b64_json" → base64 direct (no URL fetch)
 // ─────────────────────────────────────────────
 
 import { errorResponse, jsonResponse } from '../utils/cors.js';
 
-async function urlToBase64(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Image fetch ${resp.status}: ${resp.statusText}`);
-  const buf   = await resp.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary  = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
 // ── Payload GIS → Worker ──────────────────────────────────────
 // {
-//   xai_key:      string,
-//   prompt:       string,
-//   model?:       "grok-imagine-image",
-//   aspect_ratio?: "16:9" | "1:1" | ... (default "16:9")
-//   n?:           1–4 (default 1)
-//   resolution?:  "1k" | "2k" (default "1k")
-//   image_url?:   "data:image/jpeg;base64,..." — I2I editace
+//   xai_key:       string,
+//   prompt:        string,
+//   model?:        "grok-imagine-image" | "grok-imagine-image-pro",
+//   aspect_ratio?: "16:9" | "1:1" | "auto" | ... (default "16:9")
+//   n?:            1–10 (default 1)
+//   resolution?:   "1k" | "2k" (default "1k")
+//   image_urls?:   ["data:image/jpeg;base64,...", ...] — 1–5 images for Edit
 // }
 //
 // ── Response Worker → GIS ─────────────────────────────────────
@@ -40,31 +31,46 @@ export async function handleXai(request) {
     return errorResponse('Invalid JSON body', 400);
   }
 
-  const { xai_key, prompt, model, aspect_ratio, n, resolution, image_url } = body;
+  const { xai_key, prompt, model, aspect_ratio, n, resolution, image_urls } = body;
 
-  if (!xai_key) return errorResponse('Chybí xai_key', 400);
-  if (!prompt)  return errorResponse('Chybí prompt', 400);
+  if (!xai_key) return errorResponse('Missing xai_key', 400);
+  if (!prompt)  return errorResponse('Missing prompt', 400);
 
   const count   = Math.min(Math.max(parseInt(n) || 1, 1), 10);
   const aspectR = aspect_ratio || '16:9';
   const res     = resolution === '2k' ? '2k' : '1k';
+  const mdl     = model || 'grok-imagine-image';
 
+  // ── Decide endpoint: T2I vs Edit ────────────────────────
+  const isEdit  = Array.isArray(image_urls) && image_urls.length > 0;
+  const apiUrl  = isEdit
+    ? 'https://api.x.ai/v1/images/edits'
+    : 'https://api.x.ai/v1/images/generations';
+
+  // ── Build payload ───────────────────────────────────────
   const payload = {
-    model:        model || 'grok-imagine-image',
+    model:           mdl,
     prompt,
-    n:            count,
-    aspect_ratio: aspectR,
-    resolution:   res,   // vždy explicitně — "1k" nebo "2k"
+    n:               count,
+    response_format: 'b64_json',
+    resolution:      res,
   };
 
-  // I2I editace — přidat zdrojový obrázek
-  if (image_url) {
-    payload.image = { url: image_url };
+  if (isEdit) {
+    // Edit endpoint: images array [{type, url}, ...]
+    payload.images = image_urls.map(url => ({ type: 'image_url', url }));
+    // Aspect ratio for multi-image edits (single-image respects input)
+    if (image_urls.length > 1) {
+      payload.aspect_ratio = aspectR;
+    }
+  } else {
+    // T2I: always send aspect_ratio
+    payload.aspect_ratio = aspectR;
   }
 
   let xaiResp;
   try {
-    xaiResp = await fetch('https://api.x.ai/v1/images/generations', {
+    xaiResp = await fetch(apiUrl, {
       method:  'POST',
       headers: {
         'Authorization': `Bearer ${xai_key}`,
@@ -85,23 +91,25 @@ export async function handleXai(request) {
   try {
     xaiData = await xaiResp.json();
   } catch {
-    return errorResponse('xAI API vrátilo neplatné JSON', 502);
+    return errorResponse('xAI API returned invalid JSON', 502);
   }
 
   const items = xaiData.data;
   if (!Array.isArray(items) || items.length === 0) {
-    return errorResponse('xAI nevrátilo žádné obrázky', 502, JSON.stringify(xaiData));
+    return errorResponse('xAI returned no images', 502, JSON.stringify(xaiData));
   }
 
-  let images;
-  try {
-    images = await Promise.all(items.map(async img => {
-      if (!img.url) throw new Error('xAI: chybí url v položce výsledku');
-      const b64 = await urlToBase64(img.url);
-      return { b64_data: b64, mime_type: 'image/jpeg' };
-    }));
-  } catch (e) {
-    return errorResponse(`Fetch výsledku selhal: ${e.message}`, 502);
+  // ── Extract b64_json results ────────────────────────────
+  const images = items.map(img => {
+    if (img.b64_json) {
+      return { b64_data: img.b64_json, mime_type: 'image/jpeg' };
+    }
+    // Fallback: should not happen with response_format=b64_json
+    return null;
+  }).filter(Boolean);
+
+  if (images.length === 0) {
+    return errorResponse('xAI returned no base64 data', 502);
   }
 
   return jsonResponse({ images });

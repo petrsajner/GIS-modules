@@ -1,9 +1,61 @@
 # GIS — API MODELS
-*Aktualizace po v197en · 12. 4. 2026*
+*Aktualizace po v198en · 13. 4. 2026*
 
 ---
 
-## AKTUALIZACE v197en (12. 4. 2026)
+## AKTUALIZACE v198en (13. 4. 2026)
+
+---
+
+### Grok Imagine — kompletní integrace
+
+**Modely:**
+| Model | ID | Price | Max refs | Resolution |
+|-------|-----|-------|----------|------------|
+| Grok Standard | `grok-imagine-image` | $0.02/img | 5 | 1k, 2k |
+| Grok Pro | `grok-imagine-image-pro` | $0.07/img | 1 | 1k, 2k |
+
+**API:**
+- T2I: `POST https://api.x.ai/v1/images/generations`
+- Edit: `POST https://api.x.ai/v1/images/edits`
+- Auth: `Authorization: Bearer {key}`
+- Max n per request: 10
+- `response_format: "b64_json"` → přímý base64 output
+
+**Edit payload:**
+```json
+{
+  "model": "grok-imagine-image",
+  "prompt": "...",
+  "n": 1,
+  "resolution": "2k",
+  "response_format": "b64_json",
+  "images": [
+    { "type": "image_url", "url": "data:image/jpeg;base64,..." },
+    { "type": "image_url", "url": "data:image/jpeg;base64,..." }
+  ]
+}
+```
+
+**Aspect ratios (13 validních):**
+`1:1, 3:4, 4:3, 9:16, 16:9, 2:3, 3:2, 9:19.5, 19.5:9, 9:20, 20:9, 1:2, 2:1, auto`
+
+**Nepodporované (422):** `21:9, 4:5, 1:4, 4:1`
+
+**Gotchas:**
+- Pro model: max 1 input image (API error: "supports at most 1 input image(s)")
+- Single-image edit: output aspect = input aspect (aspect_ratio ignored)
+- Multi-image edit: aspect_ratio overrides
+- Pro default resolution: 2k (standard: 1k)
+
+---
+
+### Qwen Image 2 Edit — opravený maxRefs
+
+**Oprava:** maxRefs 4 → **3** (API error: "Maximum 3 reference images allowed")
+
+---
+
 
 ---
 

@@ -168,7 +168,7 @@ async function generate() {
     const xaiSnap = {
       aspectRatio:  document.getElementById('aspectRatio').value || '16:9',
       grokRes:      document.querySelector('input[name="grokRes"]:checked')?.value || '1k',
-      grokCount:    parseInt(document.querySelector('input[name="grokCount"]:checked')?.value || '1'),
+      grokCount:    parseInt(document.getElementById('grokCountVal')?.value || '1'),
       targetFolder: document.getElementById('targetFolder').value,
     };
     addToQueue({ apiKey: xaiKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, xaiSnap });
@@ -238,7 +238,9 @@ let jobQueue = [];
 const runningModelCounts = new Map();
 
 function getModelConcurrencyLimit(modelId) {
-  return 4; // jednotný limit pro fal.ai i Google modely
+  // xAI Grok — lower limit to avoid rate-limit 503s (especially with n>1)
+  if (modelId === 'grok-imagine-image' || modelId === 'grok-imagine-image-pro') return 2;
+  return 4; // default for fal.ai, Google, etc.
 }
 
 function addToQueue(jobData) {
@@ -824,7 +826,7 @@ function renderQueue() {
       j.status === 'pending'
         ? `<span>waiting</span><button onclick="cancelJob('${j.id}')" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0;line-height:1;" title="Cancel">✕</button>`
         : j.status === 'running' && j.retryAttempt > 0
-          ? `<span>retry ${j.retryAttempt}/${RETRY_MAX}…</span>`
+          ? `<span>retry ${j.retryAttempt}/${j.retryTotal || '?'}…</span>`
           : j.status === 'running'
             ? '<span>⟳ generating…</span>'
             : j.status === 'done'

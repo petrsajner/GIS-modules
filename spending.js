@@ -87,7 +87,8 @@ const SPEND_PRICES = {
   '_fal_video':         0.084,   // Updated fallback to mid-tier Kling Standard
 
   // ── xAI (per image) ─────────────────────────────────
-  'grok-imagine-image': 0.070,
+  'grok-imagine-image':     0.020,
+  'grok-imagine-image-pro': 0.070,
 
   // ── Luma — image (per image) ────────────────────────
   'photon-1':           0.032,   // Luma Photon

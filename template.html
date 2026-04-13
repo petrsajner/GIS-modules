@@ -2126,7 +2126,8 @@ select.inpaint-num option { background:#fff; color:#111; }
           <option value="qwen2_edit">Qwen Image 2 Edit — fal.ai · $0.035/img · instruction edit · up to 4 refs</option>
           <option value="qwen2_pro_edit">Qwen Image 2 Pro Edit — fal.ai · $0.075/img · edit · highest quality · up to 4 refs</option>
           <option disabled>──────────────────</option>
-          <option value="grok_imagine">Grok Imagine — xAI · $0.07/img · T2I</option>
+          <option value="grok_imagine">Grok Imagine — xAI · $0.02/img · T2I · Edit</option>
+          <option value="grok_imagine_pro">Grok Imagine Pro — xAI · $0.07/img · T2I · Edit</option>
           <option disabled>──────────────────</option>
           <option value="photon_flash">Photon Flash — Luma · $0.002/img · refs ✦ · character ✦ · cheapest</option>
           <option value="photon">Photon — Luma · $0.015/img · refs ✦ · character ✦ · highest quality</option>
@@ -2222,8 +2223,11 @@ select.inpaint-num option { background:#fff; color:#111; }
             <option value="2:3">2:3 — Portrait tall</option>
             <option value="3:2">3:2 — Photo landscape</option>
             <option value="4:5">4:5 — Portrait social</option>
+            <option value="2:1">2:1 — Banner wide</option>
+            <option value="1:2">1:2 — Banner tall</option>
             <option value="1:4">1:4 — Vertical banner</option>
             <option value="4:1">4:1 — Horizontal banner</option>
+            <option value="auto">auto — Model decides</option>
           </select>
         </div>
 
@@ -2661,21 +2665,28 @@ select.inpaint-num option { background:#fff; color:#111; }
             </div>
           </div>
 
-          <!-- Image count -->
+          <!-- Image count — segmented slider -->
           <div class="ctrl">
-            <div class="ctrl-label">Image count</div>
-            <div class="toggle-row">
-              <input type="radio" name="grokCount" id="gk1" value="1" checked><label for="gk1">1</label>
-              <input type="radio" name="grokCount" id="gk2" value="2"><label for="gk2">2</label>
-              <input type="radio" name="grokCount" id="gk3" value="3"><label for="gk3">3</label>
-              <input type="radio" name="grokCount" id="gk4" value="4"><label for="gk4">4</label>
+            <div class="ctrl-label">IMAGE COUNT</div>
+            <input type="hidden" id="grokCountVal" value="1">
+            <div id="grokCountBar" style="display:flex;width:100%;border-radius:4px;overflow:hidden;border:1px solid var(--border);cursor:pointer;" onclick="(function(e){var c=e.target.closest('[data-gc]');if(c){document.getElementById('grokCountVal').value=c.dataset.gc;document.querySelectorAll('#grokCountBar [data-gc]').forEach(function(s){s.style.background=s.dataset.gc===c.dataset.gc?'var(--accent)':((+s.dataset.gc)%2?'rgba(255,255,255,.07)':'rgba(255,255,255,.03)');s.style.color=s.dataset.gc===c.dataset.gc?'#fff':'rgba(255,255,255,.5)';})}})(event)">
+              <div data-gc="1"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:var(--accent);color:#fff;transition:background .15s;">1</div>
+              <div data-gc="2"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">2</div>
+              <div data-gc="3"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">3</div>
+              <div data-gc="4"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">4</div>
+              <div data-gc="5"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">5</div>
+              <div data-gc="6"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">6</div>
+              <div data-gc="7"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">7</div>
+              <div data-gc="8"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">8</div>
+              <div data-gc="9"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">9</div>
+              <div data-gc="10" style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">10</div>
             </div>
           </div>
 
           <!-- I2I note -->
           <div class="ctrl" style="border-top:1px solid var(--border);padding-top:8px;margin-top:2px;">
             <div style="font-size:10px;color:var(--dim2);line-height:1.5;">
-              Add a ref image for I2I editing.<br>The model will modify the image based on your prompt.
+              Add ref images for editing (up to 5).<br>Single ref = aspect from input · Multi-ref = aspect from setting · <code>auto</code> ratio lets model decide.
             </div>
           </div>
 
@@ -4889,6 +4900,13 @@ select.inpaint-num option { background:#fff; color:#111; }
         <option value="flux2_dev">Flux 2 Dev</option>
         <option value="seedream5lite">Seedream 5</option>
         <option value="seedream45">Seedream 4.5</option>
+        <option value="grok_imagine">Grok</option>
+        <option value="grok_imagine_pro">Grok Pro</option>
+        <option value="kling_v3">Kling V3</option>
+        <option value="kling_o3">Kling O3</option>
+        <option value="wan27_edit">WAN 2.7</option>
+        <option value="qwen2_edit">Qwen 2 Edit</option>
+        <option value="qwen2_pro_edit">Qwen 2 Pro</option>
       </select>
       <span class="etm-model-badge" id="etmModelBadge">NB2</span>
       <button class="etm-close" onclick="closeEditTool()">×</button>
@@ -4918,13 +4936,9 @@ select.inpaint-num option { background:#fff; color:#111; }
         </div>
       </div>
       <!-- Reference preview column -->
-      <div class="etm-ref-col" id="etmRefCol">
+      <div class="etm-ref-col" id="etmRefCol" style="overflow-y:auto;">
         <div class="etm-ref-label" id="etmRefLabel">Reference</div>
-        <img id="etmRefPreview" style="display:none" onerror="this.style.display='none'">
-        <div id="etmRef2Wrap" style="display:none">
-          <div class="etm-ref-label" style="margin-top:8px;color:rgba(60,190,100,.7);">Ref 2 (angle)</div>
-          <img id="etmRefPreview2" style="display:none;border:1px solid rgba(60,190,100,.5);" onerror="this.style.display='none'">
-        </div>
+        <div id="etmRefContainer"></div>
       </div>
     </div>
     <div class="etm-footer">

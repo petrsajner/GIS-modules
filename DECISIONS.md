@@ -1,6 +1,96 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 12. 4. 2026 · v197en*
+*Aktualizováno 13. 4. 2026 · v198en*
+
+---
+
+## Grok Imagine — kompletní integrace (13. 4. 2026)
+
+**Kontext:** xAI Grok Imagine API nabízí řadu features které GIS neměl implementované: multi-image editing (5 refs), Grok Pro model, count až 10, `response_format: b64_json`.
+
+**Rozhodnutí Worker:**
+- T2I → `/v1/images/generations`, Edit → `/v1/images/edits` — dva různé endpointy
+- `response_format: b64_json` eliminuje Worker-side URL fetch (urlToBase64 funkce odstraněna). API vrátí base64 přímo → rychlejší, spolehlivější, menší Worker latence.
+- Multi-image: `images: [{type: "image_url", url: "data:..."}]` array
+
+**Rozhodnutí Pro vs Standard:**
+- Pro (`grok-imagine-image-pro`): maxRefs 1 (API limit potvrzený errorem), default 2K, $0.07/img
+- Standard (`grok-imagine-image`): maxRefs 5, default 1K, $0.02/img (cena byla špatně $0.07)
+
+**Rozhodnutí aspect ratio:**
+- Grok podporuje 13 poměrů (nikoliv globální sadu GIS). `_grokFilterAspects()` filtruje.
+- Nepodporované (21:9, 4:5, 1:4, 4:1) se skryjí. Validace: API error "unknown variant".
+
+**Rozhodnutí concurrency:**
+- xAI limit snížen na 2 concurrent requesty (z globálních 4). 10 concurrent requestů z batch/Special Tools způsobovaly 503 + CORS error (CF Worker bez CORS headers na 503).
+
+---
+
+## Edit Tool — 7 modelových typů (13. 4. 2026)
+
+**Problém:** Edit Tool znal jen 3 typy (gemini, flux, seedream). Nové modely (Grok, Kling, Qwen, WAN) neměly specifické prompt šablony a mapovaly se na gemini.
+
+**Rozhodnutí:**
+- Rozšířit type systém na 7 typů: gemini, flux, seedream, kling, qwen2, grok, wan
+- Každý typ má vlastní ETM_ELEMENT_* template s ref formátem, neg prompt pravidly, a prompt strukturou
+- Badge má unikátní barvu per typ
+- `_etmReadaptPrompt` automaticky konvertuje prompt při přepnutí modelu
+
+**Prompt šablony (research-based):**
+- Kling: @Image1 refs, akční slovesa (swap/replace/add), strukturovaný
+- Qwen 2: instrukce + multi-image compositing, neg prompt
+- Grok: natural language, image N notation, bez neg prompt
+- WAN 2.7: ultra-krátký pod 40 slov, neg prompt
+
+---
+
+## Edit Tool — TYPE A/B klasifikace (13. 4. 2026)
+
+**Problém:** Agent klasifikoval "přidej 3 lidi ze referencí" jako TYPE B (camera reframe) místo TYPE A (element edit). Generoval 4 varianty místo 1 promptu. Refs nebyly správně referencovány.
+
+**Rozhodnutí:**
+1. TYPE B = POUZE změna pohledu, ŽÁDNÁ změna obsahu. Jakmile se mění obsah → TYPE A.
+2. "Closer shot + change lighting" = TYPE A (camera + content = edit)
+3. Multi-ref TYPE A: prompt MUSÍ explicitně referencovat KAŽDÝ obrázek by number
+4. Keep section VŽDY obsahuje "camera angle, framing" (prevence reframe u Seedream aj.)
+5. Zákaz invence mood/grading/lighting z jiných referencí (pokud uživatel nežádá)
+
+---
+
+## Ref prefix — čistý prompt bez labelů (13. 4. 2026)
+
+**Problém:** Prefix `[Reference images: image 1 = "REF_055", ...]` posílal auto-generované názvy souborů modelu. Model ale soubory nedostává — dostává raw base64 data. "REF_055" je šum.
+
+**Rozhodnutí:**
+- Prompt posílaný modelu: `[Reference images: image 1, image 2, image 3]` — jen čísla, žádné labely
+- User labels viditelné v UI (mention dropdown) ale NE v API promptu
+- Platí pro gemini i proxy_xai (oba typy sdílejí stejný preprocessing)
+
+---
+
+## Qwen 2 Edit — maxRefs opraveno (13. 4. 2026)
+
+**Problém:** `maxRefs: 4` ale API vrací 422: "Maximum 3 reference images allowed"
+
+**Rozhodnutí:** maxRefs 4 → 3. API limit je 3, ne 4 jak uvádí dokumentace.
+
+---
+
+## Error karty — Dismiss button (13. 4. 2026)
+
+**Rozhodnutí:** Přidán ✕ Dismiss button k error kartám. Smaže kartu a reflow grid. Uživatel nemusí scrollovat přes staré chyby.
+
+---
+
+## RETRY_MAX bug (13. 4. 2026)
+
+**Problém:** `RETRY_MAX is not defined` v renderQueue při NB2 retry po 503.
+
+**Příčina:** Proměnná `RETRY_MAX` nikdy neexistovala. `withRetry` nastavuje `job.retryTotal`.
+
+**Fix:** `RETRY_MAX` → `j.retryTotal || '?'`
+
+---
 
 ---
 

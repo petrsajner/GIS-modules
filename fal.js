@@ -52,9 +52,17 @@ async function _falQueue(falKey, endpointPath, payload, onStatus, signal) {
         headers: { 'Authorization': `Key ${falKey}` },
         signal,
       });
-      if (!statusRes.ok) continue;
+      if (!statusRes.ok) {
+        const errBody = await statusRes.text().catch(() => '');
+        console.error(`[GIS fal] Status poll ${statusRes.status}:`, errBody.slice(0, 500));
+        if (statusRes.status === 422) throw new Error(`fal.ai: status check failed (422): ${errBody.slice(0, 300)}`);
+        continue;
+      }
       statusData = await statusRes.json();
-    } catch (_) { continue; }
+    } catch (e) {
+      if (e.message?.includes('fal.ai:')) throw e;  // re-throw our own errors
+      continue;
+    }
 
     const status = statusData.status;
     if (status === 'IN_QUEUE')    { onStatus?.(`⟳ In queue… (${elapsed}s)`);     continue; }
@@ -71,7 +79,8 @@ async function _falQueue(falKey, endpointPath, payload, onStatus, signal) {
       });
       if (!resultRes.ok) {
         const errBody = await resultRes.text().catch(() => '');
-        throw new Error(`fal.ai: result fetch failed (${resultRes.status}): ${errBody.slice(0, 200)}`);
+        console.error(`[GIS fal] Result fetch ${resultRes.status}:`, errBody);
+        throw new Error(`fal.ai: result fetch failed (${resultRes.status}): ${errBody.slice(0, 400)}`);
       }
       return await resultRes.json();
     }

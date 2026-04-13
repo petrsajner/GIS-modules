@@ -1,5 +1,5 @@
 # GIS — ARCHITEKTURA
-*Aktuální pro v197en · 12. 4. 2026*
+*Aktuální pro v198en · 13. 4. 2026*
 
 ---
 

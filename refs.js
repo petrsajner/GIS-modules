@@ -385,7 +385,7 @@ async function handleMentionInput(e) {
 function _refModelLabel(refIdx, modelType) {
   if (modelType === 'kling' || modelType === 'flux') return `@Image${refIdx + 1}`;
   if (modelType === 'seedream') return `Figure ${refIdx + 1}`;
-  if (modelType === 'gemini') return `image ${refIdx + 1}`;
+  if (modelType === 'gemini' || modelType === 'proxy_xai') return `image ${refIdx + 1}`;
   return null; // other models: use user label
 }
 
@@ -521,7 +521,7 @@ function promptModelToUserLabels(prompt, activeRefs, modelType) {
     });
   }
 
-  if (modelType === 'gemini') {
+  if (modelType === 'gemini' || modelType === 'proxy_xai') {
     let p = prompt.replace(/^\[Reference images:[^\]]*\]\s*/i, '');
     p = p.replace(/\bimage\s+\d+\s*\(([^)]+)\)/gi, (full, label) => {
       return '@' + label.trim().replace(/\s+/g, '_');
@@ -597,23 +597,17 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
     });
   }
 
-  if (modelType === 'gemini') {
+  if (modelType === 'gemini' || modelType === 'proxy_xai') {
     // Strip any existing prefix to avoid duplication (rewritePromptForModel may have added it already)
     const strippedPrompt = prompt.replace(/^\[Reference images:[^\]]*\]\s*/gi, '');
-    const namedRefs = activeRefs.filter(r => r.userLabel || r.autoName);
     let prefix = '';
-    if (namedRefs.length > 0) {
-      const descs = activeRefs.map((r, i) => {
-        const lbl = r.userLabel || r.autoName;
-        return `image ${i + 1} = "${lbl}"`;
-      }).join(', ');
+    if (activeRefs.length > 0) {
+      const descs = activeRefs.map((r, i) => `image ${i + 1}`).join(', ');
       prefix = `[Reference images: ${descs}] `;
     }
     const body = strippedPrompt.replace(/@([\w]+)/g, (full, mention) => {
       const idx = findIdx(mention);
-      if (idx < 0) return full;
-      const r = activeRefs[idx];
-      return `image ${idx + 1} (${r.userLabel || r.autoName})`;
+      return idx >= 0 ? `image ${idx + 1}` : full;
     });
     return prefix + body;
   }

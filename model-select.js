@@ -22,7 +22,8 @@ const MODEL_DESCS = {
   qwen2_pro:       'fal.ai · $0.075/img · T2I Pro · 35 steps · highest quality · production',
   qwen2_edit:      'fal.ai · $0.035/img · instruction edit · no masks · natural language',
   qwen2_pro_edit:  'fal.ai · $0.075/img · Pro instruction edit · highest faithfulness',
-  grok_imagine:    'xAI · $0.07/img · T2I · Aurora engine · permissive content policy · proxy ✦',
+  grok_imagine:    'xAI · $0.02/img · T2I + Edit · up to 5 refs · Aurora engine · 1K/2K · proxy ✦',
+  grok_imagine_pro:'xAI · $0.07/img · T2I + Edit · up to 5 refs · higher quality · 1K/2K · proxy ✦',
   photon_flash:    'Luma · $0.002/img · refs ✦ max 14 · style_ref ✦ · character_ref ✦ · cheapest · proxy ✦',
   photon:          'Luma · $0.015/img · refs ✦ max 14 · style_ref ✦ · character_ref ✦ · highest quality · proxy ✦',
   mystic_realism:    'Mystic · Freepik/Magnific · realistic color palette · "less AI look" · 1K/2K/4K · proxy ✦',
@@ -51,6 +52,11 @@ function selectModel(key) {
   document.getElementById('klingParams').style.display    = m.type === 'kling'    ? '' : 'none';
   document.getElementById('zimageParams').style.display   = m.type === 'zimage'   ? '' : 'none';
   document.getElementById('grokParams').style.display     = m.type === 'proxy_xai'   ? '' : 'none';
+  // Grok: default 2K for Pro
+  if (m.type === 'proxy_xai') {
+    const isPro = key === 'grok_imagine_pro';
+    document.getElementById(isPro ? 'gkr2k' : 'gkr1k').checked = true;
+  }
   document.getElementById('lumaParams').style.display     = m.type === 'proxy_luma'  ? '' : 'none';
   document.getElementById('qwen2Params').style.display    = m.type === 'qwen2'       ? '' : 'none';
   document.getElementById('wan27Params').style.display    = m.type === 'wan27r'      ? '' : 'none';
@@ -85,6 +91,8 @@ function selectModel(key) {
     const cntRow = document.getElementById('wan27CountRow');
     if (cntRow) cntRow.style.display = 'none';
   }
+  // Grok: filter aspect ratios to only xAI-supported values
+  _grokFilterAspects(m.type === 'proxy_xai');
   document.getElementById('mysticParams').style.display      = m.type === 'proxy_mystic'      ? '' : 'none';
   document.getElementById('freepikEditParams').style.display = m.type === 'proxy_freepik_edit' ? '' : 'none';
 
@@ -112,18 +120,21 @@ function selectModel(key) {
             : 'Input image (required)')
         : m.type === 'qwen2' ? 'Input images (edit · compositing)'
         : 'Input image (edit)')
-    : isI2IModel ? 'Input image (I2I)'
+    : isI2IModel ? (m.type === 'proxy_xai' ? 'Input images (edit · up to 5)' : 'Input image (I2I)')
     : m.type === 'proxy_mystic' ? 'Refs: [0] Structure · [1] Style'
     : 'Reference images';
   if (refI2INote) {
     if (m.editModel) {
-      const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to 4 images · Instructions in prompt'
+      const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to 3 images · Instructions in prompt'
                  : m.type === 'wan27r' ? 'Max 4096px · Larger images auto-resized · Instructions in prompt'
                  :                       'Max 2048px · Larger images auto-resized · Instructions in prompt';
       refI2INote.textContent = info;
       refI2INote.style.display = '';
     } else if (m.i2iModel) {
-      refI2INote.textContent = 'Max 2048px · Larger images auto-resized · No image = T2I';
+      const info = m.type === 'proxy_xai'
+        ? 'Up to 5 images · Single ref = output matches input aspect · Multi-ref = aspect from setting'
+        : 'Max 2048px · Larger images auto-resized · No image = T2I';
+      refI2INote.textContent = info;
       refI2INote.style.display = '';
     } else {
       refI2INote.style.display = 'none';
@@ -405,4 +416,15 @@ function _wan27FilterAspects(restrict) {
   if (restrict && !_WAN27_PIXELS[sel.value]) {
     sel.value = '16:9';
   }
+}
+
+const _GROK_ASPECTS = new Set(['1:1','3:4','4:3','9:16','16:9','2:3','3:2','9:19.5','19.5:9','9:20','20:9','1:2','2:1','auto']);
+function _grokFilterAspects(restrict) {
+  if (!restrict) return;  // other filters handle restore
+  const sel = document.getElementById('aspectRatio');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    opt.style.display = _GROK_ASPECTS.has(opt.value) ? '' : 'none';
+  }
+  if (!_GROK_ASPECTS.has(sel.value)) sel.value = '16:9';
 }

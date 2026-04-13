@@ -321,7 +321,7 @@ const MODELS = {
     type: 'qwen2',
     provider: 'fal',
     refs: true,
-    maxRefs: 4,       // multi-image compositing (up to 4 refs)
+    maxRefs: 3,       // multi-image compositing (API limit: 3 refs)
     editModel: true,  // ref panel = vstupní obrázky pro instrukční editaci
     seed: true,
     steps: true,      // default 25
@@ -336,7 +336,7 @@ const MODELS = {
     type: 'qwen2',
     provider: 'fal',
     refs: true,
-    maxRefs: 4,       // multi-image compositing (up to 4 refs)
+    maxRefs: 3,       // multi-image compositing (API limit: 3 refs)
     editModel: true,
     seed: true,
     steps: true,      // default 35
@@ -348,6 +348,16 @@ const MODELS = {
   grok_imagine: {
     id: 'grok-imagine-image',
     name: 'Grok Imagine',
+    type: 'proxy_xai',
+    refs: true,
+    maxRefs: 5,
+    editModel: false,
+    seed: false,
+    i2iModel: true,
+  },
+  grok_imagine_pro: {
+    id: 'grok-imagine-image-pro',
+    name: 'Grok Imagine Pro',
     type: 'proxy_xai',
     refs: true,
     maxRefs: 1,

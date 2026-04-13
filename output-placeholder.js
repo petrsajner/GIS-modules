@@ -246,6 +246,7 @@ function showErrorPlaceholder(cardEl, job, msg) {
         <div class="err-btns">
           <button class="ibtn" onclick="reuseTimedOutJob('${cardKey}')" title="Load params into form to review and re-generate">↺ Reuse</button>
           <button class="ibtn err-rerun-btn" onclick="rerunJob('${cardKey}')" title="Re-run this job immediately with the same parameters">▶ Rerun</button>
+          <button class="ibtn" onclick="dismissErrorCard('${cardKey}')" title="Remove this error card" style="opacity:.6">✕ Dismiss</button>
         </div>
       </div>
     </div>
@@ -274,6 +275,13 @@ function rerunJob(cardKey) {
   }
   if (card?.parentNode) card.parentNode.removeChild(card);
 }
+
+// Remove error card and reflow grid
+function dismissErrorCard(cardKey) {
+  const card = document.querySelector(`[data-card-key="${cardKey}"]`);
+  if (card?.parentNode) card.parentNode.removeChild(card);
+}
+
 // Re-loads job parameters into the form so the user can review and re-generate
 async function loadJobParamsToForm(job) {
   if (!job) return;

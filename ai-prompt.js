@@ -606,9 +606,13 @@ function _etmSetStatus(state) {
 function _etmModelType(key) {
   const m = MODELS[key];
   if (!m) return 'gemini';
-  if (m.type === 'gemini') return 'gemini';
-  if (m.type === 'flux')   return 'flux';
-  if (m.type === 'seedream') return 'seedream';
+  if (m.type === 'gemini')     return 'gemini';
+  if (m.type === 'flux')       return 'flux';
+  if (m.type === 'seedream')   return 'seedream';
+  if (m.type === 'kling')      return 'kling';
+  if (m.type === 'qwen2')      return 'qwen2';
+  if (m.type === 'proxy_xai')  return 'grok';
+  if (m.type === 'wan27r')     return 'wan';
   return 'gemini';
 }
 
@@ -619,7 +623,8 @@ KEEP SECTION RULES (critical — same for ALL models):
 - List elements by SIMPLE NEUTRAL NAMES: "lighting", "sky", "snow", "mountains", "building".
 - NEVER characterize or interpret elements: NOT "golden hour lighting", NOT "dramatic sky", NOT "fresh powder snow".
 - The model sees the reference image — it knows what the lighting looks like. You just name the element.
-- Use the same neutral language regardless of which model the prompt is for.`;
+- Use the same neutral language regardless of which model the prompt is for.
+- ALWAYS include "camera angle, framing, shot size" in the Keep section — unless the user explicitly asks to change the camera.`;
 
 // Model-specific element edit rules
 const ETM_ELEMENT_GEMINI = `
@@ -630,7 +635,7 @@ const ETM_ELEMENT_GEMINI = `
 - Position elements using visible objects: "between the desk and the window".
 
 PROMPT STRUCTURE:
-Keep [simple neutral element names] identical.
+Keep [simple neutral element names], camera angle, framing identical.
 Change only this: [minimal description of ONLY the requested change].
 Photorealistic, cinematic, 35mm, film grain.`;
 
@@ -642,7 +647,7 @@ const ETM_ELEMENT_FLUX = `
 
 PROMPT STRUCTURE:
 Original scene: [factual description from analysis — simple names, no adjective embellishment].
-Preserve exactly: [comprehensive list using simple neutral element names].
+Preserve exactly: [comprehensive list using simple neutral element names], camera angle, framing.
 Change: [ONLY the user's requested change].
 Photorealistic, cinematic, 35mm, film grain.
 
@@ -654,11 +659,66 @@ const ETM_ELEMENT_SEEDREAM = `
 - Do NOT invent details. Use the user's exact words for the change.
 
 PROMPT STRUCTURE:
-Keep [simple neutral element names] unchanged.
+Keep [simple neutral element names], camera angle, framing unchanged.
 Change: [ONLY user's requested change — their words].
 Photorealistic, cinematic, 35mm, film grain.
 
 Negative prompt: cartoon, CGI, 3D render, blurry, bad anatomy, watermark`;
+
+const ETM_ELEMENT_KLING = `
+=== ELEMENT EDIT MODE (Kling) ===
+- Kling uses @Image1, @Image2 notation for reference images.
+- Use explicit action verbs: "swap", "replace", "add", "remove", "restyle".
+- Be specific about WHAT element changes and WHERE.
+- Kling handles structured, direct instructions best.
+
+PROMPT STRUCTURE:
+Keep @Image1 scene, camera angle, framing, [element names] identical.
+[Action verb] [target element]: [specific change description].
+Photorealistic, cinematic, 35mm, film grain.
+
+Negative prompt: CGI, cartoon, illustration, blurry, bad anatomy, watermark`;
+
+const ETM_ELEMENT_QWEN = `
+=== ELEMENT EDIT MODE (Qwen 2) ===
+- Qwen 2 Edit supports up to 3 input images for compositing.
+- Instructions-based: describe the edit as a clear instruction.
+- Qwen follows literal instructions — be explicit about what to keep and what to change.
+- Supports negative prompt for quality control.
+
+PROMPT STRUCTURE:
+Keep [element names], camera angle, framing from image 1 unchanged.
+[Clear instruction: what to add/remove/change, referencing image numbers].
+Photorealistic, cinematic, high detail.
+
+Negative prompt: blurry, low quality, distorted, deformed, watermark, bad anatomy, extra fingers`;
+
+const ETM_ELEMENT_GROK = `
+=== ELEMENT EDIT MODE (Grok Imagine) ===
+- Grok supports multi-image editing (up to 5 images for Standard, 1 for Pro).
+- Natural language instructions — describe the desired result clearly.
+- Reference images by number: "scene from image 1", "person from image 2".
+- Grok is permissive and follows instructions closely. Keep prompts direct and action-oriented.
+- Do NOT use negative prompts (not supported).
+
+PROMPT STRUCTURE:
+Keep [element names], camera angle, framing from image 1 identical.
+[Direct description of the edit — what changes, what comes from which image].
+Photorealistic, cinematic, 35mm, film grain.`;
+
+const ETM_ELEMENT_WAN = `
+=== ELEMENT EDIT MODE (WAN 2.7) ===
+- WAN 2.7 Edit uses natural language instructions.
+- SHORT prompts work best — under 40 words. Model is sensitive to over-description.
+- Reference image is the base. Prompt describes ONLY the change.
+- Supports negative prompt.
+
+PROMPT STRUCTURE:
+Keep [simple element names], camera, framing unchanged.
+[Minimal edit instruction — user's words only].
+Photorealistic, cinematic.
+
+Negative prompt: blurry, low quality, distorted, deformed, ugly, watermark`;
 
 // Shared camera reframe knowledge — same for all models
 const ETM_REFRAME_KNOWLEDGE = `
@@ -733,17 +793,22 @@ function _etmGetSystemPrompt() {
   let elementRules;
   if (type === 'flux')         elementRules = ETM_ELEMENT_FLUX;
   else if (type === 'seedream') elementRules = ETM_ELEMENT_SEEDREAM;
+  else if (type === 'kling')    elementRules = ETM_ELEMENT_KLING;
+  else if (type === 'qwen2')    elementRules = ETM_ELEMENT_QWEN;
+  else if (type === 'grok')     elementRules = ETM_ELEMENT_GROK;
+  else if (type === 'wan')      elementRules = ETM_ELEMENT_WAN;
   else                          elementRules = ETM_ELEMENT_GEMINI;
 
-  const negPromptNote = (type === 'flux' || type === 'seedream')
+  const negPromptNote = (type === 'flux' || type === 'seedream' || type === 'kling' || type === 'qwen2' || type === 'wan')
     ? '- For this model: always include a Negative prompt line at the end of each variant.'
     : '- For this model: do NOT include a Negative prompt line.';
 
   // Build analysis section from array
   let analysisSection = 'REFERENCE IMAGE ANALYSES (your internal context — never show to user):';
   for (let i = 0; i < Math.min(refCount, _etmRefAnalyses.length); i++) {
-    const refName = refs[i]?.userLabel || refs[i]?.autoName || `Ref ${i + 1}`;
-    analysisSection += `\n\nImage ${i + 1} ("${refName}"):
+    const refName = refs[i]?.userLabel;
+    const label = refName ? `Image ${i + 1} ("${refName}")` : `Image ${i + 1}`;
+    analysisSection += `\n\n${label}:
 ${_etmRefAnalyses[i] || '(analyzing...)'}`;
   }
   if (refCount === 0) analysisSection += '\n(No references loaded)';
@@ -763,14 +828,17 @@ After user responds — generate the 4 variant prompts.`;
 
   const reframeKnowledge = ETM_REFRAME_KNOWLEDGE.replace('{REFRAME_STEP1}', reframeStep1);
 
-  // Multi-ref awareness for element edits
+  // Multi-ref awareness for element edits — ALL refs are content sources
   const multiRefNote = hasMultiRef ? `
-MULTI-REFERENCE AWARENESS:
-${refCount} reference images are loaded. The user may refer to any of them:
-- "use the color from image 2" → reference image 2 in your prompt
-- "apply the mask from image 3" → reference image 3 marks the edit area
-- Use "image N" notation to reference specific images in the generated prompt.
-The [Reference images: ...] prefix is added automatically — just use "image 1", "image 2" etc. in the prompt body.` : '';
+MULTI-REFERENCE RULES FOR ELEMENT EDITS (TYPE A):
+In TYPE A, ALL ${refCount} reference images are CONTENT SOURCES for the final image.
+- Image 1 is typically the background/scene. Images 2–${refCount} contribute additional elements (people, objects, styles).
+- Your prompt MUST explicitly state what comes from EACH image, by number:
+  "Take the scene from image 1. Place the person from image 2 and the person from image 3 into the scene."
+- EVERY image must be referenced by number. If you have 4 images, the prompt must mention image 1, image 2, image 3, AND image 4.
+- NEVER say "add three people" without specifying "from image 2", "from image 3", "from image 4".
+- Keep ALL properties of image 1 (lighting, mood, color, atmosphere) UNCHANGED unless user explicitly asks to change them.
+- Do NOT transfer mood/style/grading from other images to image 1 unless the user asks for it.` : '';
 
   return `You are an intelligent image edit prompt engineer. You analyze what the user wants and choose the correct editing strategy.
 
@@ -782,19 +850,42 @@ TOTAL REFERENCES LOADED: ${refCount}
 
 Read the user's message and decide which type of edit they want:
 
-TYPE A — ELEMENT EDIT: Adding, removing, replacing, or modifying an object, person, color, lighting, style, or any visual element.
+TYPE A — ELEMENT EDIT (content change):
+  Adding, removing, replacing, or modifying objects, people, colors, lighting, style, mood.
+  Also includes: camera/framing adjustments COMBINED with content changes.
+  Keywords: add, remove, replace, change color, make brighter, put X into scene, combine.
+  CRITICAL: If the user asks to ADD PEOPLE or OBJECTS from reference images into a scene → this is ALWAYS TYPE A.
+  CRITICAL: If the user changes content AND adjusts camera (e.g. "closer shot with new lighting") → this is TYPE A.
+  In TYPE A, ALL loaded references are content sources for the final output.
 
-TYPE B — CAMERA REFRAME: Changing the camera angle, position, distance, perspective, framing, or shot size.
+TYPE B — CAMERA REFRAME (viewpoint change ONLY):
+  ONLY changing camera angle, position, distance, perspective, framing, shot size — with NO content changes.
+  The scene content stays identical. Only the viewpoint changes.
+  Keywords: show from above, closer shot, wider angle, different perspective, behind, bird's eye.
+  IMPORTANT: If the user ALSO changes any content (adds/removes/modifies anything) → it becomes TYPE A, not TYPE B.
+  In TYPE B, image 1 is the target scene. Other images (if any) help understand spatial layout.
 
-If the request is ambiguous, ask: "Are you changing what's in the scene (edit), or changing where the camera is (reframe)?"
+HOW TO DECIDE:
+- "Add three people from references" → TYPE A (adding content)
+- "Show this scene from a different angle" → TYPE B (ONLY viewpoint changes, no content change)
+- "Make it warmer / change lighting" → TYPE A (modifying content)
+- "Wide shot of this" → TYPE B (ONLY framing change)
+- "Closer shot and add a dog" → TYPE A (camera + content = TYPE A)
+- "Make it a close-up with warmer tones" → TYPE A (camera + content = TYPE A)
+If the request is genuinely ambiguous, ask. But most requests clearly belong to one type.
 
 === TYPE A RULES ===
 
 ABSOLUTE RULES FOR ELEMENT EDITS:
 1. ONLY change what the user explicitly asked for. Do NOT invent details.
 2. If the user didn't specify a detail, do NOT add it.
-3. "change X to Y" → prompt says "Change X to Y." Period.
-4. When the user references a specific image ("use color from image 2", "area marked in image 3"), include that reference in the prompt using "image N (RefName)" notation.
+3. NEVER invent mood changes, color grading, lighting shifts, or atmospheric effects that the user didn't ask for. If user says "add people" → add people. Do NOT also change mood/lighting/grading.
+4. "change X to Y" → prompt says "Change X to Y." Period.
+5. When multiple images are loaded, the prompt MUST mention EVERY image BY NUMBER.
+   BAD:  "Add three people standing around the women." (which images??)
+   GOOD: "Take the scene from image 1. Place the person from image 2, the person from image 3, and the person from image 4 standing around the women."
+6. Output ONE single prompt — no variants, no alternatives.
+7. The Keep section preserves EVERYTHING from image 1 — lighting, mood, colors, atmosphere, EVERYTHING. Do not transfer mood/style from other images unless the user explicitly asks.
 ${ETM_KEEP_RULES}
 ${elementRules}
 ${multiRefNote}
@@ -804,10 +895,13 @@ ${reframeKnowledge}
 ${negPromptNote}
 
 === GENERAL RULES (both types) ===
-- For TYPE A: respond with ONE prompt only.
+- For TYPE A: respond with ONE prompt only. ALL loaded references must appear in the prompt.
 - For TYPE B: follow the step 1 logic above, then generate 4 VARIANT prompts in ===VARIANT N=== format.
 - No explanations, no markdown formatting.
-- When generating a prompt, output ONLY the prompt text ready to paste.`;
+- When generating a prompt, output ONLY the prompt text ready to paste.
+- NEVER include classification lines like "This is TYPE A" or "Žádost je TYPE A" — those are internal thinking.
+- NEVER echo or repeat the user's original request.
+- Reference ALL loaded images correctly: you have ${refCount} image(s). Use "image 1" through "image ${refCount}" when referring to specific references.`;
 }
 
 
@@ -902,6 +996,14 @@ function _etmPreselectModel(key) {
       etmKey = (key === 'flux2_dev') ? 'flux2_dev' : 'flux2_pro';
     } else if (m.type === 'seedream') {
       etmKey = (key === 'seedream45') ? 'seedream45' : 'seedream5lite';
+    } else if (m.type === 'proxy_xai') {
+      etmKey = (key === 'grok_imagine_pro') ? 'grok_imagine_pro' : 'grok_imagine';
+    } else if (m.type === 'kling') {
+      etmKey = (key === 'kling_o3') ? 'kling_o3' : 'kling_v3';
+    } else if (m.type === 'wan27r') {
+      etmKey = 'wan27_edit';
+    } else if (m.type === 'qwen2') {
+      etmKey = (key === 'qwen2_pro_edit') ? 'qwen2_pro_edit' : 'qwen2_edit';
     } else {
       etmKey = 'nb2'; // fallback for non-edit models
     }
@@ -916,15 +1018,22 @@ function _etmUpdateBadge() {
   if (!badge) return;
   const type = _etmModelType(_etmCurrentModel);
   const names = { nb2:'NB2', nbpro:'NB Pro', flux2_pro:'Flux 2 Pro', flux2_dev:'Flux 2 Dev',
-                  seedream5lite:'Seedream 5', seedream45:'Seedream 4.5' };
+                  seedream5lite:'Seedream 5', seedream45:'Seedream 4.5',
+                  grok_imagine:'Grok', grok_imagine_pro:'Grok Pro',
+                  wan27_edit:'WAN 2.7', qwen2_edit:'Qwen 2', qwen2_pro_edit:'Qwen 2 Pro',
+                  kling_v3:'Kling V3', kling_o3:'Kling O3' };
   badge.textContent = names[_etmCurrentModel] || _etmCurrentModel;
-  if (type === 'gemini') {
-    badge.style.borderColor = 'rgba(212,160,23,.4)'; badge.style.color = 'var(--accent)'; badge.style.background = 'rgba(212,160,23,.06)';
-  } else if (type === 'flux') {
-    badge.style.borderColor = 'rgba(74,144,217,.4)'; badge.style.color = '#4a90d9'; badge.style.background = 'rgba(74,144,217,.06)';
-  } else {
-    badge.style.borderColor = 'rgba(60,190,100,.4)'; badge.style.color = '#3cbe64'; badge.style.background = 'rgba(60,190,100,.06)';
-  }
+  const colors = {
+    gemini:  { border:'rgba(212,160,23,.4)',  text:'var(--accent)', bg:'rgba(212,160,23,.06)' },
+    flux:    { border:'rgba(74,144,217,.4)',  text:'#4a90d9',       bg:'rgba(74,144,217,.06)' },
+    seedream:{ border:'rgba(60,190,100,.4)',  text:'#3cbe64',       bg:'rgba(60,190,100,.06)' },
+    kling:   { border:'rgba(160,100,220,.4)', text:'#a064dc',       bg:'rgba(160,100,220,.06)' },
+    qwen2:   { border:'rgba(60,180,200,.4)',  text:'#3cb4c8',       bg:'rgba(60,180,200,.06)' },
+    grok:    { border:'rgba(220,80,60,.4)',   text:'#dc5040',       bg:'rgba(220,80,60,.06)' },
+    wan:     { border:'rgba(220,160,60,.4)',  text:'#dca040',       bg:'rgba(220,160,60,.06)' },
+  };
+  const c = colors[type] || colors.gemini;
+  badge.style.borderColor = c.border; badge.style.color = c.text; badge.style.background = c.bg;
 }
 
 function etmSwitchModel(key) {
@@ -946,8 +1055,19 @@ async function _etmReadaptPrompt(fromType, toType) {
   const sendBtn = document.getElementById('etmChatSendBtn');
   sendBtn.disabled = true;
   _etmSetStatus('thinking');
-  const typeNames = { gemini: 'Gemini NB2/NB Pro', flux: 'Flux 2', seedream: 'Seedream' };
+  const typeNames = { gemini: 'Gemini NB2/NB Pro', flux: 'Flux 2', seedream: 'Seedream',
+                      kling: 'Kling', qwen2: 'Qwen 2', grok: 'Grok Imagine', wan: 'WAN 2.7' };
   document.getElementById('etmFooterStatus').textContent = 'Adapting prompt for ' + (typeNames[toType] || toType) + '…';
+
+  const formatHints = {
+    gemini: 'SHORT prompt under 60 words. No negative prompt. "Keep [...] identical. Change: [...]." End: Photorealistic, cinematic, 35mm, film grain.',
+    flux: '"Original scene / Preserve exactly / Change" structure. Include Negative prompt line.',
+    seedream: '"Keep [...] unchanged. Change: [...]." Concise. Include Negative prompt line.',
+    kling: 'Use @Image1, @Image2 for refs. Explicit action verbs. Include Negative prompt line.',
+    qwen2: 'Instruction-based. Reference images by number. Include Negative prompt line.',
+    grok: 'Natural language. Reference images by number (image 1, image 2). No negative prompt. Direct and action-oriented.',
+    wan: 'Very SHORT, under 40 words. Minimal instruction. Include Negative prompt line.',
+  };
 
   const adaptSystem = `You are a prompt format adapter. Convert this image edit prompt from ${typeNames[fromType] || fromType} format to ${typeNames[toType] || toType} format.
 
@@ -955,7 +1075,7 @@ RULES:
 - Keep the SAME edit intent — do not change what is being edited or reframed.
 - Use simple neutral element names in Keep sections.
 - Do NOT add or invent any details not in the original prompt.
-${toType === 'gemini' ? '- SHORT prompt, under 60 words. No negative prompt. End with: Photorealistic, cinematic, 35mm, film grain.' : ''}${toType === 'flux' ? '- Use Original scene / Preserve exactly / Change structure. Include Negative prompt line.' : ''}${toType === 'seedream' ? '- Concise: Keep [...] unchanged. Change: [...]. Include Negative prompt line.' : ''}
+- ${formatHints[toType] || formatHints.gemini}
 
 Respond ONLY with the adapted prompt. No explanations.`;
 
@@ -981,17 +1101,25 @@ function _etmRefreshRefPreviews() {
   const label = document.getElementById('etmRefLabel');
   if (label) label.textContent = count > 1 ? `References (${count})` : 'Reference';
 
-  // Show first ref
-  if (count >= 1) _etmShowRefImg('etmRefPreview', refs[0]);
-  else { const img = document.getElementById('etmRefPreview'); if (img) img.style.display = 'none'; }
-
-  // Show second ref preview (if exists)
-  const wrap2 = document.getElementById('etmRef2Wrap');
-  if (count >= 2) {
-    if (wrap2) wrap2.style.display = 'block';
-    _etmShowRefImg('etmRefPreview2', refs[1]);
-  } else {
-    if (wrap2) wrap2.style.display = 'none';
+  // Render all ref thumbnails dynamically
+  const container = document.getElementById('etmRefContainer');
+  if (container) {
+    container.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+      const refName = refs[i]?.userLabel || '';
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'margin-bottom:6px;';
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'font-size:9px;color:var(--dim2);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;';
+      lbl.textContent = refName ? `Image ${i + 1}: ${refName}` : `Image ${i + 1}`;
+      wrap.appendChild(lbl);
+      const img = document.createElement('img');
+      img.style.cssText = 'display:none;width:100%;border-radius:4px;border:1px solid var(--border);';
+      img.onerror = () => { img.style.display = 'none'; };
+      wrap.appendChild(img);
+      container.appendChild(wrap);
+      _etmShowRefImgEl(img, refs[i]);
+    }
   }
 
   // Analyze any new refs that don't have analysis yet
@@ -1008,10 +1136,8 @@ function _etmRefreshRefPreviews() {
   _etmLastRefCount = count;
 }
 
-async function _etmShowRefImg(imgId, ref) {
-  const img = document.getElementById(imgId);
+async function _etmShowRefImgEl(img, ref) {
   if (!img || !ref) return;
-  img.style.display = 'none';
   let src = '';
   if (ref.thumb) src = `data:${ref.mimeType || 'image/jpeg'};base64,${ref.thumb}`;
   if (!src && ref.assetId) {
@@ -1088,6 +1214,23 @@ Be concise — under 80 words. Focus on what makes this useful as a reference fo
   }
 }
 
+// ── Clean prompt — strip reasoning/classification from AI output ──
+function _etmCleanPrompt(text) {
+  if (!text) return text;
+  const lines = text.split('\n');
+  const cleaned = lines.filter(line => {
+    const t = line.trim();
+    // Strip TYPE classification lines (EN + CZ)
+    if (/^(The |This |Žádost |Request )?(request |žádost )?(is |je )?TYPE\s+[AB]/i.test(t)) return false;
+    // Strip lines that are pure reasoning markers
+    if (/^(Here'?s? the|Tady je|Výsledný|Resulting|Generated) (edit )?(prompt|výstup)/i.test(t)) return false;
+    // Strip "I'll" reasoning lines
+    if (/^I('ll| will) (keep|add|change|remove|modify)/i.test(t)) return false;
+    return true;
+  });
+  return cleaned.join('\n').trim();
+}
+
 // ── Chat ───────────────────────────────────────────────
 async function sendEditChat() {
   const apiKey = document.getElementById('apiKey')?.value?.trim();
@@ -1131,7 +1274,7 @@ async function sendEditChat() {
     const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
     if (variants.length > 1) {
       _etmAppendVariants(variants);
-      _etmLastPrompt = variants[0].prompt; // Default to first variant
+      _etmLastPrompt = _etmCleanPrompt(variants[0].prompt); // Default to first variant
       // Footer tip set by variant click handler
       const v0 = variants[0];
       let tip = 'Variant 1 selected';
@@ -1141,7 +1284,7 @@ async function sendEditChat() {
       document.getElementById('etmFooterStatus').textContent = tip;
     } else {
       _etmAppendMsg('model', text);
-      _etmLastPrompt = text;
+      _etmLastPrompt = _etmCleanPrompt(text);
       // Check which refs the prompt references
       const usesMultiRef = /image\s*2|image\s*3|ref\s*2|ref\s*3/i.test(text);
       let tip = 'Prompt ready — click "Use as Prompt" to apply';
@@ -1228,7 +1371,7 @@ function _etmAppendVariants(variants) {
     card.onclick = () => {
       wrap.querySelectorAll('.etm-variant-card').forEach(c => c.classList.remove('etm-variant-selected'));
       card.classList.add('etm-variant-selected');
-      _etmLastPrompt = v.prompt;
+      _etmLastPrompt = _etmCleanPrompt(v.prompt);
       // Show ref tip if variant uses fewer refs than loaded
       let tip = 'Variant ' + v.num + ' selected';
       if (v.refsNeeded.length === 1 && refCount > 1) {
