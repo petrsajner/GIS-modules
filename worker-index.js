@@ -14,6 +14,11 @@
 //
 // Routes:
 //   POST /xai/generate           → xAI Grok Imagine (sync)
+//   POST /xai/video/submit       → xAI Grok Video submit (T2V/I2V/Ref2V)
+//   POST /xai/video/edit         → xAI Grok Video edit (V2V)
+//   POST /xai/video/extend       → xAI Grok Video extend
+//   POST /xai/video/status       → xAI Grok Video status poll
+//   POST /xai/video/download     → xAI Grok Video download proxy
 //   POST /luma/generate          → Luma Photon image submit
 //   POST /luma/status            → Luma Photon image status
 //   POST /luma/video/submit      → Luma Ray3/3.14 video submit
@@ -49,6 +54,9 @@
 // ══════════════════════════════════════════════════════════
 
 import { handleXai }                              from './handlers/xai.js';
+import { handleXaiVideoSubmit, handleXaiVideoEdit,
+         handleXaiVideoExtend, handleXaiVideoStatus,
+         handleXaiVideoDownload }                  from './handlers/xai-video.js';
 import { handleLuma, handleLumaStatus,
          handleLumaVideoSubmit,
          handleLumaVideoStatus }                  from './handlers/luma.js';
@@ -114,6 +122,11 @@ export default {
         version: '2026-14',
         routes: [
           'POST /xai/generate',
+          'POST /xai/video/submit',
+          'POST /xai/video/edit',
+          'POST /xai/video/extend',
+          'POST /xai/video/status',
+          'POST /xai/video/download',
           'POST /luma/generate',
           'POST /luma/status',
           'POST /luma/video/submit',
@@ -173,6 +186,13 @@ export default {
     try {
       // ── xAI ───────────────────────────────────────────
       if (path === '/xai/generate')             return withCors(await handleXai(request));
+
+      // ── xAI video (Grok Imagine Video) ────────────────
+      if (path === '/xai/video/submit')         return withCors(await handleXaiVideoSubmit(request));
+      if (path === '/xai/video/edit')           return withCors(await handleXaiVideoEdit(request));
+      if (path === '/xai/video/extend')         return withCors(await handleXaiVideoExtend(request));
+      if (path === '/xai/video/status')         return withCors(await handleXaiVideoStatus(request));
+      if (path === '/xai/video/download')       return withCors(await handleXaiVideoDownload(request));
 
       // ── Luma image (Photon) ───────────────────────────
       if (path === '/luma/generate')            return withCors(await handleLuma(request, env));

@@ -483,6 +483,12 @@ function getRefMax() {
   return MODELS[currentModel]?.maxRefs ?? 14;
 }
 
+// Active refs = first N refs up to model's maxRefs limit.
+// Excess refs stay in refs[] (preserved for model switch) but are NOT sent to API.
+function getActiveRefs() {
+  return refs.slice(0, getRefMax());
+}
+
 // Maximum refs storable regardless of current model — allows adding refs
 // even when active model doesn't support them (they stay hidden until model switch)
 const REF_GLOBAL_MAX = 14;

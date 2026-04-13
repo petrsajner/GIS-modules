@@ -514,6 +514,28 @@ const VIDEO_MODELS = {
     aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     pixverseKey: true,
   },
+
+  // ── xAI Grok Imagine Video ─────────────────────────────
+  // One model, 5 modes via grokVideoMode selector:
+  //   t2v     = Text-to-Video (prompt only)
+  //   i2v     = Image-to-Video (1 start frame)
+  //   ref2v   = Reference-to-Video (1–7 ref images, NOT start frame)
+  //   edit    = V2V Edit (video_url, max 8.7s input)
+  //   extend  = Video Extend (video_url, adds 2–10s)
+  // Async: submit → poll request_id → download temporary URL
+  // Native audio generation (automatic, no toggle)
+  grok_video: {
+    name: 'Grok Imagine Video', type: 'grok_video',
+    modelId: 'grok-imagine-video',
+    desc: 'T2V · I2V · 7-Ref · V2V Edit · Extend · Audio · 1–15s · 720p · xAI · $0.05/s',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15, minDur: 1, defaultDur: 8,
+    durOptions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'],
+    resolutions: ['480p', '720p'],
+    grokVideoModes: ['t2v', 'i2v', 'ref2v', 'edit', 'extend'],
+    xaiKey: true,
+  },
 };
 
 // ── Kling model groups (main key → variants list) ────────
@@ -1127,6 +1149,14 @@ async function useVideoFromGallery(videoId) {
   } else if (VIDEO_MODELS[activeKey]?.type === 'wan27e_video') {
     await wan27eSetSource(videoId);
     toast('Source video set for WAN 2.7 Edit', 'ok');
+  } else if (VIDEO_MODELS[activeKey]?.type === 'grok_video') {
+    const grokMode = document.getElementById('grokVideoMode')?.value;
+    if (grokMode === 'edit' || grokMode === 'extend') {
+      await setGrokVideoSrc(videoId);
+      toast(`Source video set for Grok ${grokMode === 'edit' ? 'Edit' : 'Extend'}`, 'ok');
+    } else {
+      toast('Switch Grok Video mode to Edit or Extend to use a source video', 'info');
+    }
   } else if (VIDEO_MODELS[activeKey]?.refMode === 'seedance2_r2v') {
     await sd2VidUseFromGallery(videoId);
   } else if (VIDEO_MODELS[activeKey]?.refMode === 'video_ref') {
@@ -1333,6 +1363,7 @@ function _applyVideoModel(key) {
     _setRow('videoV2VSection',   false);
     _setRow('lumaVideoParams',   false);
     _setRow('veoRefModeRow',     false);
+    _setRow('grokVideoParams',   false);
     _setRow('klingVersionRow',   false); // Topaz models are directly in main select
     // Limit slowmo options for Astra (max 8x)
     const slowmoSel = document.getElementById('topazSlowmo');
@@ -1381,6 +1412,7 @@ function _applyVideoModel(key) {
     _setRow('videoV2VSection',    false);
     _setRow('lumaVideoParams',    false);
     _setRow('veoRefModeRow',      false);
+    _setRow('grokVideoParams',    false);
     _setRow('klingVersionRow',    false);
     // Show/hide mode-specific controls
     const isCreative = mvm.mode === 'creative';
@@ -1549,6 +1581,13 @@ function _applyVideoModel(key) {
   if (veoRefModeRow) veoRefModeRow.style.display = m.type === 'veo' ? '' : 'none';
   if (m.type === 'veo') {
     onVeoRefModeChange(document.getElementById('veoRefMode')?.value || 't2v');
+  }
+
+  // Grok Video params
+  const grokVideoParams = document.getElementById('grokVideoParams');
+  if (grokVideoParams) grokVideoParams.style.display = m.type === 'grok_video' ? '' : 'none';
+  if (m.type === 'grok_video') {
+    onGrokVideoModeChange(document.getElementById('grokVideoMode')?.value || 't2v');
   }
 
   // Luma Ray3 controls — show/hide panel + configure
@@ -2053,6 +2092,10 @@ async function generateVideo() {
   } else if (model.type === 'wan27e_video') {
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 Video Edit requires a fal.ai API key. Add it in the Setup tab.'); return; }
     if (!wan27eSrcVideoId) { toast('Select a source video first — click ▷ Use on any video in the gallery', 'err'); return; }
+  } else if (model.type === 'grok_video') {
+    const xaiKey = (localStorage.getItem('gis_xai_apikey') || '').trim();
+    if (!xaiKey)   { showApiKeyWarning('xAI API Key missing', 'Grok Video requires an xAI API key. Add it in the Setup tab.'); return; }
+    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'Grok Video requires the GIS proxy URL. Add it in the Setup tab.'); return; }
   } else {
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'Video generation requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
   }
@@ -2167,6 +2210,15 @@ async function generateVideo() {
     ].filter(Boolean),
   } : null;
 
+  // Grok Video snap
+  const grokVideoSnap = model.type === 'grok_video' ? {
+    mode:       document.getElementById('grokVideoMode')?.value || 't2v',
+    duration:   parseInt(document.getElementById('grokVideoDur')?.value) || 8,
+    resolution: document.querySelector('input[name="grokVideoRes"]:checked')?.value || '720p',
+    // V2V Edit / Extend: source video gallery ID
+    srcVideoId: _grokVideoSrcId || null,
+  } : null;
+
   // Submit count jobs (parallel)
   const jobs = [];
   // Snapshot current refs at submit time — include imageData for resilience against asset deletion
@@ -2196,7 +2248,8 @@ async function generateVideo() {
       pixverseKey: (localStorage.getItem('gis_pixverse_apikey') || '').trim(),
       veoResolution, veoRefMode, veoDuration,
       lumaResolution, lumaDurationSel, lumaLoop, lumaColorMode, lumaCharRefAssetId,
-      wan27vSnap, wan27eSnap, sd2Snap,
+      wan27vSnap, wan27eSnap, sd2Snap, grokVideoSnap,
+      xaiKey: (localStorage.getItem('gis_xai_apikey') || '').trim(),
       status: 'pending', startedAt: Date.now(),
       motionVideoUrl,
       videoRefsSnapshot: videoRefsAtSubmit,
@@ -2359,6 +2412,7 @@ async function runVideoJob(job) {
   if (model.type === 'wan27e_video')     return callWan27eVideo(job);
   if (model.type === 'pixverse_video')   return callPixverseVideo(job);
   if (model.type === 'seedance2_video')  return callSeedance2Video(job);
+  if (model.type === 'grok_video')       return callGrokVideo(job);
   // seedance_video uses the same fal.ai queue path below
 
   // ── Kling / fal.ai path ──────────────────────────────────
@@ -4123,6 +4177,241 @@ async function callSeedance2Video(job) {
     cdnUrl: videoUrl,
   }, job, ['fal', priceKey, 1, durNum]);
   toast(`Seedance 2.0 done · ${elapsed}s`, 'ok');
+}
+
+// ── xAI Grok Imagine Video ──────────────────────────────────
+// Flow: GIS → Worker POST /xai/video/submit|edit|extend → { request_id }
+//       GIS polls → Worker POST /xai/video/status → { status, video_url }
+//       GIS downloads → Worker POST /xai/video/download → binary MP4
+async function callGrokVideo(job) {
+  const { model, modelKey, prompt, proxyUrl, xaiKey, grokVideoSnap, videoRefsSnapshot, targetFolder } = job;
+
+  if (!xaiKey)   throw new Error('Missing xAI API key');
+  if (!proxyUrl)  throw new Error('Missing proxy URL');
+  if (!grokVideoSnap) throw new Error('Missing Grok Video parameters');
+
+  const mode = grokVideoSnap.mode || 't2v';
+  const duration = grokVideoSnap.duration || 8;
+  const resolution = grokVideoSnap.resolution || '720p';
+  const aspectRatio = job.aspectRatio || '16:9';
+
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  // ── Build submit payload based on mode ──────────────────
+  let submitUrl, submitBody;
+
+  if (mode === 'edit') {
+    // V2V Edit — load video from DB, upload to R2 for HTTPS URL
+    if (!grokVideoSnap.srcVideoId) throw new Error('V2V Edit requires a source video — click ▷ Use on a gallery video');
+    job.status = 'uploading';
+    updateVideoPlaceholderStatus(job, 'UPLOADING VIDEO…');
+    const srcFull = await dbGet('videos', grokVideoSnap.srcVideoId).catch(() => null);
+    if (!srcFull?.videoData) throw new Error('Source video data not found in gallery');
+    const blob = new Blob([srcFull.videoData], { type: 'video/mp4' });
+    const r2Resp = await fetch(`${proxyUrl}/r2/upload`, { method: 'POST', headers: { 'Content-Type': 'video/mp4' }, body: blob });
+    if (!r2Resp.ok) throw new Error(`R2 upload failed: ${r2Resp.status}`);
+    const { url: r2Url } = await r2Resp.json();
+    submitUrl = `${proxyUrl}/xai/video/edit`;
+    submitBody = { xai_key: xaiKey, prompt, video_url: r2Url };
+
+  } else if (mode === 'extend') {
+    // Extend — load video from DB, upload to R2
+    if (!grokVideoSnap.srcVideoId) throw new Error('Extend requires a source video — click ▷ Use on a gallery video');
+    job.status = 'uploading';
+    updateVideoPlaceholderStatus(job, 'UPLOADING VIDEO…');
+    const srcFull = await dbGet('videos', grokVideoSnap.srcVideoId).catch(() => null);
+    if (!srcFull?.videoData) throw new Error('Source video data not found in gallery');
+    const blob = new Blob([srcFull.videoData], { type: 'video/mp4' });
+    const r2Resp = await fetch(`${proxyUrl}/r2/upload`, { method: 'POST', headers: { 'Content-Type': 'video/mp4' }, body: blob });
+    if (!r2Resp.ok) throw new Error(`R2 upload failed: ${r2Resp.status}`);
+    const { url: r2Url } = await r2Resp.json();
+    submitUrl = `${proxyUrl}/xai/video/extend`;
+    submitBody = { xai_key: xaiKey, prompt, video_url: r2Url, duration };
+
+  } else {
+    // T2V / I2V / Ref2V — all go to /xai/video/submit
+    submitUrl = `${proxyUrl}/xai/video/submit`;
+    submitBody = {
+      xai_key: xaiKey, mode, prompt,
+      duration, aspect_ratio: aspectRatio, resolution,
+    };
+
+    if (mode === 'i2v') {
+      // I2V: first videoRef as start frame (base64 data URI)
+      const refs = videoRefsSnapshot || [];
+      if (!refs.length) throw new Error('I2V requires a start frame — add a video reference');
+      job.status = 'uploading';
+      updateVideoPlaceholderStatus(job, 'PREPARING IMAGE…');
+      const asset = refs[0].assetId ? await dbGet('assets', refs[0].assetId).catch(() => null) : null;
+      const imgData = asset?.imageData || refs[0].imageData;
+      if (!imgData) throw new Error('Cannot load start frame image data');
+      const mime = asset?.mimeType || refs[0].mimeType || 'image/jpeg';
+      submitBody.image_url = `data:${mime};base64,${imgData}`;
+
+    } else if (mode === 'ref2v') {
+      // Ref2V: up to 7 ref images as data URIs
+      const refs = videoRefsSnapshot || [];
+      if (!refs.length) throw new Error('Ref-to-Video requires at least 1 reference image');
+      job.status = 'uploading';
+      updateVideoPlaceholderStatus(job, 'PREPARING REFS…');
+      const refUrls = [];
+      for (const r of refs.slice(0, 7)) {
+        const asset = r.assetId ? await dbGet('assets', r.assetId).catch(() => null) : null;
+        const imgData = asset?.imageData || r.imageData;
+        if (!imgData) continue;
+        const mime = asset?.mimeType || r.mimeType || 'image/jpeg';
+        refUrls.push(`data:${mime};base64,${imgData}`);
+      }
+      if (!refUrls.length) throw new Error('Could not load any reference image data');
+      submitBody.reference_images = refUrls;
+    }
+  }
+
+  // ── Submit to Worker ────────────────────────────────────
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  const submitResp = await fetch(submitUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(submitBody),
+  });
+  if (!submitResp.ok) {
+    const err = await submitResp.json().catch(() => ({}));
+    throw new Error(`Grok Video submit ${submitResp.status}: ${err.error || err.detail || submitResp.statusText}`);
+  }
+  const { request_id } = await submitResp.json();
+  if (!request_id) throw new Error('Grok Video: no request_id from Worker');
+
+  // ── Poll for completion ─────────────────────────────────
+  job.status = 'generating';
+  updateVideoPlaceholderStatus(job, 'GENERATING…');
+
+  const POLL_MS = 5000;
+  const TIMEOUT = 15 * 60 * 1000; // 15 minutes
+  const deadline = Date.now() + TIMEOUT;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+
+    const statusResp = await fetch(`${proxyUrl}/xai/video/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ xai_key: xaiKey, request_id }),
+    });
+    if (!statusResp.ok) {
+      const err = await statusResp.json().catch(() => ({}));
+      throw new Error(`Grok Video status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+    }
+    const status = await statusResp.json();
+
+    if (status.status === 'failed') {
+      throw new Error(`Grok Video failed: ${status.error || 'unknown'}`);
+    }
+    if (status.status === 'expired') {
+      throw new Error('Grok Video: request expired');
+    }
+
+    if (status.status === 'done') {
+      if (!status.video_url) throw new Error('Grok Video: done but no video_url');
+
+      // ── Download via proxy (xAI URLs lack CORS) ───────
+      job.status = 'fetching';
+      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+      const dlResp = await fetch(`${proxyUrl}/xai/video/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_url: status.video_url }),
+      });
+      if (!dlResp.ok) throw new Error(`Grok Video download failed (${dlResp.status})`);
+      const videoArrayBuffer = await dlResp.arrayBuffer();
+
+      const actualDur = status.duration || duration;
+      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+        model: model.name, modelKey, prompt,
+        params: { mode, duration: actualDur, aspectRatio, resolution, srcVideoUrl: grokVideoSnap.srcVideoUrl || null },
+        duration: actualDur,
+        cdnUrl: status.video_url,
+        usedVideoRefs: videoRefsSnapshot || [],
+      }, job, ['xai', 'grok-imagine-video', 1, actualDur]);
+      toast(`Grok Video done · ${elapsed}s · ${mode.toUpperCase()}`, 'ok');
+      return;
+    }
+    // status === 'pending' → continue polling
+  }
+
+  throw new Error('Grok Video timeout — generation did not complete within 15 minutes');
+}
+
+// ── Grok Video — mode change handler ────────────────────────
+// Global: source video gallery ID for V2V Edit / Extend
+let _grokVideoSrcId = null;
+
+function onGrokVideoModeChange(mode) {
+  const notes = {
+    t2v:    'Prompt-only generation with native audio',
+    i2v:    'Upload a start frame as video reference → animated into video',
+    ref2v:  'Up to 7 reference images as visual guide (not start frame) · Max 10s',
+    edit:   'Edit an existing video — add/remove/restyle · Max 8.7s input · No duration/aspect/resolution control',
+    extend: 'Continue a video from its last frame · Adds 2–10s',
+  };
+  const noteEl = document.getElementById('grokVideoModeNote');
+  if (noteEl) noteEl.textContent = notes[mode] || '';
+
+  // Duration + resolution — hidden for Edit (output matches input)
+  const durEl = document.getElementById('grokVideoDur')?.parentElement;
+  const resEl = document.querySelector('input[name="grokVideoRes"]')?.closest('.ctrl');
+  if (durEl) durEl.style.display = mode === 'edit' ? 'none' : '';
+  if (resEl) resEl.style.display = (mode === 'edit' || mode === 'extend') ? 'none' : '';
+
+  // Duration max per mode
+  const durSelect = document.getElementById('grokVideoDur');
+  if (durSelect) {
+    const maxDur = mode === 'ref2v' ? 10 : (mode === 'extend' ? 10 : 15);
+    const minDur = mode === 'extend' ? 2 : 1;
+    for (const opt of durSelect.options) {
+      const v = parseInt(opt.value);
+      opt.disabled = v > maxDur || v < minDur;
+    }
+    // If current selection is out of range, reset
+    const cur = parseInt(durSelect.value);
+    if (cur > maxDur || cur < minDur) {
+      durSelect.value = mode === 'extend' ? '6' : '8';
+    }
+  }
+
+  // Source video row — show for Edit and Extend
+  const srcRow = document.getElementById('grokVideoSrcRow');
+  if (srcRow) srcRow.style.display = (mode === 'edit' || mode === 'extend') ? '' : 'none';
+
+  // Video ref section — show for I2V and Ref2V
+  const refSec = document.getElementById('videoRefSection');
+  const refLabel = document.getElementById('videoRefLabel');
+  const refCount = document.getElementById('videoRefCount');
+  if (mode === 'i2v') {
+    if (refSec) refSec.style.display = 'block';
+    if (refLabel) refLabel.childNodes[0].textContent = 'Start frame';
+    if (refCount) refCount.textContent = `${videoRefs.length} / 1`;
+  } else if (mode === 'ref2v') {
+    if (refSec) refSec.style.display = 'block';
+    if (refLabel) refLabel.childNodes[0].textContent = 'Reference images (visual guide)';
+    if (refCount) refCount.textContent = `${videoRefs.length} / 7`;
+  } else {
+    // T2V, Edit, Extend — hide ref section
+    if (refSec) refSec.style.display = (mode === 't2v' || mode === 'edit' || mode === 'extend') ? 'none' : '';
+  }
+}
+
+// Called when user clicks "Use" on a gallery video → sets source for Grok Edit/Extend
+async function setGrokVideoSrc(videoId) {
+  _grokVideoSrcId = videoId;
+  const meta = await dbGet('video_meta', videoId).catch(() => null);
+  const label = meta?.prompt?.slice(0, 40) || `video #${videoId}`;
+  const durNote = meta?.duration ? ` · ${meta.duration}s` : '';
+  const labelEl = document.getElementById('grokVideoSrcLabel');
+  if (labelEl) labelEl.textContent = `${label}${durNote}`;
 }
 
 // ── Describe video ref image ──────────────────────────────

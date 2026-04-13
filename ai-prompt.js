@@ -787,7 +787,10 @@ RULES FOR ALL VARIANTS:
 
 function _etmGetSystemPrompt() {
   const type = _etmModelType(_etmCurrentModel);
-  const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+  // Use the Edit Tool's target model maxRefs — may differ from main model
+  const etmMax = MODELS[_etmCurrentModel]?.maxRefs ?? 14;
+  const activeRefs = refs.slice(0, etmMax);
+  const refCount = activeRefs.length;
   const hasMultiRef = refCount >= 2;
 
   let elementRules;
@@ -806,7 +809,7 @@ function _etmGetSystemPrompt() {
   // Build analysis section from array
   let analysisSection = 'REFERENCE IMAGE ANALYSES (your internal context — never show to user):';
   for (let i = 0; i < Math.min(refCount, _etmRefAnalyses.length); i++) {
-    const refName = refs[i]?.userLabel;
+    const refName = activeRefs[i]?.userLabel;
     const label = refName ? `Image ${i + 1} ("${refName}")` : `Image ${i + 1}`;
     analysisSection += `\n\n${label}:
 ${_etmRefAnalyses[i] || '(analyzing...)'}`;
@@ -1038,17 +1041,20 @@ function _etmUpdateBadge() {
 
 function etmSwitchModel(key) {
   const prevType = _etmModelType(_etmCurrentModel);
+  const prevMax = MODELS[_etmCurrentModel]?.maxRefs ?? 14;
   _etmCurrentModel = key;
   _etmUpdateBadge();
+  _etmRefreshRefPreviews();  // Update ref dimming for new model's maxRefs
 
   const newType = _etmModelType(key);
+  const newMax = MODELS[key]?.maxRefs ?? 14;
   // If we have a prompt and model type changed, re-adapt it
   if (_etmLastPrompt && prevType !== newType) {
-    _etmReadaptPrompt(prevType, newType);
+    _etmReadaptPrompt(prevType, newType, prevMax, newMax);
   }
 }
 
-async function _etmReadaptPrompt(fromType, toType) {
+async function _etmReadaptPrompt(fromType, toType, prevMax, newMax) {
   const apiKey = document.getElementById('apiKey')?.value?.trim();
   if (!apiKey || !_etmLastPrompt) return;
 
@@ -1069,13 +1075,20 @@ async function _etmReadaptPrompt(fromType, toType) {
     wan: 'Very SHORT, under 40 words. Minimal instruction. Include Negative prompt line.',
   };
 
+  // Check if ref count decreased — need to trim references in prompt
+  const totalRefs = (typeof refs !== 'undefined') ? refs.length : 0;
+  const activeRefs = Math.min(totalRefs, newMax);
+  const refTrimNote = (totalRefs > newMax)
+    ? `\nCRITICAL: The target model only accepts ${newMax} reference images. The original prompt may reference up to ${totalRefs} images. You MUST remove ALL references to images beyond image ${newMax}. Redistribute or merge the content from dropped images into the remaining ${newMax} image references, or simply drop elements that came from excess images. Do NOT mention image ${newMax + 1} or higher.`
+    : '';
+
   const adaptSystem = `You are a prompt format adapter. Convert this image edit prompt from ${typeNames[fromType] || fromType} format to ${typeNames[toType] || toType} format.
 
 RULES:
 - Keep the SAME edit intent — do not change what is being edited or reframed.
 - Use simple neutral element names in Keep sections.
 - Do NOT add or invent any details not in the original prompt.
-- ${formatHints[toType] || formatHints.gemini}
+- ${formatHints[toType] || formatHints.gemini}${refTrimNote}
 
 Respond ONLY with the adapted prompt. No explanations.`;
 
@@ -1097,21 +1110,32 @@ Respond ONLY with the adapted prompt. No explanations.`;
 
 // ── Reference preview ──────────────────────────────────
 function _etmRefreshRefPreviews() {
-  const count = (typeof refs !== 'undefined') ? refs.length : 0;
+  const totalCount = (typeof refs !== 'undefined') ? refs.length : 0;
+  const etmMax = MODELS[_etmCurrentModel]?.maxRefs ?? 14;
+  const activeCount = Math.min(totalCount, etmMax);
   const label = document.getElementById('etmRefLabel');
-  if (label) label.textContent = count > 1 ? `References (${count})` : 'Reference';
+  if (label) {
+    if (totalCount > activeCount) {
+      label.textContent = `References (${activeCount} of ${totalCount} active)`;
+    } else {
+      label.textContent = totalCount > 1 ? `References (${totalCount})` : 'Reference';
+    }
+  }
 
-  // Render all ref thumbnails dynamically
+  // Render all ref thumbnails dynamically — dim excess refs
   const container = document.getElementById('etmRefContainer');
   if (container) {
     container.innerHTML = '';
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < totalCount; i++) {
       const refName = refs[i]?.userLabel || '';
+      const dimmed = i >= etmMax;
       const wrap = document.createElement('div');
-      wrap.style.cssText = 'margin-bottom:6px;';
+      wrap.style.cssText = 'margin-bottom:6px;' + (dimmed ? 'opacity:0.35;filter:grayscale(0.6);' : '');
       const lbl = document.createElement('div');
       lbl.style.cssText = 'font-size:9px;color:var(--dim2);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;';
-      lbl.textContent = refName ? `Image ${i + 1}: ${refName}` : `Image ${i + 1}`;
+      lbl.textContent = dimmed
+        ? `Image ${i + 1}: ⊘ over limit${refName ? ' — ' + refName : ''}`
+        : (refName ? `Image ${i + 1}: ${refName}` : `Image ${i + 1}`);
       wrap.appendChild(lbl);
       const img = document.createElement('img');
       img.style.cssText = 'display:none;width:100%;border-radius:4px;border:1px solid var(--border);';
@@ -1122,18 +1146,18 @@ function _etmRefreshRefPreviews() {
     }
   }
 
-  // Analyze any new refs that don't have analysis yet
-  for (let i = _etmRefAnalyses.length; i < count; i++) {
+  // Analyze only active refs
+  for (let i = _etmRefAnalyses.length; i < activeCount; i++) {
     _etmAnalyzeRefAt(i);
   }
 
   // Detect ref count change mid-conversation — inject system note
-  if (count > _etmLastRefCount && _etmLastRefCount > 0 && _etmChatHistory.length > 0) {
-    const note = `[System: Reference image ${count} was added. ${count} references now loaded.]`;
+  if (activeCount > _etmLastRefCount && _etmLastRefCount > 0 && _etmChatHistory.length > 0) {
+    const note = `[System: Reference image ${activeCount} was added. ${activeCount} references now loaded.]`;
     _etmChatHistory.push({ role: 'user', parts: [{ text: note }] });
-    _etmAppendMsg('system', `Reference ${count} added ✓`);
+    _etmAppendMsg('system', `Reference ${activeCount} added ✓`);
   }
-  _etmLastRefCount = count;
+  _etmLastRefCount = activeCount;
 }
 
 async function _etmShowRefImgEl(img, ref) {
@@ -1271,7 +1295,8 @@ async function sendEditChat() {
 
     // Check if response contains variants (===VARIANT N===)
     const variants = _etmParseVariants(text);
-    const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+    const etmMax = MODELS[_etmCurrentModel]?.maxRefs ?? 14;
+    const refCount = Math.min((typeof refs !== 'undefined') ? refs.length : 0, etmMax);
     if (variants.length > 1) {
       _etmAppendVariants(variants);
       _etmLastPrompt = _etmCleanPrompt(variants[0].prompt); // Default to first variant
@@ -1352,7 +1377,8 @@ function _etmParseVariants(text) {
 function _etmAppendVariants(variants) {
   const history = document.getElementById('etmChatHistory');
   if (!history) return;
-  const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+  const etmMax = MODELS[_etmCurrentModel]?.maxRefs ?? 14;
+  const refCount = Math.min((typeof refs !== 'undefined') ? refs.length : 0, etmMax);
 
   const wrap = document.createElement('div');
   wrap.className = 'etm-variants-wrap';
@@ -1774,7 +1800,7 @@ function _ccRefLabel(idx) {
 
 function ccRegeneratePrompts() {
   const useDesc = document.getElementById('ccUseDesc')?.checked;
-  const refCount = (typeof refs !== 'undefined') ? refs.length : 0;
+  const refCount = getActiveRefs().length;
   const hasSheet = refCount >= 2;
 
   const ref1 = _ccRefLabel(0);

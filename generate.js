@@ -27,8 +27,8 @@ async function generate() {
   } else {
     styledPrompt = promptText;
   }
-  // Snapshot refs pro job (zahrnuje assetId pro Reuse)
-  const refsCopy = refs.map(r => ({ ...r }));
+  // Snapshot active refs for job — only first maxRefs are sent (excess preserved in UI for model switch)
+  const refsCopy = getActiveRefs().map(r => ({ ...r }));
 
   if (m.type === 'gemini') {
     const nbResEl = document.querySelector('input[name="nbRes"]:checked');

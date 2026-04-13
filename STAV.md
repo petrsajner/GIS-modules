@@ -1,59 +1,64 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v198en
-## Příští verze: v199en
-## Datum: 2026-04-13
-## Worker verze: 2026-15 (+xAI multi-image edit, b64_json response)
+## Aktuální verze: v199en
+## Příští verze: v200en
+## Datum: 2026-04-14
+## Worker verze: 2026-16 (+xAI Grok Video: 5 routes)
 
 ---
 
-## Co je v198en (oproti v197en)
+## Co je v199en (oproti v198en)
 
-### 1. Grok Imagine — kompletní rozšíření
-- **Grok Imagine Pro** (`grok-imagine-image-pro`): nový model, vyšší kvalita, $0.07/img, `maxRefs: 1` (API limit)
-- **Grok Standard** (`grok-imagine-image`): cena opravena $0.02/img (z $0.07), `maxRefs: 5` (multi-image edit)
-- **Multi-image editing**: Standard model podporuje až 5 ref obrázků, endpoint `/v1/images/edits` s `images[]` array
-- **Count 1–10**: segmentovaná lišta (visual bar) místo radio buttonů 1–4
-- **Resolution**: Pro default 2K, Standard default 1K
-- **Aspect ratio filter**: Grok zobrazí jen 13 API-validních poměrů, `auto` poměr přidán
+### 1. MaxRefs enforcement — 3 vrstvy kontroly
+Problém: refs nebyly omezeny při přepnutí modelu → API 422 error. Reuse jobu s více refy než nový model podporuje obešel limit.
 
-### 2. Worker xai.js — přepracován
-- **Endpoint routing**: T2I → `/v1/images/generations`, Edit → `/v1/images/edits`
-- **`response_format: b64_json`**: eliminuje Worker-side URL fetch — API vrátí base64 přímo
-- **Multi-image edit**: `images: [{type: "image_url", url: ...}]` array (1–5 obrázků)
-- **Count limit**: zvýšen na 10 (z 4)
+**Vrstva 1 — UI (refs.js + template.html):**
+- `renderRefThumbs()` counter ukazuje `activeCount / max` (ne `refs.length / max`)
+- Refs nad limitem dostanou třídu `.ref-dimmed` — šedivé, desaturované, červený border
+- Dimmed refs si zachovávají ×-remove ale skrývají Describe button
+- Title dimmed refs: "Over limit — not sent to model"
 
-### 3. Aspect ratia
-- **Nové globální**: `2:1 — Banner wide`, `1:2 — Banner tall`, `auto — Model decides`
-- **Grok filtr**: `_grokFilterAspects()` skrývá nevalidní poměry (`21:9`, `4:5`, `1:4`, `4:1`)
+**Vrstva 2 — AI agent (ai-prompt.js):**
+- Edit Tool system prompt používá `MODELS[_etmCurrentModel].maxRefs`
+- `_etmRefreshRefPreviews()` ukazuje dimmed excess refs s "⊘ over limit"
+- `_etmSend()`, `_etmAppendVariants()`, `ccRegeneratePrompts()` — capped na aktivní refs
+- `_etmReadaptPrompt()` při přepnutí modelu s menším maxRefs přidá instrukci AI trimovat reference
 
-### 4. Edit Tool — kompletní rozšíření
-- **7 modelových typů**: Gemini, Flux, Seedream, Kling, Qwen 2, Grok, WAN 2.7
-- **Prompt šablony per model**: specifická struktura, ref formát, neg prompt pravidla
-- **Dynamický ref preview**: scrollovatelný kontejner pro VŠECHNY refs (ne jen 2)
-- **Klasifikace TYPE A/B**: camera+content = TYPE A, TYPE B = POUZE změna pohledu
-- **Keep rules**: vždy preserve `camera angle, framing` (prevence reframe u Seedream aj.)
-- **Clean prompt**: `_etmCleanPrompt()` stripuje reasoning řádky z AI výstupu
-- **Multi-ref pravidla**: povinné per-image referencing, zákaz invence mood/grading
-- **Badge barvy**: každý typ má vlastní barvu (Kling=fialová, Qwen=cyan, Grok=červená, WAN=oranžová)
-- **Readapt prompt**: přepnutí modelu automaticky readaptuje prompt do nového formátu
+**Vrstva 3 — API dispatch (generate.js):**
+- `refsCopy = getActiveRefs().map(...)` — hard limit, přebytečné refs se nikdy nedostanou do API
 
-### 5. Ref prefix — čistý prompt
-- **Prefix**: `[Reference images: image 1, image 2, image 3]` — bez labelů (žádné "REF_055")
-- **User labels**: zobrazeny v UI (mention dropdown), ale NE v promptu poslaném modelu
-- **`proxy_xai` handler**: přidán do `preprocessPromptForModel` a `promptModelToUserLabels`
+**Nový helper (models.js):**
+- `getActiveRefs()` → `refs.slice(0, getRefMax())`
 
-### 6. Error karty
-- **✕ Dismiss button**: smaže error kartu a reflow grid
-- **`dismissErrorCard()` funkce**
+### 2. Edit Tool model switch — ref dimming + prompt trim
+- `etmSwitchModel()` nově volá `_etmRefreshRefPreviews()` → okamžitá aktualizace ref panelu
+- `_etmReadaptPrompt()` detekuje `refs.length > newMax` → přidá CRITICAL instrukci AI aby odstranil reference nad limit
 
-### 7. Concurrency limit
-- **xAI**: snížen na 2 concurrent requesty (z globálních 4) — prevence 503 při batchi
+### 3. Grok Imagine Video — kompletní integrace
+Model `grok-imagine-video`, 5 módů přes xAI přímé API (ne fal.ai), Worker proxy.
 
-### 8. Bug fixy
-- **`RETRY_MAX is not defined`**: opraveno na `j.retryTotal` v renderQueue
-- **fal.js debug logging**: 422 status logován s plným error body do console
-- **Qwen 2 Edit maxRefs**: opraveno 4 → 3 (API error: "Maximum 3 reference images allowed")
+**Módy:**
+| Mód | Worker route | xAI endpoint | Popis |
+|-----|-------------|-------------|-------|
+| T2V | `/xai/video/submit` | `/v1/videos/generations` | Prompt → video |
+| I2V | `/xai/video/submit` | `/v1/videos/generations` | Start frame → video |
+| Ref2V | `/xai/video/submit` | `/v1/videos/generations` | 1–7 ref obrázků (visual guide) |
+| V2V Edit | `/xai/video/edit` | `/v1/videos/edits` | Editace existujícího videa |
+| Extend | `/xai/video/extend` | `/v1/videos/extensions` | Prodloužení videa od posledního framu |
+
+**Parametry:**
+- Duration: 1–15s (Edit: nepodporováno, Extend: 2–10s, Ref2V: max 10s)
+- Resolution: 480p, 720p
+- Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4, 3:2, 2:3
+- Reference images: max 7 (Ref2V mód)
+- Native audio: automaticky součástí výstupu
+
+**Worker (xai-video.js):** 5 exportovaných handlerů + download proxy
+**Cena:** $0.05/s ($4.20/min)
+**Async flow:** submit → request_id → poll → download přes proxy (xAI URL nemá CORS)
+**V2V Edit/Extend:** Video z galerie → R2 upload → HTTPS URL → xAI
+
+**Známý problém (xAI strana):** Extend mód je nestabilní — přijme job ale často vrátí "internal error". T2V, I2V, V2V Edit fungují spolehlivě.
 
 ---
 
@@ -61,99 +66,71 @@
 
 | Modul | Řádků | Popis změn |
 |-------|-------|------------|
-| models.js | ~591 | Grok Pro model, maxRefs: 5/1, Qwen maxRefs 4→3 |
-| template.html | ~5225 | Grok Pro option, count segmented bar, 3 nové aspect ratia, Edit Tool: 5 nových modelů, dynamický ref container |
-| model-select.js | ~434 | Grok descriptions, aspect filter, Pro auto-2K, Qwen info text 3 refs |
-| generate.js | ~905 | grokCountVal hidden input, xAI concurrency 2, RETRY_MAX→j.retryTotal |
-| proxy.js | ~441 | Multi-ref image_urls[] array |
-| spending.js | ~220 | Standard $0.02, Pro $0.07 |
-| ai-prompt.js | ~2100 | 7 model types, 4 nové prompt šablony, dynamický ref preview, clean prompt, TYPE A/B klasifikace, Keep camera rules, badge barvy, readapt pro všechny typy |
-| output-placeholder.js | ~495 | Dismiss button + dismissErrorCard() |
-| refs.js | ~842 | proxy_xai v preprocessPromptForModel/promptModelToUserLabels/_refModelLabel, čistý prefix bez labelů |
-| fal.js | ~637 | Debug logging: 422 s plným error body, re-throw pro naše chyby |
+| models.js | ~597 | `getActiveRefs()` helper |
+| refs.js | ~838 | `renderRefThumbs()` dimming, active count |
+| generate.js | ~905 | `refsCopy` uses `getActiveRefs()` |
+| ai-prompt.js | ~2139 | Edit Tool maxRefs per model, ref trim in readapt, `count` bug fix, ref preview dimming |
+| template.html | ~5231 | `.ref-dimmed` CSS + Grok Video UI panel (mode/duration/resolution/src video) |
+| video.js | ~5211 | `grok_video` model + `callGrokVideo()` + `onGrokVideoModeChange()` + `setGrokVideoSrc()` + `useVideoFromGallery()` grok case |
+| spending.js | ~221 | `grok-imagine-video: 0.050` |
 
 ### Worker (separátní deploy)
 | Soubor | Popis |
 |--------|-------|
-| xai.js | Kompletní přepis: T2I/Edit routing, b64_json, multi-image, count 10 |
-
----
-
-## Grok Imagine — ověřené limity
-
-| Model | Max refs | Max n | Resolutions | Aspect ratios |
-|-------|----------|-------|-------------|---------------|
-| `grok-imagine-image` (Standard) | 5 | 10 | 1k, 2k | 13 (viz filtr) |
-| `grok-imagine-image-pro` (Pro) | 1 | 10 | 1k, 2k | 13 (viz filtr) |
-
-**Supported aspects:** 1:1, 3:4, 4:3, 9:16, 16:9, 2:3, 3:2, 9:19.5, 19.5:9, 9:20, 20:9, 1:2, 2:1, auto
-
-**Pricing:** Standard $0.02/img, Pro $0.07/img, Edit: input + output charged
-
-**API endpoints:**
-- T2I: `POST https://api.x.ai/v1/images/generations`
-- Edit: `POST https://api.x.ai/v1/images/edits`
-- Edit payload: `{ images: [{type: "image_url", url: "data:..."}], prompt, model, n, resolution, response_format: "b64_json" }`
-
----
-
-## Qwen Image 2 — opravené limity
-
-| Constraint | Limit | Zdroj |
-|------------|-------|-------|
-| Input resolution | 4,194,304 px (4 MP) | API error |
-| Ref count (Edit) | **3 obrázky** (ne 4!) | API error: "Maximum 3 reference images allowed" |
-| File size | fal.ai standard (10 MB) | — |
-
----
-
-## Známé problémy / TODO pro v199en
-
-### Blesk ikona (⚡) u assetů — zbytečná
-- `assets.js:278` — `srcTag` zobrazuje ⚡ pro generated, ↑ pro uploaded
-- **Odebrat při příští editaci**
-
-### Grok Video — výzkum hotový, implementace čeká
-- `grok-imagine-video`: T2V, I2V, V2V, async, 5/10/15s, 720p, native audio, ~$4.20/min
-- Čeká na otestování image editu
+| xai-video.js | **NOVÝ** — 5 handlerů (submit/edit/extend/status/download) |
+| worker-index.js | 6 nových routes `/xai/video/*` + import |
 
 ---
 
 ## TODO (prioritní pořadí)
 
 1. Style Library "My Presets"
-2. Z-Image Edit (`fal-ai/z-image/edit`)
-3. Clarity 8×/16× via proxy
-4. Claid.ai via proxy
-5. WAN audio (DashScope)
-6. Vidu Q3 Turbo (`fal-ai/vidu/q3/turbo/*`)
-7. Wan 2.6 R2V
-8. Ideogram V3
-9. Recraft V4
-10. GPT Image 1.5
-11. Hailuo 2.3
-12. Use button for V2V models
-13. Runway Gen-4 Image + Video (výzkum hotový)
-14. Grok Imagine Video (výzkum hotový)
+2. Claid.ai via proxy
+3. GPT Image 1.5
+4. Hailuo 2.3
+5. Use button for V2V models
+6. Runway Gen-4 Image + Video (výzkum hotový)
+7. Recraft V4
+8. Předělat systém zobrazení ovládacích panelů (image + video)
+9. Blesk ikona (⚡) u assetů — odebrat
 
 ---
 
 ## Klíčové technické detaily
 
-### xAI Worker handler (v2026-15)
+### xAI Video Worker handler (v2026-16)
 ```
-# T2I
-POST /xai/generate → Worker → POST https://api.x.ai/v1/images/generations
-Body: { model, prompt, n, aspect_ratio, resolution, response_format: "b64_json" }
-Response: { data: [{ b64_json: "..." }] }
+# T2V / I2V / Ref2V
+POST /xai/video/submit → Worker → POST https://api.x.ai/v1/videos/generations
+Body: { xai_key, mode, prompt, duration, aspect_ratio, resolution, image_url?, reference_images? }
+Response: { request_id }
 
-# Edit (1–5 images)
-POST /xai/generate → Worker → POST https://api.x.ai/v1/images/edits
-Body: { model, prompt, n, resolution, response_format: "b64_json",
-        images: [{ type: "image_url", url: "data:..." }, ...] }
+# V2V Edit
+POST /xai/video/edit → Worker → POST https://api.x.ai/v1/videos/edits
+Body: { xai_key, prompt, video_url }  → Worker sends { model, prompt, video: {url} }
+
+# Extend
+POST /xai/video/extend → Worker → POST https://api.x.ai/v1/videos/extensions
+Body: { xai_key, prompt, video_url, duration }  → Worker sends { model, prompt, duration, video: {url} }
+
+# Poll
+POST /xai/video/status → Worker → GET https://api.x.ai/v1/videos/{request_id}
+Response: { status: "pending"|"done"|"failed"|"expired", video_url?, duration? }
+
+# Download (CORS bypass)
+POST /xai/video/download → Worker → GET {xai_temp_url} → stream binary MP4
 ```
 
-### Edit Tool — model type system
+### MaxRefs architecture (v199en)
+```
+getActiveRefs() = refs.slice(0, getRefMax())
+renderRefThumbs():  i >= max → .ref-dimmed class
+generate.js:        refsCopy = getActiveRefs().map(...)
+Edit Tool:          etmMax = MODELS[_etmCurrentModel].maxRefs
+                    _etmReadaptPrompt → refTrimNote when refs > newMax
+```
+
+### Edit Tool — model type system (v199en)
 | Type | Element rules | Ref format | Neg prompt | Badge color |
 |------|--------------|------------|------------|-------------|
 | gemini | ETM_ELEMENT_GEMINI | `image N` | ❌ | Gold |
@@ -163,15 +140,6 @@ Body: { model, prompt, n, resolution, response_format: "b64_json",
 | qwen2 | ETM_ELEMENT_QWEN | `image N` | ✅ | Cyan |
 | grok | ETM_ELEMENT_GROK | `image N` | ❌ | Red |
 | wan | ETM_ELEMENT_WAN | `image N` | ✅ | Orange |
-
-### Ref prefix — čistý formát (v198en)
-```
-Prompt sent to model:
-[Reference images: image 1, image 2, image 3] Keep lighting, scene...
-
-NOT:
-[Reference images: image 1 = "REF_055", image 2 = "REF_049"] ...
-```
 
 ---
 
@@ -192,6 +160,7 @@ NOT:
 - **Grok Pro maxRefs:** 1. Standard: 5. Ověřeno API errorem.
 - **Ref prefix:** jen `image N` — žádné labely v promptu. Labely jen v UI.
 - **OpenRouter (Claude Sonnet 4.6)** je PRIMARY agent pro všechny tool features.
+- **xAI Video Edit payload:** `video: {url}` objekt, NE `video_url` flat string.
 - **Rozhodnutí nedělat za Petra.**
 
 ---
@@ -200,6 +169,6 @@ NOT:
 
 - **Kódová báze:** `petrsajner/GIS-modules` na GitHubu
 - **Proxy:** Cloudflare Workers na `gis-proxy.petr-gis.workers.dev`; R2 bucket `gis-magnific-videos`
-- **AI provideři:** fal.ai, Google Gemini/Imagen, Luma, Kling, Replicate (WAN 2.7 Image), Freepik/Magnific, Topaz, PixVerse, xAI/Grok, OpenRouter
+- **AI provideři:** fal.ai, Google Gemini/Imagen, Luma, Kling, Replicate (WAN 2.7 Image), Freepik/Magnific, Topaz, PixVerse, xAI/Grok (Image + Video), OpenRouter
 - **Dokumenty:** `STAV.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `API_MODELS.md`, `COPYRIGHT_PROTECTION.md`
 - **Kontakt:** info.genimagestudio@gmail.com; LinkedIn: linkedin.com/in/sajner

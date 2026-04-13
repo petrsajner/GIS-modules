@@ -518,6 +518,11 @@ input[type=file] { display:none; }
 }
 .rth2:hover .rth2-describe { opacity:1; pointer-events:all; }
 
+/* Dimmed refs — over model's maxRefs limit, not sent to API */
+.rth2.ref-dimmed { opacity:0.35; filter:grayscale(0.6); pointer-events:auto; }
+.rth2.ref-dimmed .rth2-img { border-color:rgba(255,80,80,.35); }
+.rth2.ref-dimmed .rth2-label { color:var(--dim2); font-style:italic; }
+
 /* Describe modal */
 #describeModal {
   display:none; position:fixed; inset:0; z-index:500;
@@ -2974,6 +2979,9 @@ select.inpaint-num option { background:#fff; color:#111; }
             <option value="luma_ray2_flash" selected>Ray2 Flash · T2V+I2V · Fast · $0.24/5s · Luma</option>
             <option value="luma_ray2">Ray2 · T2V+I2V · $0.71/5s · Luma</option>
           </optgroup>
+          <optgroup label="── xAI Grok ──">
+            <option value="grok_video">Grok Video · T2V+I2V+Ref+Edit+Extend · $0.05/s · xAI</option>
+          </optgroup>
           <optgroup label="── Seedance ──">
             <option value="seedance2">★ Seedance 2.0 · Multi-modal · ByteDance</option>
             <option value="seedance15">Seedance 1.5 Pro · ByteDance</option>
@@ -3040,6 +3048,46 @@ select.inpaint-num option { background:#fff; color:#111; }
             <option value="ingredients">Ingredients — Up to 3 refs</option>
           </select>
           <div id="veoRefNote" style="font-size:11px;color:var(--dim2);margin-top:3px;display:none;"></div>
+        </div>
+      </div>
+
+      <!-- Grok Video params -->
+      <div class="psec" id="grokVideoParams" style="display:none;padding:6px 14px;">
+        <div class="ctrl" style="margin:0 0 8px 0;">
+          <div class="ctrl-label" style="color:var(--text);">Mode</div>
+          <select id="grokVideoMode" onchange="onGrokVideoModeChange(this.value)" style="width:100%;background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.5);color:#dc5040;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+            <option value="t2v">T2V — Text to Video</option>
+            <option value="i2v">I2V — Image to Video (start frame)</option>
+            <option value="ref2v">Ref2V — Reference images guide (max 7)</option>
+            <option value="edit">V2V Edit — Edit existing video</option>
+            <option value="extend">Extend — Continue from last frame</option>
+          </select>
+          <div id="grokVideoModeNote" style="font-size:10px;color:var(--dim2);margin-top:3px;">Prompt-only generation with native audio</div>
+        </div>
+        <div class="ctrl" style="margin:0 0 6px 0;">
+          <div class="ctrl-label">Duration</div>
+          <select id="grokVideoDur" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+            <option value="3">3s</option>
+            <option value="5">5s</option>
+            <option value="8" selected>8s</option>
+            <option value="10">10s</option>
+            <option value="12">12s</option>
+            <option value="15">15s</option>
+          </select>
+        </div>
+        <div class="ctrl" style="margin:0 0 6px 0;">
+          <div class="ctrl-label">Resolution</div>
+          <div style="display:flex;gap:12px;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text);cursor:pointer;">
+              <input type="radio" name="grokVideoRes" value="480p" style="margin:0;">480p
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text);cursor:pointer;">
+              <input type="radio" name="grokVideoRes" value="720p" checked style="margin:0;">720p
+            </label>
+          </div>
+        </div>
+        <div id="grokVideoSrcRow" style="display:none;margin-top:6px;">
+          <div style="font-size:10px;color:var(--dim2);margin-bottom:3px;">Source video: <span id="grokVideoSrcLabel" style="color:var(--accent);">none — click ▷ Use on a gallery video</span></div>
         </div>
       </div>
 

@@ -159,24 +159,26 @@ function renderRefThumbs() {
   const countEl = document.getElementById('refCount');
   const maxEl = document.getElementById('refMax');
   const max = getRefMax();
-  if (countEl) countEl.textContent = refs.length;
+  const activeCount = Math.min(refs.length, max);
+  if (countEl) countEl.textContent = activeCount;
   if (maxEl) maxEl.textContent = max;
 
   // Rebuild obsahu (zachovat ref-add-tile na konci)
   const tiles = refs.map((r, i) => {
     const label = r.userLabel || r.autoName || `ref ${i + 1}`;
     const hasName = !!(r.userLabel);
+    const dimmed = i >= max;
     return `
-    <div class="rth2" data-idx="${i}" draggable="true"
+    <div class="rth2${dimmed ? ' ref-dimmed' : ''}" data-idx="${i}" draggable="true"
          ondragstart="refDragStart(event,${i})"
          ondragend="refDragEnd(event)"
          ondragover="refDragOver(event,${i})"
          ondrop="refDrop(event,${i})"
          ondragleave="refDragLeave(event)">
-      <img class="rth2-img" src="data:${r.mimeType||'image/png'};base64,${r.thumb}" alt="${label}" onclick="openRefLightbox2(event,${i})" title="Preview">
-      <div class="del-ref2" onclick="event.stopPropagation();removeRef(${i})" title="Odebrat">×</div>
-      <div class="rth2-describe" onclick="event.stopPropagation();describeRefImage(${i})" title="Describe image">✦ Describe</div>
-      <div class="rth2-label ${hasName ? 'has-name' : ''}" title="${label}" ondblclick="startImageRefRename(${i}, this)">${escHtml(label)}</div>
+      <img class="rth2-img" src="data:${r.mimeType||'image/png'};base64,${r.thumb}" alt="${label}" onclick="openRefLightbox2(event,${i})" title="${dimmed ? 'Over limit — not sent to model' : 'Preview'}">
+      <div class="del-ref2" onclick="event.stopPropagation();removeRef(${i})" title="Remove">×</div>
+      ${!dimmed ? `<div class="rth2-describe" onclick="event.stopPropagation();describeRefImage(${i})" title="Describe image">✦ Describe</div>` : ''}
+      <div class="rth2-label ${hasName ? 'has-name' : ''}" title="${dimmed ? '⊘ Over limit' : label}" ondblclick="startImageRefRename(${i}, this)">${escHtml(label)}</div>
     </div>`;
   }).join('');
 

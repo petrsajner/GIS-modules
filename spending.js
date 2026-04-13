@@ -89,6 +89,7 @@ const SPEND_PRICES = {
   // ── xAI (per image) ─────────────────────────────────
   'grok-imagine-image':     0.020,
   'grok-imagine-image-pro': 0.070,
+  'grok-imagine-video':     0.050,  // xAI Grok Video — $0.05/s ($4.20/min)
 
   // ── Luma — image (per image) ────────────────────────
   'photon-1':           0.032,   // Luma Photon
