@@ -331,12 +331,21 @@ function setPTool(prefix, tool) {
   const eng = paintEngines[prefix];
   if (!eng) return;
   if (eng.textInput) eng.commitText();
+
+  // If leaving crop tool, cancel any active crop session first
+  if (eng.tool === 'crop' && tool !== 'crop') {
+    pCropCancel();
+  }
+
   eng.tool = tool;
-  const curMap = { pen:'cur-pen', eraser:'cur-eraser', line:'cur-line', rect:'cur-rect', ellipse:'cur-ellipse', text:'cur-text', bucket:'cur-bucket' };
+  const curMap = { pen:'cur-pen', eraser:'cur-eraser', line:'cur-line', rect:'cur-rect', ellipse:'cur-ellipse', text:'cur-text', bucket:'cur-bucket', crop:'cur-crop' };
   eng.canvas.className = curMap[tool] || 'cur-pen';
   document.querySelectorAll(`#${prefix}Toolbar .ptool`).forEach(b => b.classList.remove('active'));
   const btn = document.getElementById(`${prefix}T_${tool}`);
   if (btn) btn.classList.add('active');
+
+  // Activate crop UI
+  if (tool === 'crop') pCropStart(prefix);
 }
 
 function setPColor(prefix, color, swatchEl, pickerEl) {
@@ -400,6 +409,305 @@ function pClear(prefix) {
   }
   if (prefix === 'a') _paintDirty['a'] = false;
 }
+
+// ═══════════════════════════════════════════════════════
+// CROP TOOL (paint tab + annotate modal)
+// ═══════════════════════════════════════════════════════
+
+// { prefix, canvas, overlay, actions, lockChk, x, y, w, h, lockAspect, aspectRatio, dragMode, dragStart }
+let _pCropState = null;
+
+// Canvas element map per prefix
+function _pCropGetCanvas(prefix) {
+  return document.getElementById(prefix === 'p' ? 'paintCanvas' : 'annotateCanvas');
+}
+function _pCropGetOverlay(prefix) {
+  return document.getElementById(prefix + 'CropOverlay');
+}
+function _pCropGetActions(prefix) {
+  return document.getElementById(prefix + 'CropActions');
+}
+
+function pCropStart(prefix) {
+  const eng = paintEngines[prefix];
+  const canvas = _pCropGetCanvas(prefix);
+  const overlay = _pCropGetOverlay(prefix);
+  const actions = _pCropGetActions(prefix);
+  if (!eng || !canvas || !overlay) return;
+
+  // Initial crop rect: 80% centered
+  const cw = canvas.width, ch = canvas.height;
+  const rw = Math.round(cw * 0.8), rh = Math.round(ch * 0.8);
+  const lockChk = document.getElementById(prefix + 'CropLock');
+  _pCropState = {
+    prefix,
+    x: Math.round((cw - rw) / 2),
+    y: Math.round((ch - rh) / 2),
+    w: rw,
+    h: rh,
+    lockAspect: lockChk?.checked || false,
+    aspectRatio: rw / rh,
+    dragMode: null,
+    dragStart: null,
+  };
+
+  overlay.classList.add('active');
+  if (actions) actions.classList.add('active');
+  _pCropRender();
+}
+
+function pCropCancel() {
+  if (!_pCropState) return;
+  const { prefix } = _pCropState;
+  const overlay = _pCropGetOverlay(prefix);
+  const actions = _pCropGetActions(prefix);
+  _pCropState = null;
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.innerHTML = '';
+  }
+  if (actions) actions.classList.remove('active');
+}
+
+function pCropSetLock(locked) {
+  if (!_pCropState) return;
+  _pCropState.lockAspect = locked;
+  if (locked) _pCropState.aspectRatio = _pCropState.w / _pCropState.h;
+}
+
+function _pCropRender() {
+  if (!_pCropState) return;
+  const { prefix } = _pCropState;
+  const canvas = _pCropGetCanvas(prefix);
+  const overlay = _pCropGetOverlay(prefix);
+  if (!canvas || !overlay) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const wrap = canvas.parentElement;
+  const wrapRect = wrap.getBoundingClientRect();
+
+  // Position overlay exactly over canvas (in wrap-relative coords)
+  overlay.style.left = (rect.left - wrapRect.left) + 'px';
+  overlay.style.top  = (rect.top - wrapRect.top) + 'px';
+  overlay.style.width = rect.width + 'px';
+  overlay.style.height = rect.height + 'px';
+
+  // Canvas → screen scale
+  const sx = rect.width / canvas.width;
+  const sy = rect.height / canvas.height;
+
+  const cs = _pCropState;
+  const dx = cs.x * sx, dy = cs.y * sy;
+  const dw = cs.w * sx, dh = cs.h * sy;
+
+  overlay.innerHTML = `
+    <div class="pcrop-rect" style="left:${dx}px;top:${dy}px;width:${dw}px;height:${dh}px;">
+      <div class="pcrop-handle nw" data-h="nw"></div>
+      <div class="pcrop-handle n"  data-h="n"></div>
+      <div class="pcrop-handle ne" data-h="ne"></div>
+      <div class="pcrop-handle e"  data-h="e"></div>
+      <div class="pcrop-handle se" data-h="se"></div>
+      <div class="pcrop-handle s"  data-h="s"></div>
+      <div class="pcrop-handle sw" data-h="sw"></div>
+      <div class="pcrop-handle w"  data-h="w"></div>
+      <div class="pcrop-size-lbl">${cs.w} × ${cs.h}</div>
+    </div>
+  `;
+
+  const rectEl = overlay.querySelector('.pcrop-rect');
+  rectEl.addEventListener('mousedown', (e) => {
+    if (e.target.classList.contains('pcrop-handle')) {
+      _pCropStartDrag(e.target.dataset.h, e);
+    } else {
+      _pCropStartDrag('move', e);
+    }
+  });
+}
+
+function _pCropStartDrag(mode, e) {
+  if (!_pCropState) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const canvas = _pCropGetCanvas(_pCropState.prefix);
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  _pCropState.dragMode = mode;
+  _pCropState.dragStart = {
+    mx: e.clientX,
+    my: e.clientY,
+    x: _pCropState.x,
+    y: _pCropState.y,
+    w: _pCropState.w,
+    h: _pCropState.h,
+    scaleX,
+    scaleY,
+  };
+
+  document.addEventListener('mousemove', _pCropDragMove);
+  document.addEventListener('mouseup', _pCropDragEnd);
+}
+
+function _pCropDragMove(e) {
+  if (!_pCropState || !_pCropState.dragStart) return;
+  const canvas = _pCropGetCanvas(_pCropState.prefix);
+  const { mx, my, x, y, w, h, scaleX, scaleY } = _pCropState.dragStart;
+  const dx = (e.clientX - mx) * scaleX;
+  const dy = (e.clientY - my) * scaleY;
+  const cw = canvas.width, ch = canvas.height;
+  const minSize = 20;
+  const lock = _pCropState.lockAspect;
+  const ar = _pCropState.aspectRatio;
+
+  let nx = x, ny = y, nw = w, nh = h;
+  const m = _pCropState.dragMode;
+
+  if (m === 'move') {
+    nx = Math.max(0, Math.min(cw - w, x + dx));
+    ny = Math.max(0, Math.min(ch - h, y + dy));
+  } else {
+    // Resize
+    let left = x, top = y, right = x + w, bottom = y + h;
+    if (m.includes('w')) left   = Math.max(0, Math.min(right - minSize, x + dx));
+    if (m.includes('e')) right  = Math.min(cw, Math.max(left + minSize, x + w + dx));
+    if (m.includes('n')) top    = Math.max(0, Math.min(bottom - minSize, y + dy));
+    if (m.includes('s')) bottom = Math.min(ch, Math.max(top + minSize, y + h + dy));
+
+    nx = left; ny = top; nw = right - left; nh = bottom - top;
+
+    // Lock aspect ratio
+    if (lock) {
+      const isCorner = m.length === 2;
+      const isHorizEdge = (m === 'e' || m === 'w');
+      const isVertEdge  = (m === 'n' || m === 's');
+
+      if (isHorizEdge) {
+        const targetH = nw / ar;
+        const cy = (top + bottom) / 2;
+        ny = Math.max(0, Math.min(ch - targetH, cy - targetH / 2));
+        nh = Math.min(targetH, ch - ny);
+      } else if (isVertEdge) {
+        const targetW = nh * ar;
+        const cx = (left + right) / 2;
+        nx = Math.max(0, Math.min(cw - targetW, cx - targetW / 2));
+        nw = Math.min(targetW, cw - nx);
+      } else if (isCorner) {
+        const anchorX = m.includes('w') ? right : left;
+        const anchorY = m.includes('n') ? bottom : top;
+        const targetByW = nw / ar;
+        if (targetByW <= nh) { nh = targetByW; }
+        else { nw = nh * ar; }
+        if (m.includes('w')) nx = anchorX - nw; else nx = anchorX;
+        if (m.includes('n')) ny = anchorY - nh; else ny = anchorY;
+        if (nx < 0)    { nw += nx; nh = nw / ar; nx = 0; if (m.includes('n')) ny = anchorY - nh; }
+        if (ny < 0)    { nh += ny; nw = nh * ar; ny = 0; if (m.includes('w')) nx = anchorX - nw; }
+        if (nx + nw > cw) { nw = cw - nx; nh = nw / ar; if (m.includes('n')) ny = anchorY - nh; }
+        if (ny + nh > ch) { nh = ch - ny; nw = nh * ar; if (m.includes('w')) nx = anchorX - nw; }
+      }
+    }
+  }
+
+  _pCropState.x = Math.round(nx);
+  _pCropState.y = Math.round(ny);
+  _pCropState.w = Math.round(nw);
+  _pCropState.h = Math.round(nh);
+  _pCropRender();
+}
+
+function _pCropDragEnd() {
+  document.removeEventListener('mousemove', _pCropDragMove);
+  document.removeEventListener('mouseup', _pCropDragEnd);
+  if (_pCropState) _pCropState.dragMode = null;
+}
+
+function pCropApply() {
+  if (!_pCropState) return;
+  const { prefix, x, y, w, h } = _pCropState;
+  const eng = paintEngines[prefix];
+  const canvas = _pCropGetCanvas(prefix);
+  if (!eng || !canvas) return;
+  if (w < 1 || h < 1) return;
+
+  // Extract cropped image data
+  const cropped = eng.ctx.getImageData(x, y, w, h);
+
+  // Resize main canvas
+  canvas.width = w;
+  canvas.height = h;
+  eng.ctx.putImageData(cropped, 0, 0);
+
+  // Resize mask canvas if present (annotate mode)
+  if (eng.maskCtx) {
+    const maskCanvas = eng.maskCtx.canvas;
+    const maskCropped = eng.maskCtx.getImageData(x, y, w, h);
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    eng.maskCtx.putImageData(maskCropped, 0, 0);
+  }
+
+  // Reset history (no partial undos across crop boundary)
+  eng.history = [eng.ctx.getImageData(0, 0, w, h)];
+  if (eng.maskCtx) {
+    eng.maskHistory = [eng.maskCtx.getImageData(0, 0, w, h)];
+  }
+
+  // Paint tab: update dropdowns for new dimensions
+  if (prefix === 'p') {
+    const longSideEl = document.getElementById('pCanvasLong');
+    if (longSideEl) longSideEl.value = String(Math.max(w, h));
+    const ratioEl = document.getElementById('pCanvasRatio');
+    if (ratioEl) {
+      const approxRatio = _pCropApproxRatio(w, h);
+      if (approxRatio) ratioEl.value = approxRatio;
+    }
+  }
+
+  // Annotate: mark dirty so Apply/Save button knows something changed
+  if (prefix === 'a') _paintDirty['a'] = true;
+
+  pCropCancel();
+  pUpdateDownloadLink(prefix);
+  setPTool(prefix, 'pen');
+  if (typeof toast === 'function') toast(`Cropped to ${w}×${h}`, 'ok');
+}
+
+// Match crop dimensions to nearest dropdown ratio (paint tab UI sync)
+function _pCropApproxRatio(w, h) {
+  const r = w / h;
+  const options = [
+    { v: '9:16',  r: 9/16 },
+    { v: '3:4',   r: 3/4 },
+    { v: '1:1',   r: 1 },
+    { v: '4:3',   r: 4/3 },
+    { v: '16:9',  r: 16/9 },
+  ];
+  let best = null, bestDiff = Infinity;
+  for (const opt of options) {
+    const diff = Math.abs(r - opt.r);
+    if (diff < bestDiff) { bestDiff = diff; best = opt.v; }
+  }
+  return bestDiff < 0.05 ? best : null;
+}
+
+// Keyboard shortcuts for crop (Enter = apply, Esc = cancel)
+document.addEventListener('keydown', (e) => {
+  if (!_pCropState) return;
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+  if (e.key === 'Enter') { e.preventDefault(); pCropApply(); }
+  else if (e.key === 'Escape') {
+    e.preventDefault();
+    const prefix = _pCropState.prefix;
+    pCropCancel();
+    setPTool(prefix, 'pen');
+  }
+});
+
+// Rerender overlay on window resize
+window.addEventListener('resize', () => {
+  if (_pCropState) _pCropRender();
+});
 
 function pExportRef(prefix) {
   const eng = paintEngines[prefix];
@@ -1384,7 +1692,6 @@ async function addToInpaintQueue() {
   }
 
   const blurPx = parseInt(document.getElementById('inpaintMaskBlur')?.value || '0');
-  const isFullImageModel = (modelSel === 'qwen_inpaint');
   const negativePrompt  = (document.getElementById('inpaintNegPrompt')?.value || '').trim();
   const safetyTolerance = document.getElementById('inpaintSafetyTol')?.value || '2';
 
@@ -1395,7 +1702,6 @@ async function addToInpaintQueue() {
     ts:            Date.now(),
     modelSel, prompt, steps, guidance, strength, seed, ctrlScale, refStrength,
     maskBlur:      blurPx,
-    fullImageMode: isFullImageModel,
     imageB64, maskB64,
     fullImageB64:  _annotateBaseB64,
     fullMaskB64:   (typeof fullMaskB64 !== 'undefined') ? fullMaskB64 : maskB64,
@@ -1456,27 +1762,6 @@ async function _processInpaintQueue() {
       result = await callFluxKreaInpaint(falKey, { imageB64, maskB64, prompt,
         width: cropW, height: cropH, steps, guidance, strength, seed }, upd, signal);
       trackSpend('fal', 'fal-ai/flux-krea-lora/inpainting');
-
-    } else if (modelSel === 'fast_sdxl') {
-      result = await callFastSdxlInpaint(falKey, { imageB64, maskB64, prompt,
-        width: cropW, height: cropH, steps, guidance, strength, seed, negativePrompt }, upd, signal);
-      trackSpend('fal', 'fal-ai/fast-sdxl/inpainting');
-
-    } else if (modelSel === 'playground_v25') {
-      result = await callPlaygroundV25Inpaint(falKey, { imageB64, maskB64, prompt,
-        width: cropW, height: cropH, steps, guidance, strength, seed, negativePrompt }, upd, signal);
-      trackSpend('fal', 'fal-ai/playground-v25/inpainting');
-
-    } else if (modelSel === 'qwen_inpaint') {
-      // Qwen receives full image + full mask for better context
-      const qwenW = job.fullImageB64 ? await new Promise(r => { const i = new Image(); i.onload = () => r(i.naturalWidth);  i.src = `data:image/png;base64,${job.fullImageB64}`; }) : cropW;
-      const qwenH = job.fullImageB64 ? await new Promise(r => { const i = new Image(); i.onload = () => r(i.naturalHeight); i.src = `data:image/png;base64,${job.fullImageB64}`; }) : cropH;
-      result = await callQwenInpaint(falKey, {
-        imageB64: job.fullImageB64 || imageB64,
-        maskB64:  job.fullMaskB64  || maskB64,
-        prompt, width: qwenW, height: qwenH, steps, guidance, seed,
-      }, upd, signal);
-      trackSpend('fal', 'fal-ai/qwen-image-edit/inpaint');
 
     } else {
       // flux_fill with ControlNet/ref + flux_general → FLUX General
@@ -1589,8 +1874,6 @@ function renderInpaintQueue() {
   const modelLabel = {
     flux_fill:'FLUX Pro Fill', flux_general:'FLUX General',
     flux_dev:'FLUX Dev', flux_krea:'FLUX Krea',
-    fast_sdxl:'SDXL Fast', playground_v25:'Playground 2.5',
-    qwen_inpaint:'Qwen Inpaint',
   };
   const statusTxt = j => {
     const elapsed = j.startedAt ? Math.round((Date.now() - j.startedAt) / 1000) + 's' : '';
@@ -1628,19 +1911,7 @@ async function _compositeAndSaveQueueJob(job, result) {
 
   let finalB64;
 
-  if (job.fullImageMode) {
-    // Qwen returns full edited image — convert to PNG and save directly
-    finalB64 = await new Promise(res => {
-      const img = new Image();
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        c.width = img.naturalWidth; c.height = img.naturalHeight;
-        c.getContext('2d').drawImage(img, 0, 0);
-        res(c.toDataURL('image/png').split(',')[1]);
-      };
-      img.src = `data:${mimeType};base64,${resultB64}`;
-    });
-  } else {
+  {
     // Crop-based models: composite result back onto original at crop position
     const dims = await new Promise(res => {
       const img = new Image();
@@ -1685,7 +1956,7 @@ async function _compositeAndSaveQueueJob(job, result) {
 
   // Save to gallery ONLY — canvas NOT updated, mask preserved for next iteration
   const dimStr = fmtDims(await getImageDimensions(finalB64));
-  const modelLabel = { flux_fill:'FLUX Pro Fill', flux_general:'FLUX General', flux_dev:'FLUX Dev', flux_krea:'FLUX Krea', fast_sdxl:'SDXL Fast', playground_v25:'Playground 2.5', qwen_inpaint:'Qwen Inpaint' }[job.modelSel] || 'Inpaint';
+  const modelLabel = { flux_fill:'FLUX Pro Fill', flux_general:'FLUX General', flux_dev:'FLUX Dev', flux_krea:'FLUX Krea' }[job.modelSel] || 'Inpaint';
   const recId  = Date.now() + '_' + Math.random().toString(36).substr(2, 6);
   const rec    = {
     id: recId, ts: Date.now(),

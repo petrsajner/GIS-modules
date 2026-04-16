@@ -74,35 +74,7 @@ window.onload = () => {
       if (e.key === 'ArrowRight') navigateModal(1);
     }
   });
-  document.querySelectorAll('input[name="nImg"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('nImgVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="nbCount"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('nbCountVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="imagenCount"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('imagenCountVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="fluxCount"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('fluxCountVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="sdCount"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('sdCountVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="klingCount"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('klingCountVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="zimageCount"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('zimageCountVal').textContent = r.value;
-  }));
-  document.querySelectorAll('input[name="qwen2Count"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('qwen2CountVal').textContent = r.value;
-  }));
-  // FLUX quality tier + aspect ratio → aktualizovat pixel info
-  document.querySelectorAll('input[name="fluxQuality"]').forEach(r => r.addEventListener('change', updateFluxQualityInfo));
-  // Z-Image resolution tier + aspect ratio → aktualizovat pixel info
-  document.querySelectorAll('input[name="zimageRes"]').forEach(r => r.addEventListener('change', updateZImageQualityInfo));
-  document.getElementById('aspectRatio').addEventListener('change', () => { updateFluxQualityInfo(); updateZImageQualityInfo(); });
+  // Unified panel count + resolution listeners are set up in selectModel() → _buildResToggle()
   initDB().then(async () => {
     refreshGalleryUI();
     updateTargetFolderSelect();

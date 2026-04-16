@@ -5,6 +5,10 @@
 // ── Application identity ──────────────────────────────
 const GIS_COPYRIGHT = 'Generative Image Studio \u00a9 2026 Petr Sajner. All rights reserved.';
 const _GIS_SIG = btoa(unescape(encodeURIComponent(GIS_COPYRIGHT))).slice(0, 20);
+
+// ── Default negative prompt (shared across models that support it) ──
+const _DEFAULT_NEG_PROMPT = 'low quality, blurry, distorted, deformed, ugly, watermark, text, logo, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn, mutation, duplicate, out of frame, worst quality, jpeg artifacts';
+
 // ─────────────────────────────────────────────────────
 const MODELS = {
   nb2: {
@@ -15,7 +19,10 @@ const MODELS = {
     refs: true,
     maxRefs: 14,
     seed: false,
-    resolutions: ['512', '1K', '2K', '4K'],
+    resolutions: ['1K', '2K', '4K'],
+    maxCount: 4,
+    grounding: true,
+    persistRetry: true,
   },
   nb1: {
     id: 'gemini-2.5-flash-image',
@@ -25,17 +32,23 @@ const MODELS = {
     refs: true,
     maxRefs: 14,
     seed: false,
-    resolutions: ['1K'],   // NB1 max resolution is 1K
+    resolutions: ['1K'],
+    maxCount: 4,
+    grounding: true,
+    persistRetry: true,
   },
   nbpro: {
     id: 'gemini-3-pro-image-preview',
     name: 'NB Pro',
     type: 'gemini',
-    thinking: false,   // API: "Thinking level is not supported for this model"
+    thinking: false,
     refs: true,
     maxRefs: 14,
     seed: false,
     resolutions: ['1K', '2K', '4K'],
+    maxCount: 4,
+    grounding: true,
+    persistRetry: true,
   },
   i4: {
     id: 'imagen-4.0-generate-001',
@@ -46,6 +59,8 @@ const MODELS = {
     maxRefs: 0,
     seed: true,
     resolutions: ['1K', '2K'],
+    maxCount: 4,
+    persistRetry: true,
   },
   i4fast: {
     id: 'imagen-4.0-fast-generate-001',
@@ -56,6 +71,8 @@ const MODELS = {
     maxRefs: 0,
     seed: true,
     resolutions: ['1K'],
+    maxCount: 4,
+    persistRetry: true,
   },
   i4ultra: {
     id: 'imagen-4.0-ultra-generate-001',
@@ -65,10 +82,12 @@ const MODELS = {
     refs: false,
     maxRefs: 0,
     seed: true,
-    resolutions: ['1K'],  // Ultra returns 1K (2K not supported via REST API key)
+    resolutions: ['1K', '2K'],
+    maxCount: 1,      // Ultra: API returns max 1 image per call
+    persistRetry: true,
   },
 
-  // ── FLUX.2 family — fal.ai (browser-compatible CORS, base64 data URIs podporovány) ──
+  // ── FLUX.2 family — fal.ai ──
   flux2_pro: {
     id: 'fal-ai/flux-2-pro',
     name: 'FLUX.2 Pro',
@@ -80,10 +99,10 @@ const MODELS = {
     seed: true,
     steps: false,
     guidance: false,
-    groundingSearch: false,
     safetyTolerance: true,
-    promptUpsampling: true,
-    resolutions: ['512', '1K', '2K wide', '4MP'],
+    resolutions: ['1K', '2K', '4MP'],
+    resValues: { '1K': 1024, '2K': 1440, '4MP': 2048 },
+    maxCount: 4,
   },
   flux2_flex: {
     id: 'fal-ai/flux-2-flex',
@@ -92,14 +111,14 @@ const MODELS = {
     provider: 'fal',
     thinking: false,
     refs: true,
-    maxRefs: 10,              // fal flex/edit: až 10 referencí
+    maxRefs: 10,
     seed: true,
-    steps: true,              // num_inference_steps
-    guidance: true,           // guidance_scale
-    groundingSearch: false,
+    steps: true,
+    guidance: true,
     safetyTolerance: true,
-    promptUpsampling: true,
-    resolutions: ['512', '1K', '2K wide', '4MP'],
+    resolutions: ['1K', '2K', '4MP'],
+    resValues: { '1K': 1024, '2K': 1440, '4MP': 2048 },
+    maxCount: 4,
   },
   flux2_max: {
     id: 'fal-ai/flux-2-max',
@@ -112,10 +131,10 @@ const MODELS = {
     seed: true,
     steps: false,
     guidance: false,
-    groundingSearch: false,   // fal.ai Max nemá grounding search
     safetyTolerance: true,
-    promptUpsampling: true,
-    resolutions: ['512', '1K', '2K wide', '4MP'],
+    resolutions: ['1K', '2K', '4MP'],
+    resValues: { '1K': 1024, '2K': 1440, '4MP': 2048 },
+    maxCount: 4,
   },
   flux2_dev: {
     id: 'fal-ai/flux-2',
@@ -128,15 +147,13 @@ const MODELS = {
     seed: true,
     steps: true,
     guidance: true,
-    groundingSearch: false,
     safetyTolerance: false,
-    promptUpsampling: true,
-    resolutions: ['512', '1K', '2K wide', '4MP'],
+    resolutions: ['1K', '2K', '4MP'],
+    resValues: { '1K': 1024, '2K': 1440, '4MP': 2048 },
+    maxCount: 4,
   },
 
   // ── SeeDream family — ByteDance via fal.ai ──
-  // Flat $0.04/img bez ohledu na rozlišení, až 4K, max 10 refs
-  // image_size: auto_2K/auto_4K nebo {width,height} — NE fal.ai flux presety
   seedream45: {
     id: 'fal-ai/bytedance/seedream/v4.5',
     name: 'SeeDream 4.5',
@@ -146,8 +163,9 @@ const MODELS = {
     refs: true,
     maxRefs: 10,
     seed: true,
-    enhancePrompt: true,
+    safetyChecker: true,
     resolutions: ['2K', '4K'],
+    maxCount: 4,
   },
   seedream5lite: {
     id: 'fal-ai/bytedance/seedream/v5/lite',
@@ -158,13 +176,12 @@ const MODELS = {
     refs: true,
     maxRefs: 10,
     seed: true,
-    enhancePrompt: true,
-    resolutions: ['2K', '4K'],
+    safetyChecker: true,
+    resolutions: ['2K', '3K'],
+    maxCount: 4,
   },
 
   // ── Kling Image — Kuaishou via fal.ai ──
-  // Refs přes @Image1,@Image2 syntax (nativní pro model i náš preprocessor)
-  // T2I: fal-ai/kling-image/v3/text-to-image, I2I (s refs): fal-ai/kling-image/v3/image-to-image
   kling_v3: {
     id: 'fal-ai/kling-image/v3',
     name: 'Kling Image V3',
@@ -174,14 +191,9 @@ const MODELS = {
     refs: true,
     maxRefs: 10,
     seed: false,
-    steps: false,
-    guidance: false,
-    negPrompt: false,
     resolutions: ['1K', '2K'],
+    maxCount: 4,
   },
-
-  // T2I: fal-ai/kling-image/o3/text-to-image, I2I: fal-ai/kling-image/o3/image-to-image
-  // Nejnovější model (únor 2026) — 1K/2K/4K, aspect_ratio "auto" pro I2I
   kling_o3: {
     id: 'fal-ai/kling-image/o3',
     name: 'Kling Image O3',
@@ -191,16 +203,11 @@ const MODELS = {
     refs: true,
     maxRefs: 10,
     seed: false,
-    steps: false,
-    guidance: false,
-    negPrompt: false,
     resolutions: ['1K', '2K', '4K'],
+    maxCount: 4,
   },
 
   // ── Z-Image family — Tongyi-MAI (Alibaba) via fal.ai ──
-  // Base: 28 steps, CFG, negative prompt — plná kontrola (T2I)
-  // Base I2I: stejné parametry + image_url + strength (endpoint /base/image-to-image)
-  // Turbo: 8 steps, no CFG — T2I + I2I (endpoint /turbo + /turbo/image-to-image)
   zimage_base: {
     id: 'fal-ai/z-image/base',
     name: 'Z-Image Base',
@@ -210,33 +217,36 @@ const MODELS = {
     refs: false,
     maxRefs: 0,
     seed: true,
-    steps: true,        // num_inference_steps default 28
-    guidance: true,     // guidance_scale default 4
-    negPrompt: true,    // plný negative prompt
+    steps: true,
+    guidance: true,
+    negPrompt: true,
+    safetyChecker: true,
     resolutions: ['1K', '2K'],
+    resValues: { '1K': '1', '2K': '2' },
+    maxCount: 4,
   },
-  // Poznámka: fal-ai/z-image/base nepodporuje image_url (Base I2I endpoint neexistuje)
-  // Z-Image I2I je dostupné jen přes zimage_turbo → fal-ai/z-image/turbo/image-to-image
   zimage_turbo: {
     id: 'fal-ai/z-image/turbo',
     name: 'Z-Image Turbo',
     type: 'zimage',
     provider: 'fal',
     thinking: false,
-    refs: true,           // 1 vstupní obrázek pro I2I (optional)
-    maxRefs: 1,           // max 1 — Z-Image Turbo I2I endpoint
-    i2iModel: true,       // označení: ref sekce = I2I vstup, ne multi-ref
+    refs: true,
+    maxRefs: 1,
+    i2iModel: true,
     seed: true,
-    steps: true,          // 1–16 steps
-    guidance: false,      // Turbo: no CFG
-    negPrompt: false,     // Turbo: no negative prompt
+    steps: true,
+    guidance: false,
+    negPrompt: false,
+    safetyChecker: true,
+    acceleration: true,
+    strength: true,
     resolutions: ['1K', '2K'],
+    resValues: { '1K': '1', '2K': '2' },
+    maxCount: 4,
   },
 
-  // ── WAN 2.7 — Segmind API via proxy ────────────────────
-  // T2I: up to 2K (std) / 4K (Pro), thinking mode, neg prompt
-  // Edit: up to 9 refs, instruction-based editing
-  // Auth: x-api-key header, sync response
+  // ── WAN 2.7 — Replicate via proxy ──
   wan27_std: {
     id: 'wan-video/wan-2.7-image',
     name: 'WAN 2.7',
@@ -246,7 +256,9 @@ const MODELS = {
     maxRefs: 0,
     editModel: false,
     seed: true,
-    negPrompt: true,
+    aspectFilter: 'wan27',
+    resolutions: ['1K', '2K'],
+    maxCount: 4,
   },
   wan27_pro: {
     id: 'wan-video/wan-2.7-image-pro',
@@ -257,7 +269,10 @@ const MODELS = {
     maxRefs: 0,
     editModel: false,
     seed: true,
-    negPrompt: true,
+    thinkingCheckbox: true,
+    aspectFilter: 'wan27',
+    resolutions: ['1K', '2K', '4K'],
+    maxCount: 4,
   },
   wan27_edit: {
     id: 'wan-video/wan-2.7-image',
@@ -269,6 +284,8 @@ const MODELS = {
     editModel: true,
     seed: true,
     negPrompt: false,
+    resolutions: ['1K', '2K'],
+    maxCount: 1,
   },
   wan27_pro_edit: {
     id: 'wan-video/wan-2.7-image-pro',
@@ -280,11 +297,11 @@ const MODELS = {
     editModel: true,
     seed: true,
     negPrompt: false,
+    resolutions: ['1K', '2K', '4K'],
+    maxCount: 1,
   },
 
-  // ── Qwen Image 2 — Alibaba Tongyi via fal.ai ──
-  // T2I Standard + Pro, Edit Standard + Pro
-  // Edit endpointy: editModel:true — ref panel = vstupní obrázek pro instrukční editaci
+  // ── Qwen Image 2 — Alibaba via fal.ai ──
   qwen2_std: {
     id: 'fal-ai/qwen-image-2/text-to-image',
     name: 'Qwen Image 2',
@@ -293,12 +310,14 @@ const MODELS = {
     refs: false,
     maxRefs: 0,
     seed: true,
-    steps: true,      // default 25, range 1–50
-    guidance: true,   // default 5.0
+    steps: true,
+    guidance: true,
     negPrompt: true,
     acceleration: true,
-    promptExpansion: true,
+    safetyChecker: true,
     editModel: false,
+    resolutions: ['1K', '2K'],
+    maxCount: 4,
   },
   qwen2_pro: {
     id: 'fal-ai/qwen-image-2/pro/text-to-image',
@@ -308,12 +327,14 @@ const MODELS = {
     refs: false,
     maxRefs: 0,
     seed: true,
-    steps: true,      // default 35, range 1–50
-    guidance: true,   // default 7.0
+    steps: true,
+    guidance: true,
     negPrompt: true,
     acceleration: true,
-    promptExpansion: true,
+    safetyChecker: true,
     editModel: false,
+    resolutions: ['1K', '2K'],
+    maxCount: 4,
   },
   qwen2_edit: {
     id: 'fal-ai/qwen-image-2/edit',
@@ -321,14 +342,16 @@ const MODELS = {
     type: 'qwen2',
     provider: 'fal',
     refs: true,
-    maxRefs: 3,       // multi-image compositing (API limit: 3 refs)
-    editModel: true,  // ref panel = vstupní obrázky pro instrukční editaci
+    maxRefs: 3,
+    editModel: true,
     seed: true,
-    steps: true,      // default 25
-    guidance: true,   // default 4.5
+    steps: true,
+    guidance: true,
     negPrompt: true,
+    safetyChecker: true,
     acceleration: false,
-    promptExpansion: false,
+    resolutions: ['1K', '2K'],
+    maxCount: 1,
   },
   qwen2_pro_edit: {
     id: 'fal-ai/qwen-image-2/pro/edit',
@@ -336,14 +359,16 @@ const MODELS = {
     type: 'qwen2',
     provider: 'fal',
     refs: true,
-    maxRefs: 3,       // multi-image compositing (API limit: 3 refs)
+    maxRefs: 3,
     editModel: true,
     seed: true,
-    steps: true,      // default 35
-    guidance: true,   // default 5.0
+    steps: true,
+    guidance: true,
     negPrompt: true,
+    safetyChecker: true,
     acceleration: false,
-    promptExpansion: false,
+    resolutions: ['1K', '2K'],
+    maxCount: 1,
   },
   grok_imagine: {
     id: 'grok-imagine-image',
@@ -354,6 +379,9 @@ const MODELS = {
     editModel: false,
     seed: false,
     i2iModel: true,
+    aspectFilter: 'grok',
+    resolutions: ['1K', '2K'],
+    maxCount: 10,
   },
   grok_imagine_pro: {
     id: 'grok-imagine-image-pro',
@@ -364,6 +392,10 @@ const MODELS = {
     editModel: false,
     seed: false,
     i2iModel: true,
+    aspectFilter: 'grok',
+    resolutions: ['1K', '2K'],
+    maxCount: 10,
+    defaultRes: '2K',
   },
   photon_flash: {
     id: 'photon-flash-1',
@@ -391,54 +423,42 @@ const MODELS = {
     name: 'Mystic Realism',
     type: 'proxy_mystic',
     mysticModel: 'realism',
-    refs: true,    // refs[0] = structure ref, refs[1] = style ref
-    maxRefs: 2,
-    seed: false,
+    refs: true,    maxRefs: 2,    seed: false,
   },
   mystic_fluid: {
     id: 'mystic-fluid',
     name: 'Mystic Fluid',
     type: 'proxy_mystic',
     mysticModel: 'fluid',
-    refs: true,
-    maxRefs: 2,
-    seed: false,
+    refs: true,    maxRefs: 2,    seed: false,
   },
   mystic_zen: {
     id: 'mystic-zen',
     name: 'Mystic Zen',
     type: 'proxy_mystic',
     mysticModel: 'zen',
-    refs: true,
-    maxRefs: 2,
-    seed: false,
+    refs: true,    maxRefs: 2,    seed: false,
   },
   mystic_flexible: {
     id: 'mystic-flexible',
     name: 'Mystic Flexible',
     type: 'proxy_mystic',
     mysticModel: 'flexible',
-    refs: true,
-    maxRefs: 2,
-    seed: false,
+    refs: true,    maxRefs: 2,    seed: false,
   },
   mystic_super_real: {
     id: 'mystic-super-real',
     name: 'Mystic Super Real',
     type: 'proxy_mystic',
     mysticModel: 'super_real',
-    refs: true,
-    maxRefs: 2,
-    seed: false,
+    refs: true,    maxRefs: 2,    seed: false,
   },
   mystic_editorial: {
     id: 'mystic-editorial',
     name: 'Mystic Editorial',
     type: 'proxy_mystic',
     mysticModel: 'editorial_portraits',
-    refs: true,
-    maxRefs: 2,
-    seed: false,
+    refs: true,    maxRefs: 2,    seed: false,
   },
   // ── Freepik/Magnific Edit Tools ─────────────────────────
   freepik_relight: {
@@ -446,32 +466,27 @@ const MODELS = {
     name: 'Magnific Relight',
     type: 'proxy_freepik_edit',
     freepikTool: 'relight',
-    refs: true,
-    maxRefs: 2,    // ref[0] = source image (required), ref[1] = lighting ref (optional)
-    editModel: true,
-    seed: false,
+    refs: true,    maxRefs: 2,    editModel: true,    seed: false,
   },
   freepik_style: {
     id: 'freepik-style-transfer',
     name: 'Magnific Style Transfer',
     type: 'proxy_freepik_edit',
     freepikTool: 'style_transfer',
-    refs: true,
-    maxRefs: 2,    // ref[0] = source (required), ref[1] = style source (required)
-    editModel: true,
-    seed: false,
+    refs: true,    maxRefs: 2,    editModel: true,    seed: false,
   },
   freepik_skin: {
     id: 'freepik-skin-enhancer',
     name: 'Magnific Skin Enhancer',
     type: 'proxy_freepik_edit',
     freepikTool: 'skin_enhancer',
-    refs: true,
-    maxRefs: 1,    // ref[0] = source image (required)
-    editModel: true,
-    seed: false,
+    refs: true,    maxRefs: 1,    editModel: true,    seed: false,
   },
 };
+
+// ── Unified panel types — models using the unified control panel ──
+const _UNIFIED_TYPES = new Set(['gemini','imagen','flux','seedream','kling','zimage','wan27r','qwen2','proxy_xai']);
+function isUnifiedModel(m) { return _UNIFIED_TYPES.has(m?.type); }
 
 // ── Helper: model key z model objektu ──
 function getModelKey(model) {
@@ -484,13 +499,10 @@ function getRefMax() {
 }
 
 // Active refs = first N refs up to model's maxRefs limit.
-// Excess refs stay in refs[] (preserved for model switch) but are NOT sent to API.
 function getActiveRefs() {
   return refs.slice(0, getRefMax());
 }
 
-// Maximum refs storable regardless of current model — allows adding refs
-// even when active model doesn't support them (they stay hidden until model switch)
 const REF_GLOBAL_MAX = 14;
 
 // ── Mystic: aspect ratio mapping (GIS → Freepik API strings) ──────────────
@@ -509,30 +521,20 @@ const MYSTIC_ASPECT_MAP = {
 };
 
 // ── Helper: výpočet pixel rozměrů pro FLUX z aspect ratio + quality tier ──
-// ── Helper: výpočet pixel rozměrů pro FLUX z aspect ratio + quality tier ──
-// Vždy zaokrouhluje na násobky 64 (fal.ai požadavek pro FLUX.2)
 function calcFluxDims(aspectRatioStr, longSide) {
   const parts = aspectRatioStr.split(':').map(Number);
   const [aw, ah] = parts.length === 2 ? parts : [1, 1];
   const snap64 = v => Math.max(64, Math.round(v / 64) * 64);
-  const ls = snap64(longSide);   // snap i samotný longSide
+  const ls = snap64(longSide);
   let w, h;
-  if (aw >= ah) {
-    w = ls;
-    h = snap64(ls * ah / aw);
-  } else {
-    h = ls;
-    w = snap64(ls * aw / ah);
-  }
-  // fal.ai: min 512px na každé straně pro FLUX.2
+  if (aw >= ah) { w = ls; h = snap64(ls * ah / aw); }
+  else          { h = ls; w = snap64(ls * aw / ah); }
   w = Math.max(512, Math.min(4096, w));
   h = Math.max(512, Math.min(4096, h));
   return { w, h };
 }
 
 // ── Helper: fal.ai image_size hodnota ──
-// Pro 1K + standardní ratio → preset string (garantovaně funguje)
-// Pro 2K/4MP nebo nestandardní ratio → custom {width, height} (snap64)
 const FAL_PRESETS = {
   '1:1':  { 512: 'square',       1024: 'square_hd'      },
   '16:9': { 512: 'landscape_16_9', 1024: 'landscape_16_9' },
@@ -543,14 +545,12 @@ const FAL_PRESETS = {
 
 function falImageSize(aspectRatioStr, tier) {
   const preset = FAL_PRESETS[aspectRatioStr]?.[tier];
-  if (preset) return preset;                          // preset string
+  if (preset) return preset;
   const { w, h } = calcFluxDims(aspectRatioStr, tier);
-  return { width: w, height: h };                     // custom objekt
+  return { width: w, height: h };
 }
 
 // ── Helper: Z-Image MP-based dimensions ──
-// mpTarget: 1 = 1MP, 2 = 2MP, 4 = 4MP (tier label, ne nutně přesný počet MP)
-// Z-Image max: 2048px per side — při překročení přepočítá druhou stranu
 function calcZImageDims(ratioStr, mpTarget) {
   const parts = ratioStr.split(':').map(Number);
   const [aw, ah] = parts.length === 2 ? parts : [16, 9];
@@ -559,38 +559,95 @@ function calcZImageDims(ratioStr, mpTarget) {
   const totalPx = mpTarget * 1_000_000;
   let w = snap64(Math.sqrt(totalPx * aw / ah));
   let h = snap64(w * ah / aw);
-  // Cap na 2048px per side, zachovat aspect ratio
   if (w > MAX) { w = snap64(MAX); h = snap64(w * ah / aw); }
   if (h > MAX) { h = snap64(MAX); w = snap64(h * aw / ah); }
   return { width: w, height: h };
 }
 
-// ── Helper: aktualizuj info label u quality tieru ──
-function updateFluxQualityInfo() {
-  const tier = parseInt(document.querySelector('input[name="fluxQuality"]:checked')?.value || '1024');
-  const ratio = document.getElementById('aspectRatio')?.value || '16:9';
-  const size = falImageSize(ratio, tier);
-  let label;
-  if (typeof size === 'string') {
-    // preset — zobraz přibližné dims v závorce
-    const { w, h } = calcFluxDims(ratio, tier);
-    label = `${size} (~${w}×${h})`;
-  } else {
-    label = `${size.width}×${size.height} px`;
-  }
-  const infoEl = document.getElementById('fluxQualityInfo');
-  if (infoEl) infoEl.textContent = label;
+// ── WAN 2.7 pixel whitelist ──
+const _WAN27_PIXELS = {
+  '16:9': { '1K': '1280*720',  '2K': '2048*1152', '4K': '4096*2304' },
+  '9:16': { '1K': '720*1280',  '2K': '1152*2048', '4K': '2304*4096' },
+  '1:1':  { '1K': '1024*1024', '2K': '2048*2048', '4K': '4096*4096' },
+  '4:3':  { '1K': '1024*768',  '2K': '2048*1536', '4K': '4096*3072' },
+  '3:4':  { '1K': '768*1024',  '2K': '1536*2048', '4K': '3072*4096' },
+};
+
+// ── Grok aspect whitelist ──
+const _GROK_ASPECTS = new Set(['1:1','3:4','4:3','9:16','16:9','2:3','3:2','9:19.5','19.5:9','9:20','20:9','1:2','2:1','auto']);
+
+// ── Empirical long-side values per tier (measured from actual API output at 16:9) ──
+const _MODEL_LONG_SIDES = {
+  // Gemini: multiply by ratio (nb2/pro: 1376 base, nb1: 1344 base)
+  nb2:   { '1K': 1376, '2K': 2752, '4K': 5504 },
+  nb1:   { '1K': 1344 },
+  nbpro: { '1K': 1376, '2K': 2752, '4K': 5504 },
+  // Imagen: only 1K works via REST API
+  i4:      { '1K': 1408, '2K': 2816 },
+  i4fast:  { '1K': 1408 },
+  i4ultra: { '1K': 1408, '2K': 2816 },
+  // SeeDream
+  seedream45:    { '2K': 2560, '4K': 3840 },
+  seedream5lite: { '2K': 3136, '3K': 4704 },
+  // Kling
+  kling_v3: { '1K': 1360, '2K': 2720, '4K': 5440 },
+  kling_o3: { '1K': 1360, '2K': 2720, '4K': 5440 },
+  // Qwen
+  qwen2_std:      { '1K': 1664, '2K': 2048 },
+  qwen2_pro:      { '1K': 1664, '2K': 2048 },
+  qwen2_edit:     { '1K': 1664, '2K': 2048 },
+  qwen2_pro_edit: { '1K': 1664, '2K': 2048 },
+  // Grok
+  grok_imagine:     { '1K': 1408, '2K': 2816 },
+  grok_imagine_pro: { '1K': 1408, '2K': 2816 },
+  // WAN 2.7 — uses pixel whitelist (handled separately)
+};
+
+// Helper: compute approx W×H from empirical long side + aspect ratio
+function _approxDims(longSide, aspect) {
+  const parts = aspect.split(':').map(Number);
+  const [aw, ah] = parts.length === 2 ? parts : [16, 9];
+  let w, h;
+  if (aw >= ah) { w = longSide; h = Math.round(longSide * ah / aw); }
+  else          { h = longSide; w = Math.round(longSide * aw / ah); }
+  return w + '\u00d7' + h;
 }
 
-// ── Helper: aktualizuj info label u Z-Image quality tieru ──
-function updateZImageQualityInfo() {
-  const mpVal = document.querySelector('input[name="zimageRes"]:checked')?.value || '1';
-  const ratio = document.getElementById('aspectRatio')?.value || '16:9';
-  const { width, height } = calcZImageDims(ratio, parseInt(mpVal));
-  const infoEl = document.getElementById('zimageQualityInfo');
-  if (infoEl) infoEl.textContent = `${width}×${height} px`;
+// ── Unified resolution info — computes pixel dimensions per model type ──
+function updateUnifiedResInfo() {
+  const infoEl = document.getElementById('upResInfo');
+  if (!infoEl) return;
+  const m = MODELS[currentModel];
+  if (!m || !isUnifiedModel(m)) return;
+  const sel = document.querySelector('input[name="upRes"]:checked');
+  if (!sel) { infoEl.textContent = ''; return; }
+  const label = sel.value;
+  const apiVal = m.resValues?.[label] ?? label;
+  const aspect = document.getElementById('aspectRatio')?.value || '16:9';
+
+  // FLUX and Z-Image: use calculated dims (already accurate)
+  if (m.type === 'flux') {
+    const { w, h } = calcFluxDims(aspect, typeof apiVal === 'number' ? apiVal : parseInt(apiVal));
+    infoEl.textContent = w + '\u00d7' + h;
+  } else if (m.type === 'zimage') {
+    const { width, height } = calcZImageDims(aspect, parseInt(apiVal));
+    infoEl.textContent = width + '\u00d7' + height;
+  } else if (m.type === 'wan27r') {
+    // WAN 2.7: pixel whitelist lookup
+    const px = _WAN27_PIXELS[aspect]?.[label];
+    if (m.editModel) infoEl.textContent = label + ' (from input)';
+    else if (px) infoEl.textContent = px.replace('*', '\u00d7');
+    else infoEl.textContent = label + ' (square \u2014 ' + aspect + ' n/a)';
+  } else {
+    // All other models: use empirical long-side lookup
+    const ls = _MODEL_LONG_SIDES[currentModel]?.[label];
+    if (ls) {
+      infoEl.textContent = _approxDims(ls, aspect);
+    } else {
+      infoEl.textContent = '';
+    }
+  }
 }
 
 let currentModel = 'nb2';
-let refs = []; // [{name, mimeType, data}]
-
+let refs = [];

@@ -9,10 +9,7 @@ async function generate() {
   if (!rawPrompt && selectedStyles.size === 0) { showApiKeyWarning('Prompt empty', 'Enter a prompt or select a style before generating.'); return; }
 
   const m = MODELS[currentModel];
-  // Preprocessing: @mentions → model-specific format
   const promptText = preprocessPromptForModel(rawPrompt, refs, m.type);
-
-  // Přidat style suffix + camera suffix
   const styleSuffix = buildStyleSuffix(m.type);
   const cameraSuffix = buildCameraSuffix();
   const extraSuffix = [styleSuffix, cameraSuffix].filter(Boolean).join(', ');
@@ -27,122 +24,114 @@ async function generate() {
   } else {
     styledPrompt = promptText;
   }
-  // Snapshot active refs for job — only first maxRefs are sent (excess preserved in UI for model switch)
   const refsCopy = getActiveRefs().map(r => ({ ...r }));
 
+  // ── Unified panel reads ──
+  const aspect     = document.getElementById('aspectRatio').value;
+  const folder     = document.getElementById('targetFolder').value;
+  const resLabel   = document.querySelector('input[name="upRes"]:checked')?.value || '1K';
+  const resValue   = m.resValues?.[resLabel] ?? resLabel;
+  const upSeed     = document.getElementById('upSeed')?.value.trim() || null;
+  const upSteps    = parseInt(document.getElementById('upSteps')?.value || '28');
+  const upGuidance = parseFloat(document.getElementById('upGuidance')?.value || '3.5');
+  const upNeg      = document.getElementById('upNeg')?.value?.trim() || '';
+  const upCount    = _getUnifiedCount(m);
+
   if (m.type === 'gemini') {
-    const nbResEl = document.querySelector('input[name="nbRes"]:checked');
-    const thinkEl = document.querySelector('input[name="thinking"]:checked');
     const geminiSnap = {
-      imageSize: nbResEl ? nbResEl.value : '1K',
-      thinkingLevel: thinkEl ? thinkEl.value : 'minimal',
-      useSearch: document.getElementById('useSearch').checked,
-      persistentRetry: document.getElementById('persistentRetry').checked,
-      aspectRatio: document.getElementById('aspectRatio').value,
-      targetFolder: document.getElementById('targetFolder').value,
+      imageSize:       resLabel,
+      thinkingLevel:   document.querySelector('input[name="upThinkRadio"]:checked')?.value || 'minimal',
+      useSearch:       document.getElementById('upGrounding')?.checked || false,
+      persistentRetry: document.getElementById('upRetry')?.checked || false,
+      aspectRatio:     aspect,
+      targetFolder:    folder,
     };
-    const count = parseInt(document.querySelector('input[name="nbCount"]:checked').value);
-    addToQueue({ apiKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, geminiSnap, geminiCount: count });
+    addToQueue({ apiKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, geminiSnap, geminiCount: upCount });
+
   } else if (m.type === 'seedream') {
     const falKey = document.getElementById('fluxApiKey').value.trim();
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'This model requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
     const sdSnap = {
-      resolution:  document.querySelector('input[name="sdQuality"]:checked')?.value || '2K',
-      enhanceMode: document.querySelector('input[name="sdEnhance"]:checked')?.value || 'standard',
-      seed:        document.getElementById('sdSeed').value.trim() || null,
-      safety:      document.getElementById('sdSafety').checked,
-      aspectRatio: document.getElementById('aspectRatio').value,
-      targetFolder: document.getElementById('targetFolder').value,
+      resolution:  resLabel,
+      enhanceMode: 'standard',  // upsampling disabled per design
+      seed:        upSeed,
+      safety:      document.getElementById('upSafetyChk')?.checked ?? true,
+      aspectRatio: aspect,
+      targetFolder: folder,
     };
-    const sdCount = parseInt(document.querySelector('input[name="sdCount"]:checked')?.value || '1');
-    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, sdSnap, sdCount });
-  } else if (m.type === 'flux') {
-    const fluxKey = document.getElementById('fluxApiKey').value.trim();
-    if (!fluxKey) { showApiKeyWarning('fal.ai API Key missing', 'This model requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
-    const tier = parseInt(document.querySelector('input[name="fluxQuality"]:checked')?.value || '1024');
-    const ratio = document.getElementById('aspectRatio').value;
-    const { w: fw, h: fh } = calcFluxDims(ratio, tier);
-    const fluxCount = parseInt(document.querySelector('input[name="fluxCount"]:checked')?.value || '1');
+    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, sdSnap, sdCount: upCount });
 
+  } else if (m.type === 'flux') {
+    const falKey = document.getElementById('fluxApiKey').value.trim();
+    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'This model requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
+    const tier = typeof resValue === 'number' ? resValue : parseInt(resValue);
+    const { w: fw, h: fh } = calcFluxDims(aspect, tier);
     const fluxSnap = {
       width:            fw,
       height:           fh,
-      ratio,                              // pro falImageSize v callFlux
-      tier,                               // pro falImageSize v callFlux
-      steps:            parseInt(document.getElementById('fluxSteps').value),
-      guidance:         parseFloat(document.getElementById('fluxGuidance').value),
-      seed:             document.getElementById('fluxSeed').value.trim() || null,
-      safetyTolerance:  parseInt(document.getElementById('fluxSafety').value),
-      promptUpsampling: document.getElementById('fluxUpsampling').checked,
-      groundingSearch:  document.getElementById('fluxGrounding').checked,
-      targetFolder:     document.getElementById('targetFolder').value,
+      ratio:            aspect,
+      tier:             tier,
+      steps:            upSteps,
+      guidance:         upGuidance,
+      seed:             upSeed,
+      safetyTolerance:  parseInt(document.getElementById('upSafetySlider')?.value || '2'),
+      promptUpsampling: false,
+      groundingSearch:  false,
+      targetFolder:     folder,
     };
+    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, fluxSnap, fluxCount: upCount });
 
-    addToQueue({
-      apiKey: fluxKey,
-      prompt: styledPrompt,
-      rawPrompt,
-      model: m,
-      modelKey: currentModel,
-      refsCopy,
-      fluxSnap,
-      fluxCount,
-    });
   } else if (m.type === 'imagen') {
-    // Snapshot Imagen params now
-    const nImgEl = document.querySelector('input[name="nImg"]:checked');
-    const szEl = document.querySelector('input[name="imgSize"]:checked');
-    const icEl = document.querySelector('input[name="imagenCount"]:checked');
     const imagenSnap = {
-      nImg: nImgEl ? parseInt(nImgEl.value) : 1,
-      imageSize: szEl ? szEl.value : '1K',
-      sampleCount: icEl ? parseInt(icEl.value) : 1,
-      aspectRatio: document.getElementById('aspectRatio').value,
-      targetFolder: document.getElementById('targetFolder').value,
+      nImg:        1,
+      imageSize:   resLabel,
+      sampleCount: upCount,
+      seed:        upSeed,
+      aspectRatio: aspect,
+      targetFolder: folder,
     };
     addToQueue({ apiKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy: [], imagenSnap });
+
   } else if (m.type === 'kling') {
     const falKey = document.getElementById('fluxApiKey').value.trim();
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'This model requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
     const klingSnap = {
-      resolution: document.querySelector('input[name="klingRes"]:checked')?.value || '1K',
-      targetFolder: document.getElementById('targetFolder').value,
+      resolution:  resLabel,
+      targetFolder: folder,
     };
-    const klingCount = parseInt(document.querySelector('input[name="klingCount"]:checked')?.value || '1');
-    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, klingSnap, klingCount });
+    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, klingSnap, klingCount: upCount });
+
   } else if (m.type === 'zimage') {
     const falKey = document.getElementById('fluxApiKey').value.trim();
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'This model requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
-    const stepsEl = document.getElementById('zimageSteps');
     const zimageSnap = {
-      imageSize:    document.querySelector('input[name="zimageRes"]:checked')?.value || '1',
-      steps:        parseInt(stepsEl?.value || (m.id.includes('turbo') ? '8' : '28')),
-      guidance:     m.guidance ? parseFloat(document.getElementById('zimageGuidance').value) : null,
-      negPrompt:    m.negPrompt ? (document.getElementById('zimageNeg').value.trim() || '') : '',
-      acceleration: document.querySelector('input[name="zimageAccel"]:checked')?.value || 'regular',
-      safety:       document.getElementById('zimageSafety').checked,
-      seed:         document.getElementById('zimageSeed').value.trim() || null,
-      targetFolder: document.getElementById('targetFolder').value,
-      strength:     parseFloat(document.getElementById('zimageStrength')?.value || '0.85'),
+      imageSize:    resValue,
+      steps:        upSteps,
+      guidance:     m.guidance ? upGuidance : null,
+      negPrompt:    m.negPrompt ? upNeg : '',
+      acceleration: document.querySelector('input[name="upAccel"]:checked')?.value || 'regular',
+      safety:       document.getElementById('upSafetyChk')?.checked ?? true,
+      seed:         upSeed,
+      targetFolder: folder,
+      strength:     parseFloat(document.getElementById('upStrength')?.value || '0.85'),
     };
-    const zimageCount = parseInt(document.querySelector('input[name="zimageCount"]:checked')?.value || '1');
-    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, zimageSnap, zimageCount });
+    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, zimageSnap, zimageCount: upCount });
+
   } else if (m.type === 'qwen2') {
     const falKey = document.getElementById('fluxApiKey').value.trim();
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'This model requires a fal.ai API key. Add it in the Setup tab to start generating.'); return; }
     const qwen2Snap = {
-      resolution:      document.querySelector('input[name="qwen2Res"]:checked')?.value || '1K',
-      steps:           parseInt(document.getElementById('qwen2Steps')?.value || '25'),
-      guidance:        parseFloat(document.getElementById('qwen2Guidance')?.value || '5'),
-      negPrompt:       document.getElementById('qwen2Neg')?.value?.trim() || '',
-      acceleration:    document.querySelector('input[name="qwen2Accel"]:checked')?.value || 'regular',
-      promptExpansion: document.getElementById('qwen2Expand')?.checked || false,
-      safety:          document.getElementById('qwen2Safety')?.checked !== false,
-      seed:            document.getElementById('qwen2Seed')?.value.trim() || null,
-      targetFolder:    document.getElementById('targetFolder').value,
+      resolution:      resLabel,
+      steps:           upSteps,
+      guidance:        upGuidance,
+      negPrompt:       m.negPrompt ? upNeg : '',
+      acceleration:    document.querySelector('input[name="upAccel"]:checked')?.value || 'regular',
+      promptExpansion: false,
+      safety:          document.getElementById('upSafetyChk')?.checked ?? true,
+      seed:            upSeed,
+      targetFolder:    folder,
     };
-    const qwen2Count = m.editModel ? 1 : parseInt(document.querySelector('input[name="qwen2Count"]:checked')?.value || '1');
-    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, qwen2Snap, qwen2Count });
+    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, qwen2Snap, qwen2Count: upCount });
 
   } else if (m.type === 'wan27r') {
     const replicateKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
@@ -150,13 +139,13 @@ async function generate() {
     if (!replicateKey) { showApiKeyWarning('Replicate API Key missing', 'WAN 2.7 Image requires a Replicate API key. Add it in the Setup tab.'); return; }
     if (!proxyUrl)     { showApiKeyWarning('Proxy URL missing', 'WAN 2.7 Image requires the GIS proxy URL. Add it in the Setup tab.'); return; }
     const wan27Snap = {
-      sizeTier:     _wan27GetTier(),
+      sizeTier:     resLabel,
       size:         _wan27GetSize(),
-      count:        m.editModel ? 1 : parseInt(document.querySelector('input[name="wan27Count"]:checked')?.value || '1'),
-      thinking:     !m.editModel && (document.getElementById('wan27Thinking')?.checked || false),
-      seed:         document.getElementById('wan27Seed')?.value.trim() || null,
-      negPrompt:    document.getElementById('wan27Neg')?.value?.trim() || '',
-      targetFolder: document.getElementById('targetFolder').value,
+      count:        upCount,
+      thinking:     !m.editModel && (document.getElementById('upThinkChk')?.checked || false),
+      seed:         upSeed,
+      negPrompt:    m.negPrompt ? upNeg : '',
+      targetFolder: folder,
     };
     addToQueue({ replicateKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, wan27Snap });
 
@@ -166,10 +155,10 @@ async function generate() {
     if (!xaiKey) { showApiKeyWarning('xAI API Key missing', 'This model requires an xAI API key. Add it in the Setup tab to start generating.'); return; }
     if (!proxyUrl) { toast('Enter Proxy URL in Setup tab', 'err'); return; }
     const xaiSnap = {
-      aspectRatio:  document.getElementById('aspectRatio').value || '16:9',
-      grokRes:      document.querySelector('input[name="grokRes"]:checked')?.value || '1k',
-      grokCount:    parseInt(document.getElementById('grokCountVal')?.value || '1'),
-      targetFolder: document.getElementById('targetFolder').value,
+      aspectRatio:  aspect,
+      grokRes:      resLabel.toLowerCase(),
+      grokCount:    upCount,
+      targetFolder: folder,
     };
     addToQueue({ apiKey: xaiKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, xaiSnap });
 
@@ -179,8 +168,8 @@ async function generate() {
     if (!lumaKey) { showApiKeyWarning('Luma API Key missing', 'This model requires a Luma API key. Add it in the Setup tab to start generating.'); return; }
     if (!proxyUrl) { toast('Enter Proxy URL in Setup tab', 'err'); return; }
     const lumaSnap = {
-      aspectRatio:   document.getElementById('aspectRatio').value,
-      targetFolder:  document.getElementById('targetFolder').value,
+      aspectRatio:   aspect,
+      targetFolder:  folder,
       imgWeight:     parseFloat(document.getElementById('lumaImgWeight')?.value   || '0.85'),
       styleWeight:   parseFloat(document.getElementById('lumaStyleWeight')?.value || '0.80'),
       modifyWeight:  parseFloat(document.getElementById('lumaModifyWeight')?.value || '1.00'),
@@ -200,8 +189,8 @@ async function generate() {
       fixed:             document.getElementById('mysticFixed')?.checked || false,
       structure_strength:parseInt(document.getElementById('mysticStructStr')?.value || '50'),
       adherence:         parseInt(document.getElementById('mysticAdherence')?.value || '50'),
-      aspectRatio:       document.getElementById('aspectRatio').value,
-      targetFolder:      document.getElementById('targetFolder').value,
+      aspectRatio:       aspect,
+      targetFolder:      folder,
     };
     addToQueue({ freepikKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, mysticSnap });
 
@@ -212,22 +201,27 @@ async function generate() {
     if (!proxyUrl)   { toast('Enter Proxy URL in Setup tab', 'err'); return; }
     const editSnap = {
       tool:            m.freepikTool,
-      targetFolder:    document.getElementById('targetFolder').value,
-      // Relight
+      targetFolder:    folder,
       relightStr:      parseInt(document.getElementById('fepRelightStr')?.value || '100'),
       relightChangeBg: document.getElementById('fepRelightChangeBg')?.checked || false,
       relightStyle:    document.querySelector('input[name="fepRelightStyle"]:checked')?.value || 'smooth',
       relightInterpolate: document.getElementById('fepRelightInterpolate')?.checked || false,
-      // Style Transfer
       stylePortrait:   document.getElementById('fepStylePortrait')?.checked || false,
       styleFixed:      document.getElementById('fepStyleFixed')?.checked || false,
-      // Skin Enhancer
       skinVariant:     document.querySelector('input[name="fepSkinVariant"]:checked')?.value || 'creative',
       skinSharpen:     parseInt(document.getElementById('fepSkinSharpen')?.value || '0'),
       skinGrain:       parseInt(document.getElementById('fepSkinGrain')?.value || '2'),
     };
     addToQueue({ freepikKey, proxyUrl, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, editSnap });
   }
+}
+
+// ── Unified count helper ──
+function _getUnifiedCount(m) {
+  const mc = m.maxCount || 1;
+  if (mc <= 1) return 1;
+  if (mc <= 4) return parseInt(document.querySelector('input[name="upCount4"]:checked')?.value || '1');
+  return parseInt(document.querySelector('input[name="upCount10"]:checked')?.value || '1');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -872,11 +866,15 @@ async function callImagen(apiKey, prompt, model, snap) {
   // sampleCount: ze snapu nebo z UI, Ultra max 1
   const sampleCount = model.id.includes('ultra') ? 1 : (snap?.sampleCount || 1);
 
-  // REST API: sampleCount funguje (1-4), imageSize ignorováno (SDK-only)
+  // REST API: sampleCount (1-4), sampleImageSize ("1K"/"2K") for Standard+Ultra, seed
+  const imageSize = snap?.imageSize || '1K';
   const params = {
     sampleCount,
     aspectRatio: safeRatio,
   };
+  // sampleImageSize only supported for Standard and Ultra (not Fast)
+  if (!model.id.includes('fast') && imageSize !== '1K') params.sampleImageSize = imageSize;
+  if (snap?.seed) params.seed = parseInt(snap.seed);
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:predict?key=${apiKey}`;
   const body = { instances: [{ prompt }], parameters: params };
@@ -895,7 +893,7 @@ async function callImagen(apiKey, prompt, model, snap) {
     model: model.name,
     modelKey,
     seed: '—',
-    size: '1K',
+    size: imageSize,
     ratio: safeRatio,
     variantNum: idx + 1,
     totalVariants: images.length,

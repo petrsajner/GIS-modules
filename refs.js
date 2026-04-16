@@ -192,9 +192,9 @@ function renderRefThumbs() {
 
   // Pro Z-Image Turbo: zobraz strength slider pokud je nahrán vstupní obrázek
   const m = MODELS[currentModel];
-  const strengthRow = document.getElementById('zimageStrengthRow');
+  const strengthRow = document.getElementById('upStrengthRow');
   if (strengthRow) {
-    strengthRow.style.display = (m?.i2iModel && refs.length > 0) ? '' : 'none';
+    strengthRow.style.display = (m?.strength && refs.length > 0) ? '' : 'none';
   }
 
   // Re-apply model-specific @mention names in prompt (refs may have shifted)
@@ -545,7 +545,15 @@ function promptModelToUserLabels(prompt, activeRefs, modelType) {
 function rewritePromptForModel(prevType, newType) {
   const ta = document.getElementById('prompt');
   if (!ta || !ta.value.trim()) return;
-  if (!refs.length) return;
+
+  // Always clean up any legacy [Reference images: ...] prefix first
+  const cleaned = ta.value.replace(/^\[Reference images:[^\]]*\]\s*/gi, '');
+  if (cleaned !== ta.value) ta.value = cleaned;
+
+  if (!refs.length) {
+    if (typeof updateCharCount === 'function') updateCharCount();
+    return;
+  }
 
   // Step 1: convert current text back to canonical @UserLabel form
   const canonical = prevType
@@ -569,7 +577,10 @@ function rewritePromptForModel(prevType, newType) {
 // \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
 function preprocessPromptForModel(prompt, activeRefs, modelType) {
-  if (!prompt || !activeRefs.length) return prompt;
+  if (!prompt) return prompt;
+  // Always strip any legacy [Reference images: ...] prefix — it's no longer used
+  prompt = prompt.replace(/^\[Reference images:[^\]]*\]\s*/gi, '');
+  if (!activeRefs.length) return prompt;
 
   const labelMap = new Map();
   activeRefs.forEach((r, i) => {
@@ -600,18 +611,13 @@ function preprocessPromptForModel(prompt, activeRefs, modelType) {
   }
 
   if (modelType === 'gemini' || modelType === 'proxy_xai') {
-    // Strip any existing prefix to avoid duplication (rewritePromptForModel may have added it already)
+    // Strip any legacy prefix (from older versions or old conversations)
     const strippedPrompt = prompt.replace(/^\[Reference images:[^\]]*\]\s*/gi, '');
-    let prefix = '';
-    if (activeRefs.length > 0) {
-      const descs = activeRefs.map((r, i) => `image ${i + 1}`).join(', ');
-      prefix = `[Reference images: ${descs}] `;
-    }
-    const body = strippedPrompt.replace(/@([\w]+)/g, (full, mention) => {
+    // Convert @mentions to "image N" format — no prefix added
+    return strippedPrompt.replace(/@([\w]+)/g, (full, mention) => {
       const idx = findIdx(mention);
       return idx >= 0 ? `image ${idx + 1}` : full;
     });
-    return prefix + body;
   }
 
   return prompt;

@@ -318,124 +318,133 @@ async function loadJobParamsToForm(job) {
 
   // ── 2. Select model ──
   if (job.modelKey && typeof selectModel === 'function') selectModel(job.modelKey);
+  const m = MODELS[job.modelKey] || job.model;
+
+  // Helper — set unified count radio
+  const _reuseCount = (count, mdl) => {
+    if (!count || count <= 1) return;
+    const mc = mdl?.maxCount || 4;
+    if (mc <= 4) { _setRadio('upCount4', String(count)); document.getElementById('upCount4Val').textContent = count; }
+    else         { _setRadio('upCount10', String(count)); document.getElementById('upCount10Val').textContent = count; }
+  };
 
   // ── 3. Model-specific params ──
 
   if (type === 'gemini' && job.geminiSnap) {
     const s = job.geminiSnap;
     if (s.aspectRatio) setAspectRatioSafe(s.aspectRatio);
-    _setRadio('nbRes', s.imageSize || '1K');
-    _setRadio('thinking', s.thinkingLevel || 'minimal');
-    const searchEl = document.getElementById('useSearch');
+    _setRadio('upRes', s.imageSize || '1K');
+    _setRadio('upThinkRadio', s.thinkingLevel || 'minimal');
+    const searchEl = document.getElementById('upGrounding');
     if (searchEl) searchEl.checked = !!s.useSearch;
-    const retryEl = document.getElementById('persistentRetry');
+    const retryEl = document.getElementById('upRetry');
     if (retryEl) retryEl.checked = !!s.persistentRetry;
+    _reuseCount(job.geminiCount, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'imagen' && job.imagenSnap) {
     const s = job.imagenSnap;
     if (s.aspectRatio) setAspectRatioSafe(s.aspectRatio);
-    _setRadio('imgSize', s.imageSize || '1K');
-    _setRadio('imagenCount', String(s.sampleCount || 1));
+    _setRadio('upRes', s.imageSize || '1K');
+    if (s.seed) { const el = document.getElementById('upSeed'); if (el) el.value = s.seed; }
+    _reuseCount(s.sampleCount, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'flux' && job.fluxSnap) {
     const s = job.fluxSnap;
     if (s.ratio) setAspectRatioSafe(s.ratio);
-    if (s.tier) {
-      _setRadio('fluxQuality', String(s.tier));
-      if (typeof updateFluxQualityInfo === 'function') updateFluxQualityInfo();
+    // Reverse-map tier to label
+    if (s.tier && m.resValues) {
+      const label = Object.entries(m.resValues).find(([,v]) => v === s.tier)?.[0];
+      if (label) _setRadio('upRes', label);
     }
-    const seedEl = document.getElementById('fluxSeed');
+    const seedEl = document.getElementById('upSeed');
     if (seedEl) seedEl.value = (s.seed && s.seed !== '—') ? s.seed : '';
-    _setSlider('fluxSteps',    'fluxStepsVal',    s.steps,            v => v);
-    _setSlider('fluxGuidance', 'fluxGuidanceVal', s.guidance,         v => parseFloat(v).toFixed(1));
-    const safeEl = document.getElementById('fluxSafety');
-    if (safeEl && s.safetyTolerance !== undefined) safeEl.value = s.safetyTolerance;
-    const upsEl = document.getElementById('fluxUpsampling');
-    if (upsEl) upsEl.checked = !!s.promptUpsampling;
-    const grndEl = document.getElementById('fluxGrounding');
-    if (grndEl) grndEl.checked = !!s.groundingSearch;
+    _setSlider('upSteps',    'upStepsVal',    s.steps,    v => v);
+    _setSlider('upGuidance', 'upGuidanceVal', s.guidance, v => parseFloat(v).toFixed(1));
+    const safeEl = document.getElementById('upSafetySlider');
+    if (safeEl && s.safetyTolerance !== undefined) { safeEl.value = s.safetyTolerance; document.getElementById('upSafetySliderVal').textContent = s.safetyTolerance; }
+    _reuseCount(job.fluxCount, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'seedream' && job.sdSnap) {
     const s = job.sdSnap;
     if (s.aspectRatio) setAspectRatioSafe(s.aspectRatio);
-    _setRadio('sdQuality', s.resolution || '2K');
-    _setRadio('sdEnhance', s.enhanceMode || 'standard');
-    const seedEl = document.getElementById('sdSeed');
+    _setRadio('upRes', s.resolution || '2K');
+    const seedEl = document.getElementById('upSeed');
     if (seedEl) seedEl.value = (s.seed && s.seed !== '—') ? s.seed : '';
-    const safeEl = document.getElementById('sdSafety');
+    const safeEl = document.getElementById('upSafetyChk');
     if (safeEl) safeEl.checked = s.safety !== false;
+    _reuseCount(job.sdCount, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'kling' && job.klingSnap) {
     const s = job.klingSnap;
-    const kResMap = { '1K': 'kr_1k', '2K': 'kr_2k', '4K': 'kr_4k' };
-    const resEl = document.getElementById(kResMap[s.resolution] || 'kr_1k');
-    if (resEl) resEl.checked = true;
+    _setRadio('upRes', s.resolution || '1K');
+    _reuseCount(job.klingCount, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'zimage' && job.zimageSnap) {
     const s = job.zimageSnap;
-    const mpMap = { '1': 'zr_1mp', '2': 'zr_2mp', '4': 'zr_4mp' };
-    const mpEl = document.getElementById(mpMap[String(s.imageSize)] || 'zr_1mp');
-    if (mpEl) mpEl.checked = true;
-    const seedEl = document.getElementById('zimageSeed');
+    // Reverse-map MP value to label
+    if (s.imageSize && m.resValues) {
+      const label = Object.entries(m.resValues).find(([,v]) => String(v) === String(s.imageSize))?.[0];
+      if (label) _setRadio('upRes', label);
+    }
+    const seedEl = document.getElementById('upSeed');
     if (seedEl) seedEl.value = (s.seed && s.seed !== '—') ? s.seed : '';
-    _setSlider('zimageSteps',    'zimageStepsVal',    s.steps,    v => v);
-    _setSlider('zimageGuidance', 'zimageGuidanceVal', s.guidance, v => parseFloat(v).toFixed(1));
-    const negEl = document.getElementById('zimageNeg');
+    _setSlider('upSteps',    'upStepsVal',    s.steps,    v => v);
+    if (s.guidance != null) _setSlider('upGuidance', 'upGuidanceVal', s.guidance, v => parseFloat(v).toFixed(1));
+    const negEl = document.getElementById('upNeg');
     if (negEl && s.negPrompt !== undefined) negEl.value = s.negPrompt;
-    _setRadio('zimageAccel', s.acceleration || 'regular');
-    const safeEl = document.getElementById('zimageSafety');
+    _setRadio('upAccel', s.acceleration || 'regular');
+    const safeEl = document.getElementById('upSafetyChk');
     if (safeEl) safeEl.checked = s.safety !== false;
-    const strEl = document.getElementById('zimageStrength');
-    if (strEl && s.strength !== undefined) strEl.value = s.strength;
+    const strEl = document.getElementById('upStrength');
+    if (strEl && s.strength !== undefined) { strEl.value = s.strength; document.getElementById('upStrengthVal').textContent = parseFloat(s.strength).toFixed(2); }
+    _reuseCount(job.zimageCount, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'qwen2' && job.qwen2Snap) {
     const s = job.qwen2Snap;
-    _setRadio('qwen2Res', s.resolution || '1K');
-    const seedEl = document.getElementById('qwen2Seed');
+    _setRadio('upRes', s.resolution || '1K');
+    const seedEl = document.getElementById('upSeed');
     if (seedEl) seedEl.value = (s.seed && s.seed !== '—') ? s.seed : '';
-    _setSlider('qwen2Steps',    'qwen2StepsVal',    s.steps,    v => v);
-    _setSlider('qwen2Guidance', 'qwen2GuidanceVal', s.guidance, v => parseFloat(v).toFixed(1));
-    const accMap = { none: 'qwa_none', regular: 'qwa_reg', high: 'qwa_high' };
-    const accEl = document.getElementById(accMap[s.acceleration] || 'qwa_reg');
-    if (accEl) accEl.checked = true;
-    const expandEl = document.getElementById('qwen2Expand');
-    if (expandEl) expandEl.checked = !!s.promptExpansion;
-    const safeEl = document.getElementById('qwen2Safety');
+    _setSlider('upSteps',    'upStepsVal',    s.steps,    v => v);
+    _setSlider('upGuidance', 'upGuidanceVal', s.guidance, v => parseFloat(v).toFixed(1));
+    _setRadio('upAccel', s.acceleration || 'regular');
+    const safeEl = document.getElementById('upSafetyChk');
     if (safeEl) safeEl.checked = s.safety !== false;
+    const negEl = document.getElementById('upNeg');
+    if (negEl && s.negPrompt !== undefined) negEl.value = s.negPrompt;
+    _reuseCount(job.qwen2Count, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'wan27r' && job.wan27Snap) {
     const s = job.wan27Snap;
-    const sizeEl = document.getElementById('wan27Size');
-    if (sizeEl && s.size) sizeEl.value = s.size;
-    if (s.count) _setRadio('wan27Count', String(s.count));
-    const thinkEl = document.getElementById('wan27Thinking');
-    if (thinkEl) thinkEl.checked = !!s.thinkingMode;
-    const safeEl = document.getElementById('wan27Safety');
-    if (safeEl) safeEl.checked = s.safety !== false;
-    const seedEl = document.getElementById('wan27Seed');
+    if (s.sizeTier) _setRadio('upRes', s.sizeTier);
+    const thinkEl = document.getElementById('upThinkChk');
+    if (thinkEl) thinkEl.checked = !!s.thinking;
+    const seedEl = document.getElementById('upSeed');
     if (seedEl) seedEl.value = (s.seed && s.seed !== '—') ? s.seed : '';
+    const negEl = document.getElementById('upNeg');
+    if (negEl && s.negPrompt) negEl.value = s.negPrompt;
+    _reuseCount(s.count, m);
     _setFld(s.targetFolder);
   }
 
   if (type === 'proxy_xai' && job.xaiSnap) {
     const s = job.xaiSnap;
     if (s.aspectRatio) setAspectRatioSafe(s.aspectRatio);
-    _setRadio('grokRes', s.grokRes);
-    if (s.grokCount) _setRadio('grokCount', String(s.grokCount));
+    if (s.grokRes) _setRadio('upRes', s.grokRes.toUpperCase());
+    _reuseCount(s.grokCount, m);
     _setFld(s.targetFolder);
   }
 

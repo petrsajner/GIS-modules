@@ -1179,54 +1179,46 @@ function reuseJob(result, prompt) {
 
   if (result.type === 'gemini') {
     const th = result.thinkingLevel || 'minimal';
-    document.getElementById(th === 'high' ? 'th-high' : 'th-min').checked = true;
+    document.getElementById(th === 'high' ? 'upTr-high' : 'upTr-min').checked = true;
   }
   if (result.params?.ratio) {
     setAspectRatioSafe(result.params.ratio);
   }
   if (result.type === 'flux' || result.type === 'seedream' || result.type === 'kling' || result.type === 'zimage' || result.type === 'qwen2') {
     const seedVal = result.seed;
+    const seedEl = document.getElementById('upSeed');
+    if (seedEl) seedEl.value = (seedVal && seedVal !== '—') ? seedVal : '';
     if (result.type === 'kling') {
       const resVal = result.klingResolution || '1K';
-      const kResMap = { '1K': 'kr_1k', '2K': 'kr_2k', '4K': 'kr_4k' };
-      const el = document.getElementById(kResMap[resVal] || 'kr_1k');
-      if (el) el.checked = true;
+      const rEl = document.querySelector(`input[name="upRes"][value="${resVal}"]`);
+      if (rEl) rEl.checked = true;
     } else if (result.type === 'zimage') {
-      const seedEl = document.getElementById('zimageSeed');
-      if (seedEl) seedEl.value = (seedVal && seedVal !== '—') ? seedVal : '';
-      // Obnovit MP resolution radio
       if (result.imageSize) {
-        const mpMap = { '1': 'zr_1mp', '2': 'zr_2mp', '4': 'zr_4mp' };
-        const mpEl = document.getElementById(mpMap[String(result.imageSize)] || 'zr_1mp');
-        if (mpEl) mpEl.checked = true;
+        const m = MODELS[currentModel];
+        const label = m?.resValues ? Object.entries(m.resValues).find(([,v]) => String(v) === String(result.imageSize))?.[0] : null;
+        if (label) { const rEl = document.querySelector(`input[name="upRes"][value="${label}"]`); if (rEl) rEl.checked = true; }
       }
       if (result.steps) {
-        const el = document.getElementById('zimageSteps');
-        if (el) { el.value = result.steps; document.getElementById('zimageStepsVal').textContent = result.steps; }
+        const el = document.getElementById('upSteps');
+        if (el) { el.value = result.steps; document.getElementById('upStepsVal').textContent = result.steps; }
       }
       if (result.guidance) {
-        const el = document.getElementById('zimageGuidance');
-        if (el) { el.value = result.guidance; document.getElementById('zimageGuidanceVal').textContent = parseFloat(result.guidance).toFixed(1); }
+        const el = document.getElementById('upGuidance');
+        if (el) { el.value = result.guidance; document.getElementById('upGuidanceVal').textContent = parseFloat(result.guidance).toFixed(1); }
       }
     } else if (result.type === 'qwen2') {
-      const seedEl = document.getElementById('qwen2Seed');
-      if (seedEl) seedEl.value = (seedVal && seedVal !== '—') ? seedVal : '';
       if (result.steps) {
-        const el = document.getElementById('qwen2Steps');
-        if (el) { el.value = result.steps; document.getElementById('qwen2StepsVal').textContent = result.steps; }
+        const el = document.getElementById('upSteps');
+        if (el) { el.value = result.steps; document.getElementById('upStepsVal').textContent = result.steps; }
       }
       if (result.guidance) {
-        const el = document.getElementById('qwen2Guidance');
-        if (el) { el.value = result.guidance; document.getElementById('qwen2GuidanceVal').textContent = parseFloat(result.guidance).toFixed(1); }
+        const el = document.getElementById('upGuidance');
+        if (el) { el.value = result.guidance; document.getElementById('upGuidanceVal').textContent = parseFloat(result.guidance).toFixed(1); }
       }
       if (result.acceleration) {
-        const accMap = { none: 'qwa_none', regular: 'qwa_reg', high: 'qwa_high' };
-        const accEl = document.getElementById(accMap[result.acceleration] || 'qwa_reg');
-        if (accEl) accEl.checked = true;
+        const rEl = document.querySelector(`input[name="upAccel"][value="${result.acceleration}"]`);
+        if (rEl) rEl.checked = true;
       }
-    } else {
-      const seedEl = document.getElementById(result.type === 'seedream' ? 'sdSeed' : 'fluxSeed');
-      if (seedEl) seedEl.value = (seedVal && seedVal !== '—') ? seedVal : '';
     }
   }
 
@@ -1250,70 +1242,46 @@ async function reuseJobFromGallery(item) {
   if (item.modelKey) selectModel(item.modelKey);
   if (item.params?.ratio) setAspectRatioSafe(item.params.ratio);
   if (item.params?.thinking) {
-    document.getElementById(item.params.thinking === 'high' ? 'th-high' : 'th-min').checked = true;
-  }
-  const model = MODELS[item.modelKey];
-  if (model?.type === 'kling') {
-    const resVal = item.params?.klingResolution || '1K';
-    const kResMap = { '1K': 'kr_1k', '2K': 'kr_2k', '4K': 'kr_4k' };
-    const el = document.getElementById(kResMap[resVal] || 'kr_1k');
+    const el = document.getElementById(item.params.thinking === 'high' ? 'upTr-high' : 'upTr-min');
     if (el) el.checked = true;
   }
-  if (model?.type === 'flux' || model?.type === 'seedream') {
-    const seedEl = document.getElementById(model.type === 'seedream' ? 'sdSeed' : 'fluxSeed');
-    const seedVal = item.params?.seed;
-    if (seedEl) seedEl.value = (seedVal && seedVal !== '—') ? seedVal : '';
-  }
-  // Obnovit Z-Image parametry
-  if (model?.type === 'zimage') {
+  const model = MODELS[item.modelKey];
+  // Unified resolution restore
+  if (model && isUnifiedModel(model)) {
     const p = item.params || {};
-    // Obnovit MP resolution radio (hodnoty '1','2','4')
-    if (p.imageSize) {
-      const mpMap = { '1': 'zr_1mp', '2': 'zr_2mp', '4': 'zr_4mp' };
-      const el = document.getElementById(mpMap[String(p.imageSize)] || 'zr_1mp');
-      if (el) el.checked = true;
+    // Seed
+    if (p.seed) { const el = document.getElementById('upSeed'); if (el) el.value = p.seed !== '—' ? p.seed : ''; }
+    // Resolution — map from saved value to upRes label
+    if (model.type === 'kling' && p.klingResolution) {
+      const rEl = document.querySelector(`input[name="upRes"][value="${p.klingResolution}"]`);
+      if (rEl) rEl.checked = true;
     }
-    if (p.seed) { const el = document.getElementById('zimageSeed'); if (el) el.value = p.seed !== '—' ? p.seed : ''; }
+    if (model.type === 'zimage' && p.imageSize && model.resValues) {
+      const label = Object.entries(model.resValues).find(([,v]) => String(v) === String(p.imageSize))?.[0];
+      if (label) { const rEl = document.querySelector(`input[name="upRes"][value="${label}"]`); if (rEl) rEl.checked = true; }
+    }
+    // Steps
     if (p.steps) {
-      const el = document.getElementById('zimageSteps');
-      if (el) { el.value = p.steps; document.getElementById('zimageStepsVal').textContent = p.steps; }
+      const el = document.getElementById('upSteps');
+      if (el) { el.value = p.steps; document.getElementById('upStepsVal').textContent = p.steps; }
     }
+    // Guidance
     if (p.guidance && model.guidance) {
-      const el = document.getElementById('zimageGuidance');
-      if (el) { el.value = p.guidance; document.getElementById('zimageGuidanceVal').textContent = parseFloat(p.guidance).toFixed(1); }
+      const el = document.getElementById('upGuidance');
+      if (el) { el.value = p.guidance; document.getElementById('upGuidanceVal').textContent = parseFloat(p.guidance).toFixed(1); }
     }
+    // Neg prompt
     if (p.negPrompt !== undefined && model.negPrompt) {
-      const el = document.getElementById('zimageNeg');
+      const el = document.getElementById('upNeg');
       if (el) el.value = p.negPrompt;
     }
+    // Acceleration
     if (p.acceleration) {
-      const accelMap = { none: 'za_none', regular: 'za_reg', high: 'za_high' };
-      const accelEl = document.getElementById(accelMap[p.acceleration] || 'za_reg');
-      if (accelEl) accelEl.checked = true;
+      const rEl = document.querySelector(`input[name="upAccel"][value="${p.acceleration}"]`);
+      if (rEl) rEl.checked = true;
     }
-  }
-
-  // Obnovit Qwen Image 2 parametry
-  if (model?.type === 'qwen2') {
-    const p = item.params || {};
-    if (p.seed) { const el = document.getElementById('qwen2Seed'); if (el) el.value = p.seed !== '—' ? p.seed : ''; }
-    if (p.steps) {
-      const el = document.getElementById('qwen2Steps');
-      if (el) { el.value = p.steps; document.getElementById('qwen2StepsVal').textContent = p.steps; }
-    }
-    if (p.guidance) {
-      const el = document.getElementById('qwen2Guidance');
-      if (el) { el.value = p.guidance; document.getElementById('qwen2GuidanceVal').textContent = parseFloat(p.guidance).toFixed(1); }
-    }
-    if (p.acceleration) {
-      const accMap = { none: 'qwa_none', regular: 'qwa_reg', high: 'qwa_high' };
-      const accEl = document.getElementById(accMap[p.acceleration] || 'qwa_reg');
-      if (accEl) accEl.checked = true;
-    }
-    if (p.negPrompt !== undefined && model.negPrompt) {
-      const el = document.getElementById('qwen2Neg');
-      if (el) el.value = p.negPrompt;
-    }
+    // Update res info
+    if (typeof updateUnifiedResInfo === 'function') updateUnifiedResInfo();
   }
 
   // Obnovit reference ze snapshotu

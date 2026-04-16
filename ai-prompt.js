@@ -511,6 +511,34 @@ async function _callOpenRouterText(systemPrompt, userMsg, temperature, maxTokens
   return data.choices?.[0]?.message?.content || '';
 }
 
+// OpenRouter multi-turn call — sends full conversation history
+// history: [{ role: 'user'|'model', parts: [{text: '...'}] }] (Gemini format)
+async function _callOpenRouterMultiTurn(systemPrompt, history, temperature, maxTokens) {
+  const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
+  if (!orKey) return null;
+  const messages = [];
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  // Convert Gemini-format history to OpenAI-format messages
+  for (const turn of history) {
+    const role = turn.role === 'model' ? 'assistant' : 'user';
+    const content = (turn.parts || []).map(p => p.text || '').join('\n').trim();
+    if (content) messages.push({ role, content });
+  }
+  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${orKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://gis.local',
+      'X-Title': 'Generative Image Studio',
+    },
+    body: JSON.stringify({ model: OR_AI_PROMPT_MODEL, messages, max_tokens: maxTokens, temperature }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${data.error?.message || JSON.stringify(data.error)}`);
+  return data.choices?.[0]?.message?.content || '';
+}
+
 // Gemini 3.1 Pro — fallback when no OR key
 async function _callGeminiTextFallback(apiKey, systemPrompt, userMsg, temperature, maxTokens) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_FALLBACK_MODEL}:generateContent?key=${apiKey}`;
@@ -552,8 +580,7 @@ async function _callGeminiMultiTurnFallback(apiKey, systemPrompt, history, tempe
 async function callGeminiTextMultiTurn(apiKey, systemPrompt, history) {
   const orKey = localStorage.getItem('gis_openrouter_apikey')?.trim();
   if (orKey) {
-    const lastUserMsg = [...history].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
-    const result = await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
+    const result = await _callOpenRouterMultiTurn(systemPrompt, history, 0.85, 2048);
     trackSpend('openrouter', '_or_prompt', 1);
     return result;
   }

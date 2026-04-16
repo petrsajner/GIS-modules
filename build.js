@@ -83,6 +83,18 @@ function build() {
   if (!fs.existsSync(DIST)) fs.mkdirSync(DIST, { recursive: true });
   fs.writeFileSync(OUT_FILE, html, 'utf8');
 
+  // ── HTML structure validation ──
+  const htmlOnly = template.split(JS_MARKER)[0] || '';
+  const divOpens  = (htmlOnly.match(/<div[\s>]/g) || []).length;
+  const divCloses = (htmlOnly.match(/<\/div>/g) || []).length;
+  const divBalance = divOpens - divCloses;
+  if (divBalance !== 0) {
+    console.error(`\n  ⚠ WARNING: HTML div balance = ${divBalance} (${divOpens} opens, ${divCloses} closes)`);
+    console.error(`    Template has ${divBalance > 0 ? divBalance + ' unclosed' : Math.abs(divBalance) + ' extra closing'} <div> tag(s)!`);
+  } else {
+    console.log(`  ✓ HTML div balance: OK (${divOpens} pairs)`);
+  }
+
   const outLines = html.split('\n').length;
   console.log(`\n  ✓ Built: dist/gis_v${VERSION}.html`);
   console.log(`    JS: ${totalLines} lines across ${MODULES.length} modules`);

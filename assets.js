@@ -275,7 +275,7 @@ async function renderAssets() {
     const thumbClass = isPortrait ? 'ai-thumb pillarbox' : 'ai-thumb';
     const src = a.thumb ? `data:${a.mimeType||'image/png'};base64,${a.thumb}` : '';
     const refTag = isActive ? `<span style="font-size:9px;background:rgba(136,170,255,.9);color:#000;padding:1px 5px;font-weight:700;margin-right:5px;flex-shrink:0;">REF</span>` : '';
-    const srcTag = `<span style="font-size:9px;color:var(--dim2);margin-left:auto;flex-shrink:0;">${a.sourceType==='generated'?'⚡':'↑'}</span>`;
+    const srcTag = a.sourceType === 'upload' ? `<span style="font-size:9px;color:var(--dim2);margin-left:auto;flex-shrink:0;">↑</span>` : '';
     return `
     <div class="asset-item ${isSel?'selected':''} ${inFolder?'in-folder':''} ${isFav?'favorited':''}" data-id="${a.id}" draggable="true" ondragstart="assetDragStart(event,'${a.id}')">
       ${src ? `<img class="${thumbClass}" src="${src}" alt="${escHtml(label)}" data-needs-regen="${isPortrait && a.thumbVersion !== 2 ? '1' : '0'}">` : `<div class="${thumbClass}" style="background:#222;display:flex;align-items:center;justify-content:center;color:#555;font-size:20px;">⊞</div>`}

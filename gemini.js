@@ -4,9 +4,9 @@
 
 async function callGeminiStream(apiKey, prompt, model, refsOverride, snap, onThinking, jobRef = null) {
   const aspectRatio   = snap?.aspectRatio   || document.getElementById('aspectRatio').value;
-  const imageSize     = snap?.imageSize     || (document.querySelector('input[name="nbRes"]:checked')?.value || '1K');
-  const thinkingLevel = snap?.thinkingLevel || (document.querySelector('input[name="thinking"]:checked')?.value || 'minimal');
-  const useSearch     = snap?.useSearch     ?? document.getElementById('useSearch').checked;
+  const imageSize     = snap?.imageSize     || (document.querySelector('input[name="upRes"]:checked')?.value || '1K');
+  const thinkingLevel = snap?.thinkingLevel || (document.querySelector('input[name="upThinkRadio"]:checked')?.value || 'minimal');
+  const useSearch     = snap?.useSearch     ?? (document.getElementById('upGrounding')?.checked || false);
 
   const refsToUse = refsOverride !== undefined ? refsOverride : refs;
   const parts = [{ text: prompt }];

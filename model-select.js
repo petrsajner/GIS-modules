@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════════════
-// MODEL SWITCHING
+// MODEL SWITCHING — Unified Panel (v200en)
 // ═══════════════════════════════════════════════════════
 const MODEL_DESCS = {
-  nb2:        'Flash · Thinking ✦ · Refs ✦ max 14 · 512/1K/2K/4K · Grounding ✦',
+  nb2:        'Flash · Thinking ✦ · Refs ✦ max 14 · 1K/2K/4K · Grounding ✦',
   nb1:        'Nano Banana gen 1 · stable · Refs ✦ max 14 · 1K max · fallback for NB2',
   nbpro:      'Pro · Refs ✦ max 14 · 1K/2K/4K · Best quality',
-  i4:         'Imagen 4 · 1K · 1–4 images',
+  i4:         'Imagen 4 · 1K/2K · seed · 1–4 images',
   i4fast:     'Imagen 4 Fast · 1K · faster · 1–4 images',
   i4ultra:    'Imagen 4 Ultra · 1K · highest quality · max 1 image',
   flux2_pro:  'fal.ai · $0.03/MP · 8 refs · seed · safety',
@@ -13,10 +13,10 @@ const MODEL_DESCS = {
   flux2_max:  'fal.ai · $0.07/MP · 8 refs · highest quality',
   flux2_dev:       'fal.ai · $0.012/MP · 6 refs · steps · guidance · open-weight',
   seedream45:      'fal.ai · $0.04/img · 10 refs · 2K/4K · flat pricing · ByteDance',
-  seedream5lite:   'fal.ai · $0.04/img · 10 refs · 2K/4K · web search · reasoning',
+  seedream5lite:   'fal.ai · $0.04/img · 10 refs · 2K/3K · web search · reasoning',
   kling_v3:        'fal.ai · 10 refs · 1K/2K · @Image1 refs · Kuaishou · best consistency',
   kling_o3:        'fal.ai · 10 refs · 1K/2K/4K · @Image1 refs · Kuaishou · latest (Feb 2026)',
-  zimage_base:     'fal.ai · $0.005/MP · T2I · 28 steps · CFG · negative prompt · best quality',
+  zimage_base:     'fal.ai · $0.005/MP · T2I · steps · CFG · negative prompt · best quality',
   zimage_turbo:    'fal.ai · $0.005/MP · T2I + I2I · 1–16 steps · default 8 · input img → I2I',
   qwen2_std:       'fal.ai · $0.035/img · T2I · 25 steps · guidance · #1 AI Arena · typografie ✦',
   qwen2_pro:       'fal.ai · $0.075/img · T2I Pro · 35 steps · highest quality · production',
@@ -35,66 +35,27 @@ const MODEL_DESCS = {
   freepik_relight:   'Magnific Relight · ref[0]=source · ref[1]=light ref (opt) · prompt=lighting desc · proxy ✦',
   freepik_style:     'Magnific Style Transfer · ref[0]=source (req) · ref[1]=style source (req) · proxy ✦',
   freepik_skin:      'Magnific Skin Enhancer · ref[0]=source portrait (req) · 3 modes · no plastic skin · proxy ✦',
+  wan27_std:   'T2I · seed · Alibaba',
+  wan27_pro:   'T2I · 4K · thinking ✦ · seed · highest quality · Alibaba',
+  wan27_edit:  'instruction edit · up to 9 refs · seed · Alibaba',
+  wan27_pro_edit: 'instruction edit · 4K · up to 9 refs · seed · highest quality · Alibaba',
 };
 
 function selectModel(key) {
-  const prevType = MODELS[currentModel]?.type;  // save before switching
+  const prevType = MODELS[currentModel]?.type;
   currentModel = key;
   document.getElementById('modelSelect').value = key;
   document.getElementById('modelDesc').textContent = MODEL_DESCS[key] || '';
   const m = MODELS[key];
+  const unified = isUnifiedModel(m);
+  const isEdit = !!(m.editModel);
+  const isI2I = !!(m.i2iModel || m.editModel);
 
-  // Zobrazit správnou params sekci
-  document.getElementById('nbParams').style.display       = m.type === 'gemini'   ? '' : 'none';
-  document.getElementById('imagenParams').style.display   = m.type === 'imagen'   ? '' : 'none';
-  document.getElementById('fluxParams').style.display     = m.type === 'flux'     ? '' : 'none';
-  document.getElementById('seedreamParams').style.display = m.type === 'seedream' ? '' : 'none';
-  document.getElementById('klingParams').style.display    = m.type === 'kling'    ? '' : 'none';
-  document.getElementById('zimageParams').style.display   = m.type === 'zimage'   ? '' : 'none';
-  document.getElementById('grokParams').style.display     = m.type === 'proxy_xai'   ? '' : 'none';
-  // Grok: default 2K for Pro
-  if (m.type === 'proxy_xai') {
-    const isPro = key === 'grok_imagine_pro';
-    document.getElementById(isPro ? 'gkr2k' : 'gkr1k').checked = true;
-  }
-  document.getElementById('lumaParams').style.display     = m.type === 'proxy_luma'  ? '' : 'none';
-  document.getElementById('qwen2Params').style.display    = m.type === 'qwen2'       ? '' : 'none';
-  document.getElementById('wan27Params').style.display    = m.type === 'wan27r'      ? '' : 'none';
-  // WAN 2.7: hide T2I-only rows in Edit mode, show Pro-only options
-  if (m.type === 'wan27r') {
-    const isEdit = !!m.editModel;
-    const isPro  = m.id?.includes('-pro');
-    document.getElementById('wan27ThinkingRow').style.display = isEdit ? 'none' : '';
-    document.getElementById('wan27CountRow').style.display    = isEdit ? 'none' : '';
-    document.getElementById('wan27NegRow').style.display      = (!isEdit && m.negPrompt) ? '' : 'none';
-    // Pre-fill negative prompt (research-backed defaults)
-    const negEl = document.getElementById('wan27Neg');
-    if (negEl && m.negPrompt && !isEdit) negEl.value = 'low quality, blurry, distorted, deformed, ugly, watermark, text, logo, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn, mutation, duplicate, out of frame, worst quality, jpeg artifacts';
-    document.getElementById('wan27SizeRow').style.display     = '';
-    // Hide aspect ratio for edit (model takes aspect from input image)
-    document.getElementById('aspectRatioCtrl').style.display  = isEdit ? 'none' : '';
-    // Pro: show 4K only for T2I
-    const t4k = document.getElementById('w27t4k');
-    const t4kL = document.getElementById('w27t4kLabel');
-    const show4K = isPro && !isEdit;
-    if (t4k) { t4k.style.display = show4K ? '' : 'none'; if (t4kL) t4kL.style.display = show4K ? '' : 'none'; }
-    if (!show4K && t4k?.checked) { document.getElementById('w27t2k').checked = true; }
-    // Filter aspect options to only show supported ratios
-    if (!isEdit) _wan27FilterAspects(true);
-    _wan27UpdateRes();
-  } else {
-    // Restore all aspects + show aspect ctrl for other models
-    _wan27FilterAspects(false);
-    document.getElementById('aspectRatioCtrl').style.display = '';
-    const negRow = document.getElementById('wan27NegRow');
-    if (negRow) negRow.style.display = 'none';
-    const cntRow = document.getElementById('wan27CountRow');
-    if (cntRow) cntRow.style.display = 'none';
-  }
-  // Grok: filter aspect ratios to only xAI-supported values
-  _grokFilterAspects(m.type === 'proxy_xai');
-  document.getElementById('mysticParams').style.display      = m.type === 'proxy_mystic'      ? '' : 'none';
-  document.getElementById('freepikEditParams').style.display = m.type === 'proxy_freepik_edit' ? '' : 'none';
+  // ── Show/hide panel groups ──
+  document.getElementById('upParams').style.display            = unified ? '' : 'none';
+  document.getElementById('lumaParams').style.display          = m.type === 'proxy_luma'  ? '' : 'none';
+  document.getElementById('mysticParams').style.display        = m.type === 'proxy_mystic' ? '' : 'none';
+  document.getElementById('freepikEditParams').style.display   = m.type === 'proxy_freepik_edit' ? '' : 'none';
 
   // Freepik edit: show/hide tool-specific sub-panels
   if (m.type === 'proxy_freepik_edit') {
@@ -104,14 +65,86 @@ function selectModel(key) {
     document.getElementById('fepSkinPanel').style.display         = tool === 'skin_enhancer'  ? '' : 'none';
   }
 
-  // Ref sekce — zobrazit pokud model podporuje refs
+  // ── Negative prompt ──
+  const negRow = document.getElementById('upNegRow');
+  if (negRow) {
+    negRow.style.display = (unified && m.negPrompt) ? '' : 'none';
+    if (m.negPrompt) {
+      const negEl = document.getElementById('upNeg');
+      if (negEl) negEl.value = _DEFAULT_NEG_PROMPT;
+    }
+  }
+
+  // ── Aspect ratio ──
+  const aspectCtrl = document.getElementById('aspectRatioCtrl');
+  if (aspectCtrl) {
+    aspectCtrl.style.display = (m.type === 'wan27r' && isEdit) ? 'none' : '';
+  }
+  // Reset all aspect options, then apply model-specific filter
+  _resetAspectFilter();
+  if (m.aspectFilter === 'wan27') _wan27FilterAspects(true);
+  else if (m.aspectFilter === 'grok') _grokFilterAspects(true);
+
+  // ── Unified panel controls ──
+  if (unified) {
+    // Resolution toggle
+    _buildResToggle(m);
+
+    // Steps
+    const stepsRow = document.getElementById('upStepsRow');
+    stepsRow.style.display = m.steps ? '' : 'none';
+    if (m.steps) _setStepsDefaults(m);
+
+    // Guidance
+    const guidRow = document.getElementById('upGuidanceRow');
+    guidRow.style.display = m.guidance ? '' : 'none';
+    if (m.guidance) _setGuidanceDefaults(m);
+
+    // Seed
+    document.getElementById('upSeedRow').style.display = m.seed ? '' : 'none';
+
+    // Thinking radio (NB2: Min/High)
+    document.getElementById('upThinkRadioRow').style.display = m.thinking ? '' : 'none';
+
+    // Thinking checkbox (WAN 2.7 T2I)
+    document.getElementById('upThinkChkRow').style.display = m.thinkingCheckbox ? '' : 'none';
+
+    // Image count
+    const mc = m.maxCount || 0;
+    document.getElementById('upCount4Row').style.display  = (mc > 1 && mc <= 4) ? '' : 'none';
+    document.getElementById('upCount10Row').style.display = (mc > 4) ? '' : 'none';
+    // Reset count to 1
+    const c4_1 = document.getElementById('upc4_1');
+    if (c4_1) { c4_1.checked = true; document.getElementById('upCount4Val').textContent = '1'; }
+    const c10_1 = document.getElementById('upc10_1');
+    if (c10_1) { c10_1.checked = true; document.getElementById('upCount10Val').textContent = '1'; }
+
+    // Acceleration
+    document.getElementById('upAccelRow').style.display = m.acceleration ? '' : 'none';
+    if (m.acceleration) { const ar = document.getElementById('upa_reg'); if (ar) ar.checked = true; }
+
+    // Safety tolerance slider (FLUX)
+    document.getElementById('upSafetySliderRow').style.display = m.safetyTolerance ? '' : 'none';
+
+    // Safety checker checkbox (SeeDream, Z-Image, Qwen2)
+    document.getElementById('upSafetyChkRow').style.display = m.safetyChecker ? '' : 'none';
+
+    // Strength slider (Z-Image Turbo I2I — shown only when ref exists)
+    document.getElementById('upStrengthRow').style.display = (m.strength && refs.length > 0) ? '' : 'none';
+
+    // Grounding (Google)
+    document.getElementById('upGroundingRow').style.display = m.grounding ? '' : 'none';
+
+    // Persistent retry (Google)
+    document.getElementById('upRetryRow').style.display = m.persistRetry ? '' : 'none';
+  }
+
+  // ── Reference section ──
   document.getElementById('refSection').style.display = m.refs ? '' : 'none';
-  // Nadpis ref sekce + I2I note + res toggle
   const refLabel = document.getElementById('refSectionLabel');
   const refI2INote = document.getElementById('refI2INote');
   const refResRow = document.getElementById('refResRow');
-  const isI2IModel = !!(m.i2iModel || m.editModel);
-  if (refLabel) refLabel.textContent = m.editModel
+  if (refLabel) refLabel.textContent = isEdit
     ? (m.type === 'proxy_freepik_edit'
         ? (m.freepikTool === 'style_transfer'
             ? 'Refs: [0] Source · [1] Style (both required)'
@@ -120,19 +153,19 @@ function selectModel(key) {
             : 'Input image (required)')
         : m.type === 'qwen2' ? 'Input images (edit · compositing)'
         : 'Input image (edit)')
-    : isI2IModel ? (m.type === 'proxy_xai' ? 'Input images (edit · up to 5)' : 'Input image (I2I)')
+    : isI2I ? (m.type === 'proxy_xai' ? 'Input images (edit · up to ' + (m.maxRefs || 5) + ')' : 'Input image (I2I)')
     : m.type === 'proxy_mystic' ? 'Refs: [0] Structure · [1] Style'
     : 'Reference images';
   if (refI2INote) {
-    if (m.editModel) {
-      const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to 3 images · Instructions in prompt'
+    if (isEdit) {
+      const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to ' + (m.maxRefs||3) + ' images · Instructions in prompt'
                  : m.type === 'wan27r' ? 'Max 4096px · Larger images auto-resized · Instructions in prompt'
                  :                       'Max 2048px · Larger images auto-resized · Instructions in prompt';
       refI2INote.textContent = info;
       refI2INote.style.display = '';
-    } else if (m.i2iModel) {
+    } else if (isI2I) {
       const info = m.type === 'proxy_xai'
-        ? 'Up to 5 images · Single ref = output matches input aspect · Multi-ref = aspect from setting'
+        ? 'Add ref images for editing (up to ' + (m.maxRefs||5) + ').\nSingle ref = aspect from input · Multi-ref = aspect from setting · auto ratio lets model decide.'
         : 'Max 2048px · Larger images auto-resized · No image = T2I';
       refI2INote.textContent = info;
       refI2INote.style.display = '';
@@ -140,9 +173,9 @@ function selectModel(key) {
       refI2INote.style.display = 'none';
     }
   }
-  if (refResRow) refResRow.style.display = isI2IModel ? 'none' : '';
+  if (refResRow) refResRow.style.display = isI2I ? 'none' : '';
 
-  // Aktualizovat limit referencí v UI
+  // Update ref count display
   if (m.refs) {
     const max = m.maxRefs ?? 14;
     const refCountEl = document.getElementById('refCount');
@@ -152,180 +185,126 @@ function selectModel(key) {
     renderRefThumbs();
   }
 
-  // fal.ai API key v headeru — zobrazit pro FLUX, SeeDream, Kling, Z-Image
+  // fal.ai API key field visibility
+  const falTypes = new Set(['flux','seedream','kling','zimage','qwen2']);
   const fluxKeyField = document.getElementById('fluxKeyField');
-  if (fluxKeyField) fluxKeyField.style.display =
-    (m.type === 'flux' || m.type === 'seedream' || m.type === 'kling' || m.type === 'zimage' || m.type === 'qwen2') ? '' : 'none';
+  if (fluxKeyField) fluxKeyField.style.display = falTypes.has(m.type) ? '' : 'none';
 
-  // Proxy models — keys managed via Setup tab
-
-  // Thinking: NB2 only
-  const thinkSec = document.getElementById('thinkingSection');
-  if (thinkSec) thinkSec.style.display = m.thinking ? '' : 'none';
-
-  // ── FLUX: enable/disable controls podle capability flags ──
-  if (m.type === 'flux') {
-    const guidanceRow = document.getElementById('fluxGuidanceRow');
-    const guidanceInput = document.getElementById('fluxGuidance');
-    if (guidanceRow) guidanceRow.style.opacity = m.guidance ? '1' : '0.35';
-    if (guidanceInput) guidanceInput.disabled = !m.guidance;
-    const safetyRow = document.getElementById('fluxSafetyRow');
-    const safetyInput = document.getElementById('fluxSafety');
-    if (safetyRow) safetyRow.style.opacity = m.safetyTolerance ? '1' : '0.35';
-    if (safetyInput) safetyInput.disabled = !m.safetyTolerance;
-    const groundingRow = document.getElementById('fluxGroundingRow');
-    if (groundingRow) groundingRow.style.display = m.groundingSearch ? '' : 'none';
-    const refMaxInfo = document.getElementById('fluxRefMaxInfo');
-    if (refMaxInfo) refMaxInfo.textContent = `max ${m.maxRefs} ref. images`;
-    updateFluxQualityInfo();
-  }
-
-  if (m.type === 'seedream') {
-    const refMaxInfo = document.getElementById('sdRefMaxInfo');
-    if (refMaxInfo) refMaxInfo.textContent = `max ${m.maxRefs} ref. images`;
-    // v5/lite: max 3K; v4.5: max 4K — aktualizuj label a value
-    const is5 = m.id.includes('/v5/');
-    const hiresLbl = document.getElementById('sdq_hires_lbl');
-    const hiresInp = document.getElementById('sdq_hires');
-    if (hiresLbl) hiresLbl.textContent = is5 ? '3K' : '4K';
-    if (hiresInp) hiresInp.value = is5 ? '3K' : '4K';
-  }
-
-  // ── Kling: skrýt 4K radio pokud model nepodporuje ──
-  if (m.type === 'kling') {
-    const sup4K = m.resolutions?.includes('4K');
-    const kr4k  = document.getElementById('kr_4k');
-    const kr4kL = document.querySelector('label[for="kr_4k"]');
-    if (kr4k)  { kr4k.style.display  = sup4K ? '' : 'none'; if (!sup4K && kr4k.checked) document.getElementById('kr_2k').checked = true; }
-    if (kr4kL) kr4kL.style.display = sup4K ? '' : 'none';
-  }
-
-  // ── Z-Image: nastavit doporučené defaults + enable/disable controls ──
-  if (m.type === 'zimage') {
-    const isTurbo = m.id.includes('turbo');
-    const guidRow = document.getElementById('zimageGuidanceRow');
-    const negRow  = document.getElementById('zimageNegRow');
-    const stepsEl = document.getElementById('zimageSteps');
-    const guidEl  = document.getElementById('zimageGuidance');
-
-    if (guidRow) guidRow.style.display = m.guidance  ? '' : 'none';
-    if (negRow)  negRow.style.display  = m.negPrompt ? '' : 'none';
-    // Pre-fill negative prompt for Base (research-backed defaults)
-    const negEl = document.getElementById('zimageNeg');
-    if (negEl && m.negPrompt) negEl.value = 'blurry, low quality, distorted, deformed, ugly, watermark, text, signature, logo, extra fingers, extra limbs, fused fingers, missing fingers, deformed hands, bad anatomy, disfigured, poorly drawn face, mutation, extra head, duplicate, out of frame, worst quality, jpeg artifacts, grainy';
-
-    // Vždy resetovat na doporučené defaulty při přepnutí modelu
-    if (stepsEl) {
-      stepsEl.max   = isTurbo ? '16' : '50';
-      stepsEl.value = isTurbo ? '8'  : '28';
-      document.getElementById('zimageStepsVal').textContent = stepsEl.value;
-    }
-    if (guidEl && m.guidance) {
-      guidEl.value = '7.5';  // doporučeno: 7–7.5 pro Base bez reference
-      document.getElementById('zimageGuidanceVal').textContent = '7.5';
-    }
-    // Reset acceleration na regular
-    const accelReg = document.getElementById('za_reg');
-    if (accelReg) accelReg.checked = true;
-    // Reset strength slider
-    const strengthEl = document.getElementById('zimageStrength');
-    const strengthRow = document.getElementById('zimageStrengthRow');
-    if (strengthEl) strengthEl.value = '0.85';
-    const strengthValEl = document.getElementById('zimageStrengthVal');
-    if (strengthValEl) strengthValEl.textContent = '0.85';
-    if (strengthRow) strengthRow.style.display = 'none'; // zobrazí se až při nahráni ref
-    updateZImageQualityInfo();
-  }
-
-  // ── Qwen Image 2: doporučené defaults při přepnutí modelu ──
-  if (m.type === 'qwen2') {
-    const isPro  = key.includes('pro');
-    const isEdit = !!m.editModel;
-    const stepsEl = document.getElementById('qwen2Steps');
-    const guidEl  = document.getElementById('qwen2Guidance');
-    // Steps: Std=25, Pro=35
-    if (stepsEl) {
-      stepsEl.value = isPro ? '35' : '25';
-      document.getElementById('qwen2StepsVal').textContent = stepsEl.value;
-    }
-    // Guidance: Edit=4.5, Pro edit=5.0, Std=5.0, Pro=7.0
-    if (guidEl) {
-      const gDef = isPro && isEdit ? '5' : isEdit ? '4.5' : isPro ? '7' : '5';
-      guidEl.value = gDef;
-      document.getElementById('qwen2GuidanceVal').textContent = parseFloat(gDef).toFixed(1);
-    }
-    // Acceleration + Expand: jen pro T2I, schovat pro Edit
-    const accelRow  = document.getElementById('qwen2AccelRow');
-    const expandRow = document.getElementById('qwen2ExpandRow');
-    const countRow  = document.getElementById('qwen2CountRow');
-    if (accelRow)  accelRow.style.display  = isEdit ? 'none' : '';
-    if (expandRow) expandRow.style.display = isEdit ? 'none' : '';
-    if (countRow)  countRow.style.display  = isEdit ? 'none' : '';
-    // Reset acceleration na regular
-    const accelReg = document.getElementById('qwa_reg');
-    if (accelReg) accelReg.checked = true;
-    // Reset expand
-    const expandEl = document.getElementById('qwen2Expand');
-    if (expandEl) expandEl.checked = false;
-    // Reset seed
-    const seedEl = document.getElementById('qwen2Seed');
-    if (seedEl) seedEl.value = '';
-    // Negative prompt: show + set default
-    const negRow = document.getElementById('qwen2NegRow');
-    const negEl  = document.getElementById('qwen2Neg');
-    if (negRow) negRow.style.display = m.negPrompt ? '' : 'none';
-    if (negEl && m.negPrompt) negEl.value = 'blurry, low quality, distorted, deformed, oversaturated, watermark, ugly, bad anatomy, extra fingers, extra limbs, disfigured, poorly drawn face, duplicate, out of frame, worst quality, jpeg artifacts';
-  }
-
-  // ── Kling: počítadlo listeners ──
-  if (m.type === 'kling') {
-    document.querySelectorAll('input[name="klingCount"]').forEach(r => r.addEventListener('change', () => {
-      document.getElementById('klingCountVal').textContent = r.value;
-    }));
-  }
-
-  // Rebuild resolution toggle pro Gemini modely
-  if (m.type === 'gemini') {
-    const resWrap = document.getElementById('nbResWrap');
-    if (resWrap) {
-      const toggleEl = resWrap.querySelector('.toggle-row');
-      if (toggleEl) {
-        toggleEl.innerHTML = m.resolutions.map((r, i) =>
-          `<input type="radio" name="nbRes" id="nbr_${r}" value="${r}" ${i === 0 ? 'checked' : ''}>
-           <label for="nbr_${r}">${r}</label>`
-        ).join('');
-        const valEl = document.getElementById('nbrVal');
-        if (valEl) valEl.textContent = m.resolutions[0];
-        toggleEl.querySelectorAll('input').forEach(inp =>
-          inp.addEventListener('change', () => { if (valEl) valEl.textContent = inp.value; })
-        );
-      }
-    }
-  }
-
-  // Imagen Ultra: force 1 image
-  // Ultra: max 1 obrázek (nejdražší model, sampleCount > 1 nedoporučeno)
-  const imagenCountRow = document.getElementById('imagenCountRow');
-  if (key === 'i4ultra') {
-    document.querySelectorAll('input[name="nImg"]').forEach(r => r.disabled = true);
-    document.querySelectorAll('input[name="imagenCount"]').forEach(r => { r.disabled = true; });
-    const ic1 = document.getElementById('ic1');
-    if (ic1) { ic1.checked = true; ic1.disabled = false; }
-    const imagenCountVal = document.getElementById('imagenCountVal');
-    if (imagenCountVal) imagenCountVal.textContent = '1';
-  } else {
-    document.querySelectorAll('input[name="nImg"]').forEach(r => r.disabled = false);
-    document.querySelectorAll('input[name="imagenCount"]').forEach(r => { r.disabled = false; });
-  }
-  // Imagen Fast: 1K only
-  const sz2k = document.getElementById('sz2k');
-  if (sz2k) sz2k.disabled = (key === 'i4fast');
-
-  // Live-rewrite @mentions in prompt textarea for new model
+  // Live-rewrite @mentions in prompt textarea
   if (typeof rewritePromptForModel === 'function') {
     rewritePromptForModel(prevType, MODELS[key]?.type);
   }
 }
+
+// ── Resolution toggle builder ──
+function _buildResToggle(m) {
+  const res = m.resolutions || ['1K'];
+  const defaultRes = m.defaultRes || res[0];
+  for (let i = 0; i < 3; i++) {
+    const radio = document.getElementById('upRes' + (i + 1));
+    const label = document.getElementById('upRes' + (i + 1) + 'L');
+    if (!radio || !label) continue;
+    if (i < res.length) {
+      radio.value = res[i];
+      radio.disabled = false;
+      label.textContent = res[i];
+      label.style.opacity = '';
+      label.style.pointerEvents = '';
+      radio.checked = (res[i] === defaultRes);
+    } else {
+      radio.value = '';
+      radio.disabled = true;
+      label.textContent = '';
+      label.style.opacity = '0.25';
+      label.style.pointerEvents = 'none';
+      radio.checked = false;
+    }
+  }
+  // Attach change listeners for res info + count val updates
+  document.querySelectorAll('input[name="upRes"]').forEach(r => {
+    r.onchange = () => updateUnifiedResInfo();
+  });
+  document.querySelectorAll('input[name="upCount4"]').forEach(r => {
+    r.onchange = () => { document.getElementById('upCount4Val').textContent = r.value; };
+  });
+  document.querySelectorAll('input[name="upCount10"]').forEach(r => {
+    r.onchange = () => { document.getElementById('upCount10Val').textContent = r.value; };
+  });
+  updateUnifiedResInfo();
+}
+
+// ── Steps defaults per model ──
+function _setStepsDefaults(m) {
+  const el = document.getElementById('upSteps');
+  const val = document.getElementById('upStepsVal');
+  if (!el) return;
+  if (m.type === 'zimage') {
+    const isTurbo = m.id.includes('turbo');
+    el.max = isTurbo ? '16' : '50';
+    el.value = isTurbo ? '8' : '28';
+  } else if (m.type === 'qwen2') {
+    el.max = '50';
+    el.value = m.id.includes('pro') ? '35' : '25';
+  } else if (m.type === 'flux') {
+    el.max = '50';
+    el.value = '28';
+  } else {
+    el.max = '50';
+    el.value = '28';
+  }
+  if (val) val.textContent = el.value;
+}
+
+// ── Guidance defaults per model ──
+function _setGuidanceDefaults(m) {
+  const el = document.getElementById('upGuidance');
+  const val = document.getElementById('upGuidanceVal');
+  if (!el) return;
+  if (m.type === 'qwen2') {
+    const isPro = m.id.includes('pro');
+    const isEdit = !!m.editModel;
+    const gDef = isPro && isEdit ? 5 : isEdit ? 4.5 : isPro ? 7 : 5;
+    el.value = gDef;
+  } else if (m.type === 'zimage') {
+    el.value = 7.5;
+  } else if (m.type === 'flux') {
+    el.value = 3.5;
+  } else {
+    el.value = 3.5;
+  }
+  if (val) val.textContent = parseFloat(el.value).toFixed(1);
+}
+
+// ── Aspect ratio filtering ──
+function _resetAspectFilter() {
+  const sel = document.getElementById('aspectRatio');
+  if (!sel) return;
+  for (const opt of sel.options) opt.style.display = '';
+}
+
+function _wan27FilterAspects(restrict) {
+  const sel = document.getElementById('aspectRatio');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    if (restrict) opt.style.display = _WAN27_PIXELS[opt.value] ? '' : 'none';
+  }
+  if (restrict && !_WAN27_PIXELS[sel.value]) sel.value = '16:9';
+}
+
+function _grokFilterAspects(restrict) {
+  if (!restrict) return;
+  const sel = document.getElementById('aspectRatio');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    opt.style.display = _GROK_ASPECTS.has(opt.value) ? '' : 'none';
+  }
+  if (!_GROK_ASPECTS.has(sel.value)) sel.value = '16:9';
+}
+
+// Listen for aspect ratio changes → update resolution pixel info
+document.getElementById('aspectRatio')?.addEventListener('change', () => {
+  if (isUnifiedModel(MODELS[currentModel])) updateUnifiedResInfo();
+});
 
 // ═══════════════════════════════════════════════════════
 // VIEW SWITCHING
@@ -343,7 +322,6 @@ function switchView(v) {
   const videoView = document.getElementById('videoView');
   if (videoView) videoView.classList.toggle('show', v === 'video');
   if (v === 'gallery') {
-    // Jeden dbGetAllMeta call — sdílíme pro folders i gallery render
     Promise.all([dbGetAll('folders'), dbGetAllMeta()]).then(([folders, items]) => {
       renderFoldersSync(folders, items);
       renderGalleryWithItems(items);
@@ -354,77 +332,14 @@ function switchView(v) {
   if (v === 'video') { refreshVideoGalleryUI(); }
 }
 
-
-// ── WAN 2.7 Resolution — tier + main aspect → pixel info ──
-
-// Replicate WAN 2.7 whitelist — only these pixel strings are accepted
-const _WAN27_PIXELS = {
-  '16:9': { '1K': '1280*720',  '2K': '2048*1152', '4K': '4096*2304' },
-  '9:16': { '1K': '720*1280',  '2K': '1152*2048', '4K': '2304*4096' },
-  '1:1':  { '1K': '1024*1024', '2K': '2048*2048', '4K': '4096*4096' },
-  '4:3':  { '1K': '1024*768',  '2K': '2048*1536', '4K': '4096*3072' },
-  '3:4':  { '1K': '768*1024',  '2K': '1536*2048', '4K': '3072*4096' },
-};
-
+// ── WAN 2.7 helpers (for generate.js API calls) ──
 function _wan27GetTier() {
-  return document.querySelector('input[name="wan27Tier"]:checked')?.value || '2K';
+  return document.querySelector('input[name="upRes"]:checked')?.value || '2K';
 }
 
-// Get size string for Replicate API — pixel string or tier preset fallback
 function _wan27GetSize() {
   const tier = _wan27GetTier();
   const aspect = document.getElementById('aspectRatio')?.value || '16:9';
   const px = _WAN27_PIXELS[aspect]?.[tier];
-  return px || tier; // unsupported aspect → send preset (square)
-}
-
-// Update the pixel info label next to Resolution heading
-function _wan27UpdateRes() {
-  const tier = _wan27GetTier();
-  const aspect = document.getElementById('aspectRatio')?.value || '16:9';
-  const m = typeof currentModel !== 'undefined' ? MODELS[currentModel] : null;
-  const isEdit = m?.editModel;
-  const px = _WAN27_PIXELS[aspect]?.[tier];
-  const info = document.getElementById('wan27ResInfo');
-  if (!info) return;
-  if (isEdit) {
-    info.textContent = tier + ' (aspect from input image)';
-  } else if (px) {
-    info.textContent = tier + '  ' + px.replace('*', '×');
-  } else {
-    info.textContent = tier + ' (square — ' + aspect + ' not supported)';
-  }
-}
-
-// Listen for main aspect ratio changes → update pixel info
-document.getElementById('aspectRatio')?.addEventListener('change', () => {
-  if (document.getElementById('wan27Params')?.style.display !== 'none') _wan27UpdateRes();
-});
-
-// Show/hide aspect ratio options based on WAN 2.7 whitelist
-function _wan27FilterAspects(restrict) {
-  const sel = document.getElementById('aspectRatio');
-  if (!sel) return;
-  for (const opt of sel.options) {
-    if (restrict) {
-      opt.style.display = _WAN27_PIXELS[opt.value] ? '' : 'none';
-    } else {
-      opt.style.display = '';
-    }
-  }
-  // If current selection is hidden, switch to 16:9
-  if (restrict && !_WAN27_PIXELS[sel.value]) {
-    sel.value = '16:9';
-  }
-}
-
-const _GROK_ASPECTS = new Set(['1:1','3:4','4:3','9:16','16:9','2:3','3:2','9:19.5','19.5:9','9:20','20:9','1:2','2:1','auto']);
-function _grokFilterAspects(restrict) {
-  if (!restrict) return;  // other filters handle restore
-  const sel = document.getElementById('aspectRatio');
-  if (!sel) return;
-  for (const opt of sel.options) {
-    opt.style.display = _GROK_ASPECTS.has(opt.value) ? '' : 'none';
-  }
-  if (!_GROK_ASPECTS.has(sel.value)) sel.value = '16:9';
+  return px || tier;
 }

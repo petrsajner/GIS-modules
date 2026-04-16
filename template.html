@@ -125,11 +125,13 @@ select:focus, input[type=number]:focus, input[type=text].ctrl-input:focus { bord
 /* Checkbox */
 .chk-row { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:var(--dim); user-select:none; }
 .chk-row input { display:none; }
-.chk-box { width:14px; height:14px; border:1px solid var(--border); background:var(--s2); flex-shrink:0; position:relative; transition:all .12s; }
+.chk-box { width:14px; height:14px; border:1.5px solid var(--dim2); background:var(--s2); flex-shrink:0; position:relative; transition:all .12s; }
 .chk-row input:checked ~ .chk-box { background:var(--accent); border-color:var(--accent); }
 .chk-box::after { content:''; position:absolute; top:1px; left:4px; width:3px; height:7px; border:2px solid #000; border-top:none; border-left:none; transform:rotate(45deg); opacity:0; }
 .chk-row input:checked ~ .chk-box::after { opacity:1; }
 .chk-row:hover { color:var(--text); }
+.grok-cnt-lbl { display:flex;align-items:center;justify-content:center;padding:5px 0;font-size:11px;color:var(--dim);cursor:pointer;user-select:none;transition:all .12s; }
+input[name="upCount10"]:checked + .grok-cnt-lbl { background:var(--accent)!important;color:#000;font-weight:600; }
 
 /* Thinking badge */
 .thinking-badge {
@@ -905,6 +907,54 @@ input[type=range].prange::-webkit-slider-thumb {
 #paintCanvas.cur-rect    { cursor:crosshair; }
 #paintCanvas.cur-ellipse { cursor:crosshair; }
 #paintCanvas.cur-text    { cursor:text; }
+#paintCanvas.cur-crop    { cursor:crosshair; }
+
+/* Crop overlay (paint + annotate) */
+#pCropOverlay, #aCropOverlay {
+  position:absolute; top:0; left:0; width:100%; height:100%;
+  display:none; pointer-events:none; z-index:10;
+}
+#pCropOverlay.active, #aCropOverlay.active { display:block; }
+.pcrop-rect {
+  position:absolute; box-sizing:border-box;
+  border:2px dashed #fff; box-shadow:0 0 0 99999px rgba(0,0,0,.55);
+  cursor:move; pointer-events:auto;
+}
+.pcrop-handle {
+  position:absolute; width:12px; height:12px; background:#fff;
+  border:1.5px solid #000; box-sizing:border-box;
+  pointer-events:auto;
+}
+.pcrop-handle.nw { top:-6px;  left:-6px;  cursor:nwse-resize; }
+.pcrop-handle.ne { top:-6px;  right:-6px; cursor:nesw-resize; }
+.pcrop-handle.sw { bottom:-6px; left:-6px;  cursor:nesw-resize; }
+.pcrop-handle.se { bottom:-6px; right:-6px; cursor:nwse-resize; }
+.pcrop-handle.n  { top:-6px;  left:50%; margin-left:-6px; cursor:ns-resize; }
+.pcrop-handle.s  { bottom:-6px; left:50%; margin-left:-6px; cursor:ns-resize; }
+.pcrop-handle.w  { left:-6px; top:50%; margin-top:-6px; cursor:ew-resize; }
+.pcrop-handle.e  { right:-6px; top:50%; margin-top:-6px; cursor:ew-resize; }
+.pcrop-size-lbl {
+  position:absolute; bottom:-28px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,.85); color:#fff; padding:3px 8px; font-size:10px;
+  font-family:'IBM Plex Mono',monospace; white-space:nowrap; border-radius:2px;
+  pointer-events:none;
+}
+#pCropActions, #aCropActions {
+  display:none; gap:6px; align-items:center;
+}
+#pCropActions.active, #aCropActions.active { display:flex; }
+.pcrop-lock {
+  display:flex; align-items:center; gap:4px; font-size:11px; color:var(--dim);
+  cursor:pointer; user-select:none; padding:0 6px;
+}
+.pcrop-btn {
+  padding:4px 10px; font-size:11px; border:1px solid var(--border); background:var(--s2);
+  color:var(--text); cursor:pointer; font-family:'IBM Plex Mono',monospace;
+  transition:all .12s;
+}
+.pcrop-btn:hover { border-color:var(--accent); }
+.pcrop-btn.apply { border-color:var(--accent); color:var(--accent); }
+.pcrop-btn.apply:hover { background:var(--accent); color:#000; }
 
 /* Paint bg toggle */
 .pbg-toggle { display:flex; gap:0; }
@@ -934,6 +984,7 @@ input[type=range].prange::-webkit-slider-thumb {
 #annotateCanvas.cur-ellipse { cursor:crosshair; }
 #annotateCanvas.cur-text    { cursor:text; }
 #annotateCanvas.cur-bucket  { cursor:cell; }
+#annotateCanvas.cur-crop    { cursor:crosshair; }
 .annotate-footer {
   display:flex; align-items:center; gap:10px; padding:10px 14px;
   border-top:1px solid var(--border); background:var(--s1); flex-shrink:0;
@@ -2121,10 +2172,10 @@ select.inpaint-num option { background:#fff; color:#111; }
           <option value="zimage_base">Z-Image Base — fal.ai · $0.005/MP · CFG · neg.prompt</option>
           <option value="zimage_turbo">Z-Image Turbo — fal.ai · $0.005/MP · ultra-fast · opt. I2I</option>
 
-          <option value="wan27_std">WAN 2.7 — Replicate · T2I · opt. ref · Alibaba</option>
-          <option value="wan27_pro">WAN 2.7 Pro — Replicate · T2I · highest quality · Alibaba</option>
-          <option value="wan27_edit">WAN 2.7 Edit — Replicate · instruction edit · ref required</option>
-          <option value="wan27_pro_edit">WAN 2.7 Pro Edit — Replicate · instruction edit · highest quality</option>
+          <option value="wan27_std">WAN 2.7 — T2I · opt. thinking · Alibaba</option>
+          <option value="wan27_pro">WAN 2.7 Pro — T2I · 4K · thinking · highest quality · Alibaba</option>
+          <option value="wan27_edit">WAN 2.7 Edit — instruction edit · up to 9 refs · Alibaba</option>
+          <option value="wan27_pro_edit">WAN 2.7 Pro Edit — instruction edit · 4K · highest quality · Alibaba</option>
           <option disabled>──────────────────</option>
           <option value="qwen2_std">Qwen Image 2 — fal.ai · $0.035/img · T2I</option>
           <option value="qwen2_pro">Qwen Image 2 Pro — fal.ai · $0.075/img · T2I · highest quality</option>
@@ -2167,11 +2218,11 @@ select.inpaint-num option { background:#fff; color:#111; }
         <!-- Aktivní style + camera tagy — uvnitř psec pro správný padding -->
         <div id="styleTags" style="display:flex;flex-wrap:wrap;gap:5px;padding-top:6px;min-height:0;"></div>
         <div id="cameraTags" style="display:flex;flex-wrap:wrap;gap:5px;padding-top:3px;min-height:0;"></div>
-        <!-- Negative prompt — shown for models that support it, directly under prompt -->
-        <div id="wan27NegRow" style="display:none;padding-top:8px;">
-          <div style="font-size:10px;color:var(--dim2);cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
-            onclick="var t=this.nextElementSibling;var o=t.style.display!=='none';t.style.display=o?'none':'';this.firstElementChild.textContent=o?'▸':'▾'"><span>▸</span> Negative prompt <span style="color:var(--dim);font-size:9px;opacity:.6">(prefilled)</span></div>
-          <textarea id="wan27Neg" rows="1" style="display:none;width:100%;height:24px;min-height:0;background:var(--s2);border:1px solid var(--border);color:var(--dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 9px;outline:none;resize:none;overflow:hidden;line-height:18px;box-sizing:border-box;margin-top:4px;"
+        <!-- Unified negative prompt — shown for models with negPrompt:true -->
+        <div id="upNegRow" style="display:none;padding-top:8px;">
+          <div class="ctrl-label" style="font-size:11px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
+            onclick="var t=document.getElementById('upNeg');var o=t.style.display!=='none';t.style.display=o?'none':'';this.querySelector('.neg-arrow').textContent=o?'\u25b8':'\u25be'"><span class="neg-arrow">\u25b8</span> Negative prompt <span style="color:var(--dim);font-size:9px;opacity:.6">(prefilled)</span></div>
+          <textarea id="upNeg" rows="1" style="display:none;width:100%;height:24px;min-height:0;background:var(--s2);border:1px solid var(--border);color:var(--dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 9px;outline:none;resize:none;overflow:hidden;line-height:18px;box-sizing:border-box;margin-top:4px;"
             oninput="this.style.height='';this.style.height=Math.max(24,this.scrollHeight)+'px'"></textarea>
         </div>
       </div>
@@ -2237,465 +2288,142 @@ select.inpaint-num option { background:#fff; color:#111; }
         </div>
 
         <!-- NB2/Pro params -->
-        <div id="nbParams">
-          <div class="ctrl" id="thinkingSection">
-            <div class="ctrl-label">Thinking Mode</div>
-            <div class="toggle-row">
-              <input type="radio" name="thinking" id="th-min" value="minimal" checked>
-              <label for="th-min">Minimal</label>
-              <input type="radio" name="thinking" id="th-high" value="high">
-              <label for="th-high">High ✦</label>
-            </div>
-          </div>
-          <div class="ctrl">
-            <div class="ctrl-label">Image count <span class="cv" id="nbCountVal">1</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="nbCount" id="nbc1" value="1" checked><label for="nbc1">1</label>
-              <input type="radio" name="nbCount" id="nbc2" value="2"><label for="nbc2">2</label>
-              <input type="radio" name="nbCount" id="nbc3" value="3"><label for="nbc3">3</label>
-              <input type="radio" name="nbCount" id="nbc4" value="4"><label for="nbc4">4</label>
-            </div>
-          </div>
-          <div class="ctrl" id="nbResWrap">
-            <div class="ctrl-label">Resolution <span class="cv" id="nbrVal">1K</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="nbRes" id="nbr_1K" value="1K" checked><label for="nbr_1K">1K</label>
-              <input type="radio" name="nbRes" id="nbr_2K" value="2K"><label for="nbr_2K">2K</label>
-              <input type="radio" name="nbRes" id="nbr_4K" value="4K"><label for="nbr_4K">4K</label>
+        <div id="upParams">
+
+          <!-- Resolution -->
+          <div class="ctrl" id="upResRow">
+            <div class="ctrl-label">Resolution <span class="cv" id="upResInfo" style="color:var(--accent);"></span></div>
+            <div class="toggle-row" id="upResToggle">
+              <input type="radio" name="upRes" id="upRes1" value="" checked><label for="upRes1" id="upRes1L"></label>
+              <input type="radio" name="upRes" id="upRes2" value=""><label for="upRes2" id="upRes2L"></label>
+              <input type="radio" name="upRes" id="upRes3" value=""><label for="upRes3" id="upRes3L"></label>
             </div>
           </div>
 
-          <div class="ctrl">
+          <!-- Steps slider -->
+          <div class="ctrl" id="upStepsRow" style="display:none">
+            <div class="ctrl-label">Steps <span class="cv" id="upStepsVal">28</span></div>
+            <input type="range" id="upSteps" min="1" max="50" value="28" step="1"
+              oninput="document.getElementById('upStepsVal').textContent=this.value"
+              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
+          </div>
+
+          <!-- Guidance slider -->
+          <div class="ctrl" id="upGuidanceRow" style="display:none">
+            <div class="ctrl-label">Guidance <span class="cv" id="upGuidanceVal">3.5</span></div>
+            <input type="range" id="upGuidance" min="1" max="20" value="3.5" step="0.5"
+              oninput="document.getElementById('upGuidanceVal').textContent=parseFloat(this.value).toFixed(1)"
+              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
+          </div>
+
+          <!-- Seed -->
+          <div class="ctrl" id="upSeedRow" style="display:none">
+            <div class="ctrl-label">Seed <span style="font-size:10px;color:var(--dim2);margin-left:4px;">(empty = random)</span></div>
+            <input type="text" id="upSeed" placeholder="" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;box-sizing:border-box;">
+          </div>
+
+          <!-- Thinking radio — NB2 (Min/High) -->
+          <div class="ctrl" id="upThinkRadioRow" style="display:none">
+            <div class="ctrl-label">Thinking mode</div>
+            <div class="toggle-row">
+              <input type="radio" name="upThinkRadio" id="upTr-min" value="minimal" checked><label for="upTr-min">Minimal</label>
+              <input type="radio" name="upThinkRadio" id="upTr-high" value="high"><label for="upTr-high">High ✦</label>
+            </div>
+          </div>
+
+          <!-- Thinking checkbox — WAN 2.7 -->
+          <div class="ctrl" id="upThinkChkRow" style="display:none">
+            <label class="chk-row" style="cursor:pointer;">
+              <input type="checkbox" id="upThinkChk">
+              <div class="chk-box"></div>
+              <span style="font-size:11px;color:var(--dim);">Thinking mode <span style="color:var(--dim2);font-size:9px;">(better composition, slower)</span></span>
+            </label>
+          </div>
+
+          <!-- Image count — 4 buttons (default) -->
+          <div class="ctrl" id="upCount4Row" style="display:none">
+            <div class="ctrl-label">Image count <span class="cv" id="upCount4Val">1</span></div>
+            <div class="toggle-row">
+              <input type="radio" name="upCount4" id="upc4_1" value="1" checked><label for="upc4_1">1</label>
+              <input type="radio" name="upCount4" id="upc4_2" value="2"><label for="upc4_2">2</label>
+              <input type="radio" name="upCount4" id="upc4_3" value="3"><label for="upc4_3">3</label>
+              <input type="radio" name="upCount4" id="upc4_4" value="4"><label for="upc4_4">4</label>
+            </div>
+          </div>
+
+          <!-- Image count — 10 buttons (Grok) with alternating bg -->
+          <div class="ctrl" id="upCount10Row" style="display:none">
+            <div class="ctrl-label">Image count <span class="cv" id="upCount10Val">1</span></div>
+            <div style="display:grid;grid-template-columns:repeat(10,1fr);gap:0;">
+              <input type="radio" name="upCount10" id="upc10_1" value="1" checked style="display:none"><label for="upc10_1" class="grok-cnt-lbl" style="background:rgba(255,255,255,.03);">1</label>
+              <input type="radio" name="upCount10" id="upc10_2" value="2" style="display:none"><label for="upc10_2" class="grok-cnt-lbl" style="background:rgba(255,255,255,.06);">2</label>
+              <input type="radio" name="upCount10" id="upc10_3" value="3" style="display:none"><label for="upc10_3" class="grok-cnt-lbl" style="background:rgba(255,255,255,.03);">3</label>
+              <input type="radio" name="upCount10" id="upc10_4" value="4" style="display:none"><label for="upc10_4" class="grok-cnt-lbl" style="background:rgba(255,255,255,.06);">4</label>
+              <input type="radio" name="upCount10" id="upc10_5" value="5" style="display:none"><label for="upc10_5" class="grok-cnt-lbl" style="background:rgba(255,255,255,.03);">5</label>
+              <input type="radio" name="upCount10" id="upc10_6" value="6" style="display:none"><label for="upc10_6" class="grok-cnt-lbl" style="background:rgba(255,255,255,.06);">6</label>
+              <input type="radio" name="upCount10" id="upc10_7" value="7" style="display:none"><label for="upc10_7" class="grok-cnt-lbl" style="background:rgba(255,255,255,.03);">7</label>
+              <input type="radio" name="upCount10" id="upc10_8" value="8" style="display:none"><label for="upc10_8" class="grok-cnt-lbl" style="background:rgba(255,255,255,.06);">8</label>
+              <input type="radio" name="upCount10" id="upc10_9" value="9" style="display:none"><label for="upc10_9" class="grok-cnt-lbl" style="background:rgba(255,255,255,.03);">9</label>
+              <input type="radio" name="upCount10" id="upc10_10" value="10" style="display:none"><label for="upc10_10" class="grok-cnt-lbl" style="background:rgba(255,255,255,.06);">10</label>
+            </div>
+          </div>
+
+          <!-- Acceleration (None/Regular/High+) -->
+          <div class="ctrl" id="upAccelRow" style="display:none">
+            <div class="ctrl-label">Acceleration</div>
+            <div class="toggle-row">
+              <input type="radio" name="upAccel" id="upa_none" value="none"><label for="upa_none">None</label>
+              <input type="radio" name="upAccel" id="upa_reg" value="regular" checked><label for="upa_reg">Regular</label>
+              <input type="radio" name="upAccel" id="upa_high" value="high"><label for="upa_high">High ✦</label>
+            </div>
+          </div>
+
+          <!-- Safety tolerance slider (FLUX) -->
+          <div class="ctrl" id="upSafetySliderRow" style="display:none">
+            <div class="ctrl-label">Safety tolerance <span class="cv" id="upSafetySliderVal">2</span></div>
+            <input type="range" id="upSafetySlider" min="1" max="5" value="2" step="1"
+              oninput="document.getElementById('upSafetySliderVal').textContent=this.value"
+              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
+          </div>
+
+          <!-- Safety checker checkbox (SeeDream, Z-Image, Qwen2) -->
+          <div class="ctrl" id="upSafetyChkRow" style="display:none">
+            <label class="chk-row" style="cursor:pointer;">
+              <input type="checkbox" id="upSafetyChk" checked>
+              <div class="chk-box"></div>
+              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
+            </label>
+          </div>
+
+          <!-- Strength slider (Z-Image Turbo I2I) -->
+          <div class="ctrl" id="upStrengthRow" style="display:none">
+            <div class="ctrl-label">Strength <span class="cv" id="upStrengthVal">0.85</span>
+              <span style="font-size:10px;color:var(--dim2);margin-left:4px;">denoise strength for I2I</span>
+            </div>
+            <input type="range" id="upStrength" min="0.1" max="1.0" value="0.85" step="0.05"
+              oninput="document.getElementById('upStrengthVal').textContent=parseFloat(this.value).toFixed(2)"
+              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
+          </div>
+
+          <!-- Grounding: Google Search -->
+          <div class="ctrl" id="upGroundingRow" style="display:none">
             <label class="chk-row">
-              <input type="checkbox" id="useSearch">
+              <input type="checkbox" id="upGrounding">
               <div class="chk-box"></div>
               Grounding: Google Search
             </label>
           </div>
-          <div class="ctrl">
+
+          <!-- Persistent retry -->
+          <div class="ctrl" id="upRetryRow" style="display:none">
             <label class="chk-row">
-              <input type="checkbox" id="persistentRetry">
+              <input type="checkbox" id="upRetry">
               <div class="chk-box"></div>
-              Persistent retry on 503 <span style="font-size:9px;color:var(--dim2);margin-left:4px;">(10× / ~10 min backoff)</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Imagen params -->
-        <div id="imagenParams" style="display:none">
-          <div class="ctrl" style="padding:6px 0 10px; font-size:11px; color:var(--dim); line-height:1.7;">
-            Fixed resolution (REST API limit) · 2K/4K requires Vertex AI SDK
-          </div>
-          <div class="ctrl">
-            <div class="ctrl-label">Image count <span class="cv" id="imagenCountVal">1</span></div>
-            <div class="toggle-row" id="imagenCountRow">
-              <input type="radio" name="imagenCount" id="ic1" value="1" checked><label for="ic1">1</label>
-              <input type="radio" name="imagenCount" id="ic2" value="2"><label for="ic2">2</label>
-              <input type="radio" name="imagenCount" id="ic3" value="3"><label for="ic3">3</label>
-              <input type="radio" name="imagenCount" id="ic4" value="4"><label for="ic4">4</label>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- FLUX.2 params -->
-        <div id="fluxParams" style="display:none">
-
-          <!-- Kvalita (max rozlišení — aspect ratio se bere z globálního selectoru výše) -->
-          <div class="ctrl">
-            <div class="ctrl-label">Output quality <span class="cv" id="fluxQualityInfo">1024px</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="fluxQuality" id="fq_512"  value="512"  checked><label for="fq_512">512</label>
-              <input type="radio" name="fluxQuality" id="fq_1k"   value="1024"><label for="fq_1k">1K</label>
-              <input type="radio" name="fluxQuality" id="fq_2k"   value="1440"><label for="fq_2k">2K</label>
-              <input type="radio" name="fluxQuality" id="fq_4mp"  value="2048"><label for="fq_4mp">4MP</label>
-            </div>
-          </div>
-
-          <!-- Image count -->
-          <div class="ctrl">
-            <div class="ctrl-label">Image count <span class="cv" id="fluxCountVal">1</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="fluxCount" id="fc1" value="1" checked><label for="fc1">1</label>
-              <input type="radio" name="fluxCount" id="fc2" value="2"><label for="fc2">2</label>
-              <input type="radio" name="fluxCount" id="fc3" value="3"><label for="fc3">3</label>
-              <input type="radio" name="fluxCount" id="fc4" value="4"><label for="fc4">4</label>
-            </div>
-          </div>
-
-          <!-- Steps -->
-          <div class="ctrl" id="fluxStepsRow">
-            <div class="ctrl-label">Steps <span class="cv" id="fluxStepsVal">28</span></div>
-            <input type="range" id="fluxSteps" min="4" max="50" value="28" step="1"
-              oninput="document.getElementById('fluxStepsVal').textContent=this.value"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Guidance (jen flex + dev) -->
-          <div class="ctrl" id="fluxGuidanceRow">
-            <div class="ctrl-label">Guidance <span class="cv" id="fluxGuidanceVal">3.5</span></div>
-            <input type="range" id="fluxGuidance" min="1" max="10" value="3.5" step="0.5"
-              oninput="document.getElementById('fluxGuidanceVal').textContent=this.value"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Seed -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span style="font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;">(empty = random)</span></div>
-            <input type="number" id="fluxSeed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <!-- Safety tolerance (ne u dev) -->
-          <div class="ctrl" id="fluxSafetyRow">
-            <div class="ctrl-label">Safety tolerance <span class="cv" id="fluxSafetyVal">2</span></div>
-            <input type="range" id="fluxSafety" min="1" max="5" value="2" step="1"
-              oninput="document.getElementById('fluxSafetyVal').textContent=this.value"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Prompt upsampling -->
-          <div class="ctrl">
-            <label class="chk-row" style="cursor:pointer;">
-              <input type="checkbox" id="fluxUpsampling">
-              <div class="chk-box" id="fluxUpsamplingChk"></div>
-              <span style="font-size:11px;color:var(--dim);">Prompt upsampling</span>
+              Persistent retry on 503 <span style="font-size:9px;color:var(--dim2);margin-left:4px;">(10\u00d7 / ~10 min backoff)</span>
             </label>
           </div>
 
-          <!-- Grounding search (jen max) -->
-          <div class="ctrl" id="fluxGroundingRow" style="display:none">
-            <label class="chk-row" style="cursor:pointer;">
-              <input type="checkbox" id="fluxGrounding">
-              <div class="chk-box" id="fluxGroundingChk"></div>
-              <span style="font-size:11px;color:var(--dim);">Grounding search <span style="color:var(--accent)">✦</span></span>
-            </label>
-          </div>
-
-          <!-- Ref limit info -->
-          <div style="font-size:10px;color:var(--dim2);margin-top:2px;" id="fluxRefMaxInfo">max 8 ref. images</div>
-
-        </div>
-
-        <!-- SeeDream params -->
-        <div id="seedreamParams" style="display:none">
-
-          <!-- Kvalita výstupu -->
-          <div class="ctrl">
-            <div class="ctrl-label">Output quality</div>
-            <div class="toggle-row">
-              <input type="radio" name="sdQuality" id="sdq_2k" value="2K" checked><label for="sdq_2k">2K</label>
-              <input type="radio" name="sdQuality" id="sdq_hires" value="3K"><label for="sdq_hires" id="sdq_hires_lbl">4K</label>
-            </div>
-          </div>
-
-          <!-- Image count -->
-          <div class="ctrl">
-            <div class="ctrl-label">Image count <span class="cv" id="sdCountVal">1</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="sdCount" id="sdc1" value="1" checked><label for="sdc1">1</label>
-              <input type="radio" name="sdCount" id="sdc2" value="2"><label for="sdc2">2</label>
-              <input type="radio" name="sdCount" id="sdc3" value="3"><label for="sdc3">3</label>
-              <input type="radio" name="sdCount" id="sdc4" value="4"><label for="sdc4">4</label>
-            </div>
-          </div>
-
-          <!-- Enhance prompt mode -->
-          <div class="ctrl">
-            <div class="ctrl-label">Prompt enhance</div>
-            <div class="toggle-row">
-              <input type="radio" name="sdEnhance" id="sde_standard" value="standard" checked><label for="sde_standard">Standard</label>
-              <input type="radio" name="sdEnhance" id="sde_fast" value="fast"><label for="sde_fast">Fast</label>
-            </div>
-          </div>
-
-          <!-- Seed -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span style="font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;">(empty = random)</span></div>
-            <input type="number" id="sdSeed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <!-- Safety checker -->
-          <div class="ctrl">
-            <label class="chk-row" style="cursor:pointer;">
-              <input type="checkbox" id="sdSafety" checked>
-              <div class="chk-box" id="sdSafetyChk"></div>
-              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
-            </label>
-          </div>
-
-          <!-- Ref limit info -->
-          <div style="font-size:10px;color:var(--dim2);margin-top:2px;" id="sdRefMaxInfo">max 10 ref. images</div>
-
-        </div>
-
-        <!-- Kling Image params -->
-        <div id="klingParams" style="display:none">
-
-          <!-- Rozlišení -->
-          <div class="ctrl">
-            <div class="ctrl-label">Resolution</div>
-            <div class="toggle-row">
-              <input type="radio" name="klingRes" id="kr_1k" value="1K" checked><label for="kr_1k">1K</label>
-              <input type="radio" name="klingRes" id="kr_2k" value="2K"><label for="kr_2k">2K</label>
-              <input type="radio" name="klingRes" id="kr_4k" value="4K"><label for="kr_4k">4K</label>
-            </div>
-          </div>
-
-          <!-- Image count -->
-          <div class="ctrl">
-            <div class="ctrl-label">Image count <span class="cv" id="klingCountVal">1</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="klingCount" id="kc1" value="1" checked><label for="kc1">1</label>
-              <input type="radio" name="klingCount" id="kc2" value="2"><label for="kc2">2</label>
-              <input type="radio" name="klingCount" id="kc3" value="3"><label for="kc3">3</label>
-              <input type="radio" name="klingCount" id="kc4" value="4"><label for="kc4">4</label>
-            </div>
-          </div>
-
-          <!-- Ref limit info -->
-          <div style="font-size:10px;color:var(--dim2);margin-top:2px;">max 10 ref. images · @Image1 @Image2…</div>
-
-        </div>
-
-        <!-- Z-Image params (sdílené pro Base i Turbo) -->
-        <div id="zimageParams" style="display:none">
-
-          <!-- Rozlišení -->
-          <div class="ctrl">
-            <div class="ctrl-label">Resolution</div>
-            <div class="toggle-row">
-              <input type="radio" name="zimageRes" id="zr_1mp" value="1" checked><label for="zr_1mp">1MP</label>
-              <input type="radio" name="zimageRes" id="zr_2mp" value="2"><label for="zr_2mp">2MP</label>
-              <input type="radio" name="zimageRes" id="zr_4mp" value="4"><label for="zr_4mp">4MP</label>
-            </div>
-            <div style="font-size:11px;color:var(--txt-muted);margin-top:3px" id="zimageQualityInfo"></div>
-          </div>
-
-          <!-- Image count -->
-          <div class="ctrl">
-            <div class="ctrl-label">Image count <span class="cv" id="zimageCountVal">1</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="zimageCount" id="zc1" value="1" checked><label for="zc1">1</label>
-              <input type="radio" name="zimageCount" id="zc2" value="2"><label for="zc2">2</label>
-              <input type="radio" name="zimageCount" id="zc3" value="3"><label for="zc3">3</label>
-              <input type="radio" name="zimageCount" id="zc4" value="4"><label for="zc4">4</label>
-            </div>
-          </div>
-
-          <!-- Steps (Base: 1-50, Turbo: 1-8) -->
-          <div class="ctrl" id="zimageStepsRow">
-            <div class="ctrl-label">Steps <span class="cv" id="zimageStepsVal">28</span></div>
-            <input type="range" id="zimageSteps" min="1" max="50" value="28" step="1"
-              oninput="document.getElementById('zimageStepsVal').textContent=this.value"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Guidance scale (jen Base) -->
-          <div class="ctrl" id="zimageGuidanceRow">
-            <div class="ctrl-label">Guidance scale <span class="cv" id="zimageGuidanceVal">4</span></div>
-            <input type="range" id="zimageGuidance" min="1" max="20" value="4" step="0.5"
-              oninput="document.getElementById('zimageGuidanceVal').textContent=parseFloat(this.value).toFixed(1)"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Strength (Turbo I2I + Edit — zobrazí se jen když je nahrán vstupní obrázek) -->
-          <div class="ctrl" id="zimageStrengthRow" style="display:none">
-            <div class="ctrl-label">Strength <span class="cv" id="zimageStrengthVal">0.85</span></div>
-            <input type="range" id="zimageStrength" min="0.1" max="1.0" value="0.85" step="0.05"
-              oninput="document.getElementById('zimageStrengthVal').textContent=parseFloat(this.value).toFixed(2)"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-            <div style="font-size:11px;color:var(--dim2);margin-top:3px;">0.1 = preserve structure · 1.0 = free generation</div>
-          </div>
-
-          <!-- Seed -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span style="font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;">(empty = random)</span></div>
-            <input type="number" id="zimageSeed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <!-- Negative prompt (jen Base) — collapsible -->
-          <div class="ctrl" id="zimageNegRow">
-            <div class="ctrl-label" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
-              onclick="var t=this.nextElementSibling;var o=t.style.display!=='none';t.style.display=o?'none':'';this.firstElementChild.textContent=o?'▸':'▾'"><span>▸</span> Negative prompt <span style="color:var(--dim2);font-weight:400;font-size:9px;opacity:.6">(prefilled)</span></div>
-            <textarea id="zimageNeg" style="display:none;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:7px 9px;outline:none;resize:vertical;min-height:44px;line-height:1.5;margin-top:4px;"></textarea>
-          </div>
-
-          <!-- Acceleration -->
-          <div class="ctrl">
-            <div class="ctrl-label">Acceleration</div>
-            <div class="toggle-row">
-              <input type="radio" name="zimageAccel" id="za_none" value="none"><label for="za_none">None</label>
-              <input type="radio" name="zimageAccel" id="za_reg" value="regular" checked><label for="za_reg">Regular</label>
-              <input type="radio" name="zimageAccel" id="za_high" value="high"><label for="za_high">High ✦</label>
-            </div>
-          </div>
-
-          <!-- Safety checker -->
-          <div class="ctrl">
-            <label class="chk-row" style="cursor:pointer;">
-              <input type="checkbox" id="zimageSafety" checked>
-              <div class="chk-box"></div>
-              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
-            </label>
-          </div>
-
-        </div>
-
-        <!-- ═══ WAN 2.7 params ═══ -->
-        <div id="wan27Params" style="display:none">
-
-          <!-- Resolution — 1K/2K/4K toggle (like NB Pro) -->
-          <div class="ctrl" id="wan27SizeRow">
-            <div class="ctrl-label">Resolution <span class="cv" id="wan27ResInfo">2K</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="wan27Tier" id="w27t1k" value="1K" onchange="_wan27UpdateRes()"><label for="w27t1k">1K</label>
-              <input type="radio" name="wan27Tier" id="w27t2k" value="2K" checked onchange="_wan27UpdateRes()"><label for="w27t2k">2K</label>
-              <input type="radio" name="wan27Tier" id="w27t4k" value="4K" onchange="_wan27UpdateRes()"><label for="w27t4k" id="w27t4kLabel">4K</label>
-            </div>
-          </div>
-
-          <!-- Thinking mode (T2I only) -->
-          <div class="ctrl" id="wan27ThinkingRow">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-              <input type="checkbox" id="wan27Thinking" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Thinking mode <span style="color:var(--dim2)">(better composition, slower)</span></span>
-            </label>
-          </div>
-
-          <!-- Seed -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span style="font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;">(empty = random)</span></div>
-            <input type="number" id="wan27Seed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-        </div>
-
-        <!-- ═══ WAN 2.7 I2V params (video) ═══ -->
-        <!-- ═══ Qwen Image 2 params ═══ -->
-        <div id="qwen2Params" style="display:none">
-
-          <!-- Rozlišení -->
-          <div class="ctrl" id="qwen2ResRow">
-            <div class="ctrl-label">Resolution</div>
-            <div class="toggle-row">
-              <input type="radio" name="qwen2Res" id="qw2r_1k" value="1K" checked><label for="qw2r_1k">1K</label>
-              <input type="radio" name="qwen2Res" id="qw2r_2k" value="2K"><label for="qw2r_2k">2K</label>
-            </div>
-          </div>
-
-          <!-- Steps -->
-          <div class="ctrl" id="qwen2StepsRow">
-            <div class="ctrl-label">Steps <span class="cv" id="qwen2StepsVal">25</span></div>
-            <input type="range" id="qwen2Steps" min="1" max="50" value="25" step="1"
-              oninput="document.getElementById('qwen2StepsVal').textContent=this.value"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Guidance scale -->
-          <div class="ctrl" id="qwen2GuidanceRow">
-            <div class="ctrl-label">Guidance scale <span class="cv" id="qwen2GuidanceVal">5.0</span></div>
-            <input type="range" id="qwen2Guidance" min="1" max="10" value="5" step="0.5"
-              oninput="document.getElementById('qwen2GuidanceVal').textContent=parseFloat(this.value).toFixed(1)"
-              style="-webkit-appearance:none;width:100%;height:3px;background:var(--border2);outline:none;cursor:pointer;margin-top:4px;">
-          </div>
-
-          <!-- Negative prompt — collapsible -->
-          <div class="ctrl" id="qwen2NegRow">
-            <div class="ctrl-label" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;"
-              onclick="var t=this.nextElementSibling;var o=t.style.display!=='none';t.style.display=o?'none':'';this.firstElementChild.textContent=o?'▸':'▾'"><span>▸</span> Negative prompt <span style="color:var(--dim2);font-weight:400;font-size:9px;opacity:.6">(prefilled)</span></div>
-            <textarea id="qwen2Neg" style="display:none;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:7px 9px;outline:none;resize:vertical;min-height:44px;line-height:1.5;margin-top:4px;"></textarea>
-          </div>
-
-          <!-- Image count (jen T2I) -->
-          <div class="ctrl" id="qwen2CountRow">
-            <div class="ctrl-label">Image count <span class="cv" id="qwen2CountVal">1</span></div>
-            <div class="toggle-row">
-              <input type="radio" name="qwen2Count" id="qw2c1" value="1" checked><label for="qw2c1">1</label>
-              <input type="radio" name="qwen2Count" id="qw2c2" value="2"><label for="qw2c2">2</label>
-              <input type="radio" name="qwen2Count" id="qw2c3" value="3"><label for="qw2c3">3</label>
-              <input type="radio" name="qwen2Count" id="qw2c4" value="4"><label for="qw2c4">4</label>
-            </div>
-          </div>
-
-          <!-- Acceleration (jen T2I) -->
-          <div class="ctrl" id="qwen2AccelRow">
-            <div class="ctrl-label">Acceleration</div>
-            <div class="toggle-row">
-              <input type="radio" name="qwen2Accel" id="qwa_none" value="none"><label for="qwa_none">None</label>
-              <input type="radio" name="qwen2Accel" id="qwa_reg" value="regular" checked><label for="qwa_reg">Regular</label>
-              <input type="radio" name="qwen2Accel" id="qwa_high" value="high"><label for="qwa_high">High</label>
-            </div>
-          </div>
-
-          <!-- Seed -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span class="cv" style="color:var(--dim2)">(empty = random)</span></div>
-            <input type="number" id="qwen2Seed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;box-sizing:border-box;outline:none;">
-          </div>
-
-          <!-- Prompt expansion (jen T2I) -->
-          <div class="ctrl" id="qwen2ExpandRow">
-            <label class="chk-row" style="cursor:pointer;">
-              <input type="checkbox" id="qwen2Expand">
-              <div class="chk-box"></div>
-              <span style="font-size:11px;color:var(--dim);">Prompt expansion <span style="color:var(--accent)">✦</span></span>
-            </label>
-          </div>
-
-          <!-- Safety checker -->
-          <div class="ctrl">
-            <label class="chk-row" style="cursor:pointer;">
-              <input type="checkbox" id="qwen2Safety" checked>
-              <div class="chk-box"></div>
-              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
-            </label>
-          </div>
-
-        </div>
-
-        <!-- Grok Imagine params -->
-        <div id="grokParams" style="display:none">
-
-          <!-- Resolution -->
-          <div class="ctrl">
-            <div class="ctrl-label">Resolution</div>
-            <div class="toggle-row">
-              <input type="radio" name="grokRes" id="gkr1k" value="1k" checked><label for="gkr1k">1K</label>
-              <input type="radio" name="grokRes" id="gkr2k" value="2k"><label for="gkr2k">2K</label>
-            </div>
-          </div>
-
-          <!-- Image count — segmented slider -->
-          <div class="ctrl">
-            <div class="ctrl-label">IMAGE COUNT</div>
-            <input type="hidden" id="grokCountVal" value="1">
-            <div id="grokCountBar" style="display:flex;width:100%;border-radius:4px;overflow:hidden;border:1px solid var(--border);cursor:pointer;" onclick="(function(e){var c=e.target.closest('[data-gc]');if(c){document.getElementById('grokCountVal').value=c.dataset.gc;document.querySelectorAll('#grokCountBar [data-gc]').forEach(function(s){s.style.background=s.dataset.gc===c.dataset.gc?'var(--accent)':((+s.dataset.gc)%2?'rgba(255,255,255,.07)':'rgba(255,255,255,.03)');s.style.color=s.dataset.gc===c.dataset.gc?'#fff':'rgba(255,255,255,.5)';})}})(event)">
-              <div data-gc="1"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:var(--accent);color:#fff;transition:background .15s;">1</div>
-              <div data-gc="2"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">2</div>
-              <div data-gc="3"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">3</div>
-              <div data-gc="4"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">4</div>
-              <div data-gc="5"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">5</div>
-              <div data-gc="6"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">6</div>
-              <div data-gc="7"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">7</div>
-              <div data-gc="8"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">8</div>
-              <div data-gc="9"  style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);transition:background .15s;">9</div>
-              <div data-gc="10" style="flex:1;text-align:center;padding:6px 0;font-size:11px;font-weight:600;background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);transition:background .15s;">10</div>
-            </div>
-          </div>
-
-          <!-- I2I note -->
-          <div class="ctrl" style="border-top:1px solid var(--border);padding-top:8px;margin-top:2px;">
-            <div style="font-size:10px;color:var(--dim2);line-height:1.5;">
-              Add ref images for editing (up to 5).<br>Single ref = aspect from input · Multi-ref = aspect from setting · <code>auto</code> ratio lets model decide.
-            </div>
-          </div>
-
-        </div>
+        </div><!-- /upParams -->
 
         <!-- Luma Photon params -->
         <div id="lumaParams" style="display:none">
@@ -2927,17 +2655,6 @@ select.inpaint-num option { background:#fff; color:#111; }
         </div>
 
       </div><!-- /psec params -->
-
-      <!-- WAN 2.7 Image count — shown for T2I, placed above Save To -->
-      <div id="wan27CountRow" style="display:none;padding:0 14px 6px;">
-        <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px;">Image count</div>
-        <div class="toggle-row">
-          <input type="radio" name="wan27Count" id="w27c1" value="1" checked><label for="w27c1">1</label>
-          <input type="radio" name="wan27Count" id="w27c2" value="2"><label for="w27c2">2</label>
-          <input type="radio" name="wan27Count" id="w27c3" value="3"><label for="w27c3">3</label>
-          <input type="radio" name="wan27Count" id="w27c4" value="4"><label for="w27c4">4</label>
-        </div>
-      </div>
 
       <!-- Uložit do + Generate -->
       <div style="padding:0 14px 8px; display:flex; align-items:center; gap:8px;">
@@ -4543,6 +4260,7 @@ select.inpaint-num option { background:#fff; color:#111; }
           <button class="ptool"        id="aT_rect"    title="Rectangle (R)"  onclick="setPTool('a','rect')">▭</button>
           <button class="ptool"        id="aT_ellipse" title="Ellipse (O)"    onclick="setPTool('a','ellipse')">◯</button>
           <button class="ptool"        id="aT_text"    title="Text (T)"       onclick="setPTool('a','text')">A</button>
+          <button class="ptool"        id="aT_crop"    title="Crop (C)"       onclick="setPTool('a','crop')"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 1v10h10M1 3h10v10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
           <div class="sep"></div>
           <span class="ptool-lbl">Color</span>
           <div class="pcolors" id="aColors">
@@ -4591,6 +4309,17 @@ select.inpaint-num option { background:#fff; color:#111; }
           <button class="ibtn" onclick="pSaveToGallery('a')" style="border-color:#3a9c5c;color:#3a9c5c;padding:4px 10px;font-size:11px;">◫ Gallery + close</button>
           <div class="sep"></div>
           <button class="ibtn" onclick="openInpaintPanel()" style="border-color:#ff9966;color:#ff9966;padding:4px 12px;font-size:11px;font-weight:600;">⊛ Inpaint →</button>
+          <!-- Crop actions — shown only when crop tool is active -->
+          <div id="aCropActions">
+            <div class="sep"></div>
+            <label class="pcrop-lock" title="Lock aspect ratio">
+              <input type="checkbox" id="aCropLock" onchange="pCropSetLock(this.checked)">
+              <div class="pfill-box"></div>
+              Lock ratio
+            </label>
+            <button class="pcrop-btn apply" onclick="pCropApply()" title="Apply crop (Enter)">✓ Apply</button>
+            <button class="pcrop-btn" onclick="pCropCancel()" title="Cancel (Esc)">✗ Cancel</button>
+          </div>
         </div>
       </div>
 
@@ -4764,6 +4493,7 @@ select.inpaint-num option { background:#fff; color:#111; }
 
   <div id="annotateCanvasWrap">
     <canvas id="annotateCanvas" class="cur-pen"></canvas>
+    <div id="aCropOverlay"></div>
   </div>
   <div class="annotate-footer">
     <span class="annotate-title" id="annotateTitle">Paint</span>

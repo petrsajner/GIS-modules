@@ -222,3 +222,138 @@
 ## Setup UI redesign — střídavé pozadí + Get Key linky (11. 4. 2026)
 
 **Rozhodnutí:** Střídavé pozadí, accent labels, Get key → linky.
+
+---
+
+## Unified Image Panel — jedna dynamická šablona (14. 4. 2026)
+
+**Problém:** 9 separátních HTML panelů (nbParams, imagenParams, fluxParams, seedreamParams, klingParams, zimageParams, wan27Params, qwen2Params, grokParams) — každý nový model = nový HTML blok + nový JS wiring. Duplikované prvky (count, resolution, seed) v každém panelu. model-select.js: 300+ řádků show/hide logiky.
+
+**Rozhodnutí: Jeden generický panel (`upParams`) s 14 prvky:**
+- Každý model v models.js deklaruje UI flags (resolutions, maxCount, steps, guidance, seed, safetyTolerance, safetyChecker, grounding, etc.)
+- `selectModel()` zobrazuje/skrývá prvky podle flagů
+- `generate()` čte z jedné sady elementů, mapuje na per-type snap formáty
+- Resolution: 3 tlačítka, labely z `model.resolutions[]`, pixel info dynamicky per type
+- Count: 4-button (většina) nebo 10-button (Grok) varianta
+- Safety: slider (FLUX) nebo checkbox (SeeDream/Z-Image/Qwen2) varianta
+- Thinking: radio Min/High (NB2) nebo checkbox (WAN 2.7) varianta
+
+**Scope:** Gemini, Imagen, FLUX, SeeDream, Kling, Z-Image, WAN 2.7, Qwen 2, Grok
+**Stranou:** Luma Photon, Mystic, Freepik Edit (unikátní parametry, zůstávají jako legacy panely)
+
+**Doplňková rozhodnutí:**
+- Resolution 512 odstraněna (NB2, FLUX) — generuje 1K i s 512 nastavením
+- Prompt upsampling/expansion/enhance zakázáno v UI, posíláno jako false
+- Neg prompt: jeden sdílený prvek, prefilled s `_DEFAULT_NEG_PROMPT`
+- Checkbox `.chk-box` border: 1px→1.5px s `var(--dim2)` pro viditelnost
+
+**Výsledek:** template.html −330 řádků, model-select.js −85 řádků. Přidání nového image modelu = jen přidat objekt do MODELS s UI flags.
+
+---
+
+## Imagen 4 REST API — sampleImageSize (15. 4. 2026)
+
+**Problém:** 5. pokus o aktivaci 2K resolution u Imagen 4 Standard/Ultra přes REST API. Předchozí 4 pokusy byly neúspěšné — všechny renderovaly jen 1K.
+
+**Root cause:** REST API Gemini endpointu `:predict` používá **Vertex AI naming convention** pro parametry: `sampleImageSize`, ne `imageSize` (což je SDK name). Google SDK to interně mapuje, ale při REST volání musí být Vertex název.
+
+**Dokumentace to nezmiňovala jasně:**
+- Gemini API REST sekce ukazuje jen `sampleCount` v REST curl příkladu
+- SDK docs zmiňují `imageSize` ale s poznámkou "Note: Naming conventions of parameters vary by programming language"
+- Pravdu ukazovala až Vertex AI doc `set-output-resolution`: `sampleImageSize` v JSON body
+
+**Fix:**
+```js
+if (!model.id.includes('fast') && imageSize !== '1K')
+  params.sampleImageSize = imageSize;  // "2K"
+```
+
+**Ověřeno:** 2K u Imagen 4 Ultra na 16:9 = 2816×1536. Aktualizována paměť uživatele.
+
+**Lessons learned:**
+- Při REST volání Google API: hledat Vertex AI doc (ne jen Gemini API doc)
+- `imageSize` (SDK) = `sampleImageSize` (REST)
+- `numberOfImages` (SDK) = `sampleCount` (REST)
+- Uvolit parametr konzervativně — default 1K se bez parametru generuje spolehlivě
+
+---
+
+## Unified Image Panel (14. 4. 2026)
+
+**Problém:** 9 separátních HTML panelů (nbParams, imagenParams, fluxParams, seedreamParams, klingParams, zimageParams, wan27Params, qwen2Params, grokParams) — každý nový model = nový HTML blok + nový JS wiring. Duplikované prvky.
+
+**Rozhodnutí: Jeden generický panel `upParams` s 14 prvky:**
+- Každý model v models.js deklaruje UI flags (resolutions, maxCount, steps, guidance, seed, safetyTolerance, safetyChecker, grounding, etc.)
+- `selectModel()` zobrazuje/skrývá prvky podle flagů
+- `generate()` čte z jedné sady elementů, mapuje na per-type snap formáty
+- Handlers nedotčené — stejné snap formáty
+
+**Scope:** Gemini, Imagen, FLUX, SeeDream, Kling, Z-Image, WAN 2.7, Qwen 2, Grok
+**Stranou:** Luma Photon, Mystic, Freepik Edit (unikátní parametry, zůstávají legacy)
+
+**Výsledek:** template.html −330 řádků, model-select.js −85 řádků. Přidání nového image modelu = jen přidat objekt do MODELS s UI flags.
+
+---
+
+## HTML Build Validation (14. 4. 2026)
+
+**Problém:** Při refactoru byl omylem ponechán orphan `</div>` tag (po odstranění `wan27CountRow`). Layout se rozbil — Save To, Generate, Queue vypadly z levého panelu. Bez chyby. Stejný typ chyby se už v historii projektu opakoval.
+
+**Rozhodnutí:** Automatická HTML div balance validace v `build.js`:
+```js
+const divOpens = (htmlOnly.match(/<div[\s>]/g) || []).length;
+const divCloses = (htmlOnly.match(/<\/div>/g) || []).length;
+if (divOpens !== divCloses) console.error(`⚠ WARNING: HTML div balance = ${divOpens - divCloses}`);
+else console.log(`✓ HTML div balance: OK (${divOpens} pairs)`);
+```
+
+Při každém buildu zobrazí balanci. Pokud nesedí, build projde ale zobrazí warning.
+
+---
+
+## Reference prefix `[Reference images: ...]` — odstraněn (14. 4. 2026)
+
+**Problém:** Prefix `[Reference images: image 1, image 2]` se přidával do textarea při přepnutí modelu na Gemini/xAI. Funkčně neškodil (neduplikoval se), ale byl redundantní — Gemini vidí obrázky v `parts` array. Petrovi to vadilo vizuálně.
+
+**Rozhodnutí:** Úplně odstraněno. `preprocessPromptForModel` pro Gemini/xAI už prefix nepřidává. Legacy prefix se stripuje vždy (i bez refs). `rewritePromptForModel` cleanup při každém přepnutí modelu.
+
+**Co zůstává:** Styles a camera prefix pro Gemini — ty jsou na začátku promptu ve formátu "Visual style instructions: ... . Camera: ... .\n\n[prompt]" a jsou zachovány.
+
+---
+
+## Edit Tool Agent — chat memory fix (14. 4. 2026)
+
+**Problém:** V Edit Tool si agent nepamatoval předchozí konverzaci. Modal se otevřel, chat byl viditelný, ale agent reagoval jako by neviděl nic než analyzované refs.
+
+**Root cause:** `callGeminiTextMultiTurn()` při OpenRouter path (primární agent) posílala jen poslední user message, ne celou historii:
+```js
+const lastUserMsg = [...history].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
+const result = await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
+```
+
+**Fix:** Nová funkce `_callOpenRouterMultiTurn()` která:
+1. Konvertuje Gemini history `[{role,parts:[{text}]}]` na OpenAI `[{role,content}]`
+2. Mapuje role 'model' → 'assistant'
+3. Posílá celé messages array na OpenRouter
+
+**Agent si teď pamatuje celou konverzaci** — persistent dokud uživatel nedá reset nebo nezavře modal.
+
+---
+
+## Crop Tool (15. 4. 2026)
+
+**Problém:** Petr potřebuje oříznout obrázek. Dělá to mimo GIS (export → crop → import zpět). V paint tabu je to k ničemu (start s prázdným canvasem), ale v annotate modálu už obrázek je.
+
+**Rozhodnutí:** Crop tool v annotate modálu.
+- 8 handlů (4 rohy + 4 strany)
+- Lock ratio checkbox
+- Apply/Cancel tlačítka + Enter/Esc shortcuts
+- DOM overlay (ne canvas drawing) — čistší, snadnější UI
+- Architektura podporuje oba prefixy ('p' + 'a'), v UI je jen 'a' (annotate)
+
+**Implementace:**
+- `_pCropState` holding prefix + geometry + drag state
+- Apply: `ctx.getImageData(x,y,w,h)` → resize canvas → `putImageData`
+- Mask canvas se resize spolu (pokud existuje)
+- History se resetuje (no undo across crop boundary)
+
