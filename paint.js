@@ -6,6 +6,7 @@ let paintBgColor = '#000000'; // default black
 
 // ── Inpaint state ──
 let _annotateMaskCanvas = null;  // offscreen canvas — white strokes = mask area
+let _annotateAnnotCanvas = null; // offscreen canvas — color strokes, transparent bg (clean annotation layer for Method B)
 let _annotateBaseB64    = null;  // clean original image b64 (no strokes) for inpaint crop + composite
 let _annotateBaseName   = null;  // image/model name for gallery label
 let _paintDirty            = {};    // { 'a': bool } — true = has unsaved strokes
@@ -39,9 +40,12 @@ function createPaintEngine(prefix, canvas) {
     maskSnapshot: null,   // for shape-preview restore on mask ctx
     history: [],
     maskHistory: [],      // mirrors main history for mask canvas
+    annotHistory: [],     // mirrors main history for annotation canvas (color strokes, transparent bg)
     textInput: null,
     bgImageData: null,
-    maskCtx: null,        // set externally after creation
+    maskCtx: null,        // set externally after creation — monochrome white strokes for inpaint mask
+    annotCtx: null,       // set externally after creation — color strokes on transparent bg (clean annotation layer for Method B export)
+    annotSnapshot: null,  // mirrors snapshot for shape-preview restore on annotation ctx
   };
 
   function getPos(e) {
@@ -58,6 +62,10 @@ function createPaintEngine(prefix, canvas) {
     if (state.maskCtx) {
       state.maskHistory.push(state.maskCtx.getImageData(0, 0, canvas.width, canvas.height));
       if (state.maskHistory.length > 40) state.maskHistory.shift();
+    }
+    if (state.annotCtx) {
+      state.annotHistory.push(state.annotCtx.getImageData(0, 0, canvas.width, canvas.height));
+      if (state.annotHistory.length > 40) state.annotHistory.shift();
     }
   }
 
@@ -80,6 +88,18 @@ function createPaintEngine(prefix, canvas) {
     state.maskCtx.lineWidth = state.lineWidth;
     state.maskCtx.lineCap = 'round';
     state.maskCtx.lineJoin = 'round';
+  }
+
+  // Prepare annotation ctx for a drawing operation (user color, for clean layer export)
+  function annotApply(isErase) {
+    if (!state.annotCtx) return;
+    state.annotCtx.globalAlpha = state.opacity;
+    state.annotCtx.globalCompositeOperation = isErase ? 'destination-out' : 'source-over';
+    state.annotCtx.strokeStyle = state.color;
+    state.annotCtx.fillStyle = state.color;
+    state.annotCtx.lineWidth = state.lineWidth;
+    state.annotCtx.lineCap = 'round';
+    state.annotCtx.lineJoin = 'round';
   }
 
   function drawShape(x1, y1, x2, y2) {
@@ -117,6 +137,26 @@ function createPaintEngine(prefix, canvas) {
           state.maskCtx.ellipse(cx2, cy2, rx, ry, 0, 0, Math.PI * 2);
           state.maskCtx.fill();
           state.maskCtx.stroke();
+        }
+      }
+    }
+    // Mirror to annotation layer — user color, transparent bg
+    if (state.annotCtx) {
+      annotApply(false);
+      state.annotCtx.beginPath();
+      if (state.tool === 'line') {
+        state.annotCtx.moveTo(x1, y1); state.annotCtx.lineTo(x2, y2); state.annotCtx.stroke();
+      } else if (state.tool === 'rect') {
+        const w = x2 - x1, h = y2 - y1;
+        if (state.fillShapes) state.annotCtx.fillRect(x1, y1, w, h);
+        state.annotCtx.strokeRect(x1, y1, w, h);
+      } else if (state.tool === 'ellipse') {
+        const rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+        const cx2 = (x1 + x2) / 2, cy2 = (y1 + y2) / 2;
+        if (rx >= 1 && ry >= 1) {
+          state.annotCtx.ellipse(cx2, cy2, rx, ry, 0, 0, Math.PI * 2);
+          if (state.fillShapes) state.annotCtx.fill();
+          state.annotCtx.stroke();
         }
       }
     }
@@ -166,6 +206,17 @@ function createPaintEngine(prefix, canvas) {
         if (visited[i]) { d[i*4] = fR2; d[i*4+1] = fG2; d[i*4+2] = fB2; d[i*4+3] = 255; }
       }
       state.ctx.putImageData(imgData, 0, 0);
+
+      // Mirror fill to annotation layer (color on transparent bg)
+      if (state.annotCtx) {
+        const annotData = state.annotCtx.getImageData(0, 0, w, h);
+        const ad = annotData.data;
+        for (let i = 0; i < w * h; i++) {
+          if (visited[i]) { ad[i*4] = fR2; ad[i*4+1] = fG2; ad[i*4+2] = fB2; ad[i*4+3] = 255; }
+        }
+        state.annotCtx.putImageData(annotData, 0, 0);
+      }
+
       saveHistory();
       _paintDirty['a'] = true;
       return;
@@ -244,6 +295,11 @@ function createPaintEngine(prefix, canvas) {
         state.maskCtx.font = `bold ${fontSize}px 'IBM Plex Mono', monospace`;
         state.maskCtx.fillText(txt, x, y);
       }
+      if (state.annotCtx) {
+        annotApply(false);
+        state.annotCtx.font = `bold ${fontSize}px 'IBM Plex Mono', monospace`;
+        state.annotCtx.fillText(txt, x, y);
+      }
       saveHistory();
       if (state.prefix === 'a') _paintDirty['a'] = true;
     }
@@ -264,9 +320,11 @@ function createPaintEngine(prefix, canvas) {
     if (state.tool !== 'pen' && state.tool !== 'eraser') {
       state.snapshot = state.ctx.getImageData(0, 0, canvas.width, canvas.height);
       if (state.maskCtx) state.maskSnapshot = state.maskCtx.getImageData(0, 0, canvas.width, canvas.height);
+      if (state.annotCtx) state.annotSnapshot = state.annotCtx.getImageData(0, 0, canvas.width, canvas.height);
     } else {
       state.snapshot = null;
       state.maskSnapshot = null;
+      state.annotSnapshot = null;
     }
     if (state.tool === 'pen' || state.tool === 'eraser') {
       applyStyle();
@@ -280,6 +338,11 @@ function createPaintEngine(prefix, canvas) {
         state.maskCtx.beginPath();
         state.maskCtx.moveTo(p.x, p.y);
       }
+      if (state.annotCtx) {
+        annotApply(isErase);
+        state.annotCtx.beginPath();
+        state.annotCtx.moveTo(p.x, p.y);
+      }
     }
   }
 
@@ -292,9 +355,11 @@ function createPaintEngine(prefix, canvas) {
       state.ctx.lineTo(p.x, p.y);
       state.ctx.stroke();
       if (state.maskCtx) { state.maskCtx.lineTo(p.x, p.y); state.maskCtx.stroke(); }
+      if (state.annotCtx) { state.annotCtx.lineTo(p.x, p.y); state.annotCtx.stroke(); }
     } else {
       state.ctx.putImageData(state.snapshot, 0, 0);
       if (state.maskCtx && state.maskSnapshot) state.maskCtx.putImageData(state.maskSnapshot, 0, 0);
+      if (state.annotCtx && state.annotSnapshot) state.annotCtx.putImageData(state.annotSnapshot, 0, 0);
       drawShape(state.startX, state.startY, p.x, p.y);
     }
   }
@@ -308,6 +373,10 @@ function createPaintEngine(prefix, canvas) {
     if (state.maskCtx) {
       state.maskCtx.globalCompositeOperation = 'source-over';
       state.maskCtx.globalAlpha = 1;
+    }
+    if (state.annotCtx) {
+      state.annotCtx.globalCompositeOperation = 'source-over';
+      state.annotCtx.globalAlpha = 1;
     }
     saveHistory();
     if (state.prefix === 'a') _paintDirty['a'] = true;
@@ -395,6 +464,14 @@ function pUndo(prefix) {
       eng.maskCtx.clearRect(0, 0, eng.canvas.width, eng.canvas.height);
     }
   }
+  if (eng.annotCtx && eng.annotHistory.length > 0) {
+    eng.annotHistory.pop();
+    if (eng.annotHistory.length > 0) {
+      eng.annotCtx.putImageData(eng.annotHistory[eng.annotHistory.length - 1], 0, 0);
+    } else {
+      eng.annotCtx.clearRect(0, 0, eng.canvas.width, eng.canvas.height);
+    }
+  }
 }
 
 function pClear(prefix) {
@@ -406,6 +483,10 @@ function pClear(prefix) {
   if (eng.maskCtx) {
     eng.maskCtx.clearRect(0, 0, eng.canvas.width, eng.canvas.height);
     eng.maskHistory = [];
+  }
+  if (eng.annotCtx) {
+    eng.annotCtx.clearRect(0, 0, eng.canvas.width, eng.canvas.height);
+    eng.annotHistory = [];
   }
   if (prefix === 'a') _paintDirty['a'] = false;
 }
@@ -646,10 +727,50 @@ function pCropApply() {
     eng.maskCtx.putImageData(maskCropped, 0, 0);
   }
 
-  // Reset history (no partial undos across crop boundary)
-  eng.history = [eng.ctx.getImageData(0, 0, w, h)];
+  // Resize annotation canvas if present (color-strokes layer for Method B)
+  if (eng.annotCtx) {
+    const annotCanvas = eng.annotCtx.canvas;
+    const annotCropped = eng.annotCtx.getImageData(x, y, w, h);
+    annotCanvas.width = w;
+    annotCanvas.height = h;
+    eng.annotCtx.putImageData(annotCropped, 0, 0);
+  }
+
+  // Reset history (no partial undos across crop boundary).
+  // IMPORTANT: history[0] must remain the CLEAN original image (without annotations),
+  // because Method B Layer 1 export reads history[0] directly. If we stored the
+  // cropped CURRENT ctx (= image + strokes) here, "annotate → crop → save B" would
+  // save the annotated image as Layer 1. Instead, crop the pristine history[0].
+  let croppedBase;
+  let croppedBaseCanvas = null;
+  if (eng.history && eng.history.length > 0) {
+    const orig = eng.history[0];
+    const src = document.createElement('canvas');
+    src.width = orig.width; src.height = orig.height;
+    src.getContext('2d').putImageData(orig, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = w; out.height = h;
+    const octx = out.getContext('2d');
+    octx.drawImage(src, x, y, w, h, 0, 0, w, h);
+    croppedBase = octx.getImageData(0, 0, w, h);
+    croppedBaseCanvas = out;
+  } else {
+    croppedBase = eng.ctx.getImageData(0, 0, w, h);
+  }
+  eng.history = [croppedBase];
   if (eng.maskCtx) {
     eng.maskHistory = [eng.maskCtx.getImageData(0, 0, w, h)];
+  }
+  if (eng.annotCtx) {
+    eng.annotHistory = [eng.annotCtx.getImageData(0, 0, w, h)];
+  }
+
+  // Annotate mode: update _annotateBaseB64 so inpaint cropping reads from the
+  // NEW cropped base (same coordinates as the visible canvas), not the original
+  // full-size image. Without this, inpaint source preview shows a slice from
+  // the top-left of the pre-crop image instead of the current canvas area.
+  if (prefix === 'a' && croppedBaseCanvas) {
+    _annotateBaseB64 = croppedBaseCanvas.toDataURL('image/png').split(',')[1];
   }
 
   // Paint tab: update dropdowns for new dimensions
@@ -745,33 +866,21 @@ async function pExportAnnotate() {
     closeAnnotateModal();
   } else {
     if (refs.length >= getRefMax() - 1) { toast(`Not enough room for 2 references (max ${getRefMax()})`, 'err'); return; }
+    // Layer 1: clean original image (from history[0], untouched by strokes)
     const origImageData = eng.history[0];
     const origCanvas = document.createElement('canvas');
     origCanvas.width = eng.canvas.width; origCanvas.height = eng.canvas.height;
     origCanvas.getContext('2d').putImageData(origImageData, 0, 0);
     const origB64 = origCanvas.toDataURL('image/png').split(',')[1];
 
+    // Layer 2: color strokes on WHITE background (from annotation canvas, no diff)
     const w = eng.canvas.width, h = eng.canvas.height;
-    const currentData = eng.ctx.getImageData(0, 0, w, h);
-    const cur = currentData.data;
-    const orig = origImageData.data;
     const strokeCanvas = document.createElement('canvas');
     strokeCanvas.width = w; strokeCanvas.height = h;
     const sc = strokeCanvas.getContext('2d');
-    const outData = sc.createImageData(w, h);
-    const out = outData.data;
-    for (let i = 0; i < cur.length; i += 4) {
-      const dr = Math.abs(cur[i]   - orig[i]);
-      const dg = Math.abs(cur[i+1] - orig[i+1]);
-      const db = Math.abs(cur[i+2] - orig[i+2]);
-      const da = Math.abs(cur[i+3] - orig[i+3]);
-      if (dr + dg + db + da > 8) {
-        out[i] = cur[i]; out[i+1] = cur[i+1]; out[i+2] = cur[i+2]; out[i+3] = cur[i+3];
-      } else {
-        out[i] = 255; out[i+1] = 255; out[i+2] = 255; out[i+3] = 255;
-      }
-    }
-    sc.putImageData(outData, 0, 0);
+    sc.fillStyle = '#ffffff';
+    sc.fillRect(0, 0, w, h);
+    if (_annotateAnnotCanvas) sc.drawImage(_annotateAnnotCanvas, 0, 0);
     const annotB64 = strokeCanvas.toDataURL('image/png').split(',')[1];
 
     const assetAnnot = await createAsset(annotB64, 'image/png', 'generated');
@@ -794,28 +903,23 @@ async function pSaveToAssets() {
   if (eng.textInput) eng.textInput.blur();
 
   if (isAnnotate && annotateExportMode === 'B') {
+    // Layer 1: clean original image (from history[0], untouched by strokes)
     const origImageData = eng.history[0];
     const origCanvas = document.createElement('canvas');
     origCanvas.width = eng.canvas.width; origCanvas.height = eng.canvas.height;
     origCanvas.getContext('2d').putImageData(origImageData, 0, 0);
     const origB64 = origCanvas.toDataURL('image/png').split(',')[1];
+
+    // Layer 2: color strokes on WHITE background (from annotation canvas, no diff)
     const w = eng.canvas.width, h = eng.canvas.height;
-    const currentData = eng.ctx.getImageData(0, 0, w, h);
-    const cur = currentData.data;
-    const orig = origImageData.data;
     const strokeCanvas = document.createElement('canvas');
     strokeCanvas.width = w; strokeCanvas.height = h;
     const sc = strokeCanvas.getContext('2d');
-    const outData = sc.createImageData(w, h);
-    const out = outData.data;
-    for (let i = 0; i < cur.length; i += 4) {
-      const dr = Math.abs(cur[i]-orig[i]), dg = Math.abs(cur[i+1]-orig[i+1]);
-      const db = Math.abs(cur[i+2]-orig[i+2]), da = Math.abs(cur[i+3]-orig[i+3]);
-      if (dr+dg+db+da > 8) { out[i]=cur[i]; out[i+1]=cur[i+1]; out[i+2]=cur[i+2]; out[i+3]=cur[i+3]; }
-      else { out[i]=255; out[i+1]=255; out[i+2]=255; out[i+3]=255; }
-    }
-    sc.putImageData(outData, 0, 0);
+    sc.fillStyle = '#ffffff';
+    sc.fillRect(0, 0, w, h);
+    if (_annotateAnnotCanvas) sc.drawImage(_annotateAnnotCanvas, 0, 0);
     const annotB64 = strokeCanvas.toDataURL('image/png').split(',')[1];
+
     const assetAnnot = await createAsset(annotB64, 'image/png', 'generated');
     const assetOrig  = await createAsset(origB64,  'image/png', 'generated');
     closeAnnotateModal();
@@ -907,15 +1011,22 @@ function openAnnotateModal(b64data, modelName) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
 
-    // Init offscreen mask canvas (same dimensions)
+    // Init offscreen mask canvas (same dimensions) — monochrome white strokes for inpaint
     _annotateMaskCanvas = document.createElement('canvas');
     _annotateMaskCanvas.width  = img.naturalWidth;
     _annotateMaskCanvas.height = img.naturalHeight;
 
+    // Init offscreen annotation canvas (same dimensions) — color strokes on transparent bg for Method B
+    _annotateAnnotCanvas = document.createElement('canvas');
+    _annotateAnnotCanvas.width  = img.naturalWidth;
+    _annotateAnnotCanvas.height = img.naturalHeight;
+
     const eng = createPaintEngine('a', canvas);
-    eng.maskCtx     = _annotateMaskCanvas.getContext('2d');
-    eng.maskHistory = [];
-    eng.saveHistory();  // saves image state to history AND empty mask to maskHistory
+    eng.maskCtx      = _annotateMaskCanvas.getContext('2d');
+    eng.annotCtx     = _annotateAnnotCanvas.getContext('2d');
+    eng.maskHistory  = [];
+    eng.annotHistory = [];
+    eng.saveHistory();  // saves image state to history AND empty mask + empty annot to their histories
     paintEngines['a'] = eng;
 
     setPTool('a', 'pen');
@@ -1565,13 +1676,25 @@ async function applyInpaintDownscale() {
   tmpMask.width = newW; tmpMask.height = newH;
   tmpMask.getContext('2d').drawImage(_annotateMaskCanvas, 0, 0, newW, newH);
 
+  // Scale down annotation canvas (if present)
+  let tmpAnnot = null;
+  if (_annotateAnnotCanvas) {
+    tmpAnnot = document.createElement('canvas');
+    tmpAnnot.width = newW; tmpAnnot.height = newH;
+    tmpAnnot.getContext('2d').drawImage(_annotateAnnotCanvas, 0, 0, newW, newH);
+  }
+
   // Apply
   _annotateBaseB64 = scaledBaseB64;
   eng.canvas.width = newW; eng.canvas.height = newH;
   eng.ctx.drawImage(tmp, 0, 0);
   _annotateMaskCanvas.width = newW; _annotateMaskCanvas.height = newH;
   eng.maskCtx.drawImage(tmpMask, 0, 0);
-  eng.history = []; eng.maskHistory = [];
+  if (_annotateAnnotCanvas && tmpAnnot) {
+    _annotateAnnotCanvas.width = newW; _annotateAnnotCanvas.height = newH;
+    eng.annotCtx.drawImage(tmpAnnot, 0, 0);
+  }
+  eng.history = []; eng.maskHistory = []; eng.annotHistory = [];
   eng.saveHistory();
 
   toast(`Downscaled to ${newW}×${newH} ✓`, 'ok');
@@ -1935,12 +2058,12 @@ async function _compositeAndSaveQueueJob(job, result) {
       resultCrop.width = cropW; resultCrop.height = cropH;
       const rc = resultCrop.getContext('2d');
       await new Promise(res => {
-        const ri = new Image(); ri.onload = () => { rc.drawImage(ri, 0, 0); res(); };
+        const ri = new Image(); ri.onload = () => { rc.drawImage(ri, 0, 0, cropW, cropH); res(); };
         ri.src = `data:${mimeType};base64,${resultB64}`;
       });
       rc.globalCompositeOperation = 'destination-in';
       await new Promise(res => {
-        const mi = new Image(); mi.onload = () => { rc.drawImage(mi, 0, 0); res(); };
+        const mi = new Image(); mi.onload = () => { rc.drawImage(mi, 0, 0, cropW, cropH); res(); };
         mi.src = `data:image/png;base64,${job.maskB64}`;
       });
       rc.globalCompositeOperation = 'source-over';

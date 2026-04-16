@@ -190,14 +190,8 @@ function renderRefThumbs() {
 
   scroll.innerHTML = tiles + addTile;
 
-  // Pro Z-Image Turbo: zobraz strength slider pokud je nahrán vstupní obrázek
-  const m = MODELS[currentModel];
-  const strengthRow = document.getElementById('upStrengthRow');
-  if (strengthRow) {
-    strengthRow.style.display = (m?.strength && refs.length > 0) ? '' : 'none';
-  }
-
   // Re-apply model-specific @mention names in prompt (refs may have shifted)
+  const m = MODELS[currentModel];
   if (typeof rewritePromptForModel === 'function' && m) {
     rewritePromptForModel(m.type, m.type);  // same model, but refs changed
   }

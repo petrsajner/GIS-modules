@@ -1,5 +1,68 @@
 # GIS — API MODELS
-*Aktualizace po v199en · 14. 4. 2026*
+*Aktualizace po v201en · 16. 4. 2026*
+
+---
+
+## AKTUALIZACE v201en (16. 4. 2026)
+
+---
+
+### Z-Image family — kompletní mapa endpointů
+
+Po researchu v v201en potvrzeny následující endpointy v Z-Image rodině na fal.ai (Tongyi-MAI / Alibaba, 6B params):
+
+| Endpoint | Type | GIS model key | Status |
+|----------|------|---------------|--------|
+| `fal-ai/z-image/base` | T2I standard (28 steps, CFG, neg prompt) | `zimage_base` | ✅ integrated |
+| `fal-ai/z-image/turbo` | T2I ultra-fast (8 steps, acceleration) | `zimage_turbo` | ✅ integrated (v201en split) |
+| `fal-ai/z-image/turbo/image-to-image` | I2I (strength-based) | `zimage_turbo_i2i` | ✅ integrated (v201en nový) |
+| `fal-ai/z-image/base/lora` | T2I base + LoRA array (max 3) | — | 🟡 TODO |
+| `fal-ai/z-image/turbo/lora` | T2I turbo + LoRA array (max 3) | — | 🟡 TODO |
+| `fal-ai/z-image-trainer` | LoRA training (ZIP dataset, polling) | — | 🟡 TODO |
+
+**Žádný instruction-based edit endpoint v Z-Image rodině neexistuje** (není ekvivalent Qwen Edit / WAN Edit / FLUX Kontext). Z-Image I2I je strength-based (podobně jako SDXL I2I) — uživatel nastavuje jak moc se výstup liší od vstupu, ne "změň tohle".
+
+**Pricing:** $0.005/MP pro base i turbo.
+
+**Cena LoRA trainer:** $0.226 per 100 training steps (default 1000 = $2.26).
+
+**Z-Image Turbo I2I — detail integrace (v201en):**
+
+```js
+// callZImage v fal.js — endpoint rozhodnut přes model.id
+// zimage_turbo_i2i: model.id = 'fal-ai/z-image/turbo/image-to-image'
+// Legacy fallback: if (i2iModel && refs.length > 0 && isTurbo) → force I2I endpoint
+// Kombinace bezpečná — model.id přímo odpovídá cíli
+
+payload = {
+  prompt,
+  image_url: 'data:image/jpeg;base64,...',  // single ref, REF_MAX_PX = 2048
+  image_size: calcZImageDims(aspect, mpTarget),  // pixel dims
+  num_images: 1,
+  num_inference_steps: 8,  // default turbo
+  enable_safety_checker: true,
+  output_format: 'png',
+  acceleration: 'regular',  // 'none' | 'regular' | 'high'
+  seed: ...,
+  strength: 0.85,  // 0.1-1.0 — UI slider vždy viditelný pro i2i model
+}
+```
+
+**UI flags (`models.js`):**
+```js
+zimage_turbo_i2i: {
+  id: 'fal-ai/z-image/turbo/image-to-image',
+  refs: true, maxRefs: 1, i2iModel: true,
+  strength: true,
+  steps: true, acceleration: true,
+  seed: true, safetyChecker: true,
+  resolutions: ['1K', '2K'], maxCount: 4,
+}
+```
+
+**Gotchas:**
+- Bez reference endpoint vrátí 422 (`image_url is required`). UI by měl varovat, ale zatím se nekontroluje — user dostane error při generate.
+- `strength` slider se zobrazí okamžitě při select modelu (dřív byl vázaný na `refs.length > 0`).
 
 ---
 

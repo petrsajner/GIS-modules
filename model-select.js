@@ -17,7 +17,8 @@ const MODEL_DESCS = {
   kling_v3:        'fal.ai · 10 refs · 1K/2K · @Image1 refs · Kuaishou · best consistency',
   kling_o3:        'fal.ai · 10 refs · 1K/2K/4K · @Image1 refs · Kuaishou · latest (Feb 2026)',
   zimage_base:     'fal.ai · $0.005/MP · T2I · steps · CFG · negative prompt · best quality',
-  zimage_turbo:    'fal.ai · $0.005/MP · T2I + I2I · 1–16 steps · default 8 · input img → I2I',
+  zimage_turbo:    'fal.ai · $0.005/MP · T2I · ultra-fast · 1–16 steps · default 8 · acceleration',
+  zimage_turbo_i2i:'fal.ai · $0.005/MP · I2I · ref + strength · 1–16 steps · ref required',
   qwen2_std:       'fal.ai · $0.035/img · T2I · 25 steps · guidance · #1 AI Arena · typografie ✦',
   qwen2_pro:       'fal.ai · $0.075/img · T2I Pro · 35 steps · highest quality · production',
   qwen2_edit:      'fal.ai · $0.035/img · instruction edit · no masks · natural language',
@@ -129,8 +130,8 @@ function selectModel(key) {
     // Safety checker checkbox (SeeDream, Z-Image, Qwen2)
     document.getElementById('upSafetyChkRow').style.display = m.safetyChecker ? '' : 'none';
 
-    // Strength slider (Z-Image Turbo I2I — shown only when ref exists)
-    document.getElementById('upStrengthRow').style.display = (m.strength && refs.length > 0) ? '' : 'none';
+    // Strength slider (dedicated I2I/edit models with strength flag)
+    document.getElementById('upStrengthRow').style.display = m.strength ? '' : 'none';
 
     // Grounding (Google)
     document.getElementById('upGroundingRow').style.display = m.grounding ? '' : 'none';
@@ -166,7 +167,7 @@ function selectModel(key) {
     } else if (isI2I) {
       const info = m.type === 'proxy_xai'
         ? 'Add ref images for editing (up to ' + (m.maxRefs||5) + ').\nSingle ref = aspect from input · Multi-ref = aspect from setting · auto ratio lets model decide.'
-        : 'Max 2048px · Larger images auto-resized · No image = T2I';
+        : 'Max 2048px · Larger images auto-resized · Input image required';
       refI2INote.textContent = info;
       refI2INote.style.display = '';
     } else {

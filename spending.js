@@ -141,7 +141,7 @@ const SPEND_PRICES = {
   '_seedance2_r2v_fast':  0.181,  // Fast R2V with video inputs $0.1814/s
 };
 
-const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'openrouter', 'pixverse', 'segmind', 'replicate'];
+const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'openrouter', 'pixverse', 'replicate'];
 
 function _spendKey(provider) {
   return `gis_spend_${provider}`;

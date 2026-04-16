@@ -1,214 +1,191 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v200en
-## Příští verze: v201en
-## Datum: 2026-04-14
+## Aktuální verze: v201en
+## Příští verze: v202en
+## Datum: 2026-04-16
 ## Worker verze: 2026-16 (beze změny)
 
 ---
 
-## Co je v v200en (oproti v199en)
+## Co je v v201en (oproti v200en)
 
-### 1. Unified Image Panel — dynamická šablona pro všechny image modely
-9 separátních per-model HTML panelů → 1 generický panel (`upParams`) s 14 prvky, zobrazovanými podle UI flags v MODELS definici.
+### 1. Paint Engine — paralelní annotation layer
+Přidán `_annotateAnnotCanvas` jako paralelní offscreen canvas vedle `_annotateMaskCanvas`. Tahy se nadále kreslí do hlavního display ctx (pro okamžitou vizibilitu) a zároveň do dedikovaného annotation canvasu (barevně, transparentní pozadí). Method B už nepoužívá diff rekonstrukci — čte přímo z `_annotateAnnotCanvas`.
 
-**Scope (unified):** Gemini (NB2/NB1/NBPro), Imagen (4/4Fast/4Ultra), FLUX (Pro/Flex/Max/Dev), SeeDream (4.5/5Lite), Kling (V3/O3), Z-Image (Base/Turbo), WAN 2.7 (Std/Pro/Edit/ProEdit), Qwen 2 (Std/Pro/Edit/ProEdit), Grok (Std/Pro)
+**Architektura:**
+- `eng.canvas` (display) — composite obrázku + tahů (pro viewing)
+- `eng.history[0]` — čistý originální obrázek (nikdy se nemění tahy)
+- `_annotateMaskCanvas` — bílé tahy pro inpaint masku (beze změny od před)
+- `_annotateAnnotCanvas` — **nové** — barevné tahy na transparentním pozadí
 
-**Stranou (legacy panely):** Luma Photon, Mystic, Freepik Edit — mají unikátní parametry
+Draw operace (pen, shape, text, flood fill) kreslí do všech 3 ctx: display ctx + maskCtx + annotCtx. Undo / clear / crop synchronně resetují všechny tři.
 
-**14 unified controls:** Resolution toggle · Steps slider · Guidance slider · Seed input · Thinking Min/High (NB2) · Thinking checkbox (WAN 2.7) · Image count 4 buttons · Image count 10 buttons (Grok) · Acceleration · Safety tolerance slider (FLUX) · Safety checker checkbox · Strength slider (Z-Image Turbo) · Grounding: Google Search · Persistent retry
+**Co se tím vyřešilo:**
+- "Anotuj → crop → Save B" už nevrací bílou plochu jako layer 2 (byl to diff(ctx - history[0]) = 0 po cropu, který přepisoval history[0] aktuálním ctx)
+- Čistý annotation layer bez závislosti na stavu obrázku
+- Odstraněna diff rekonstrukce — robustnější chování
 
-### 2. Bugs vyřešené ve v200en
+### 2. Crop bugs vyřešené
+Tři bugy v crop flow, postupně odkryté:
 
-**⚠ Orphan `</div>` tag** — po odstranění `wan27CountRow` zůstal 1 vnější zavírací div → layout rozbitý. Fixed.
+**(a) Method B Layer 2 prázdný po anotace→crop→save:**
+`pCropApply` přepisoval `history[0]` aktuálním ctx (= obrázek + anotace). Diff s current=orig = 0 → bílá plocha. Fixed přes nový annotCanvas (bod 1).
 
-**⚠ Nechrání proti rozbité HTML struktuře** — Přidána automatická `<div>` balance validace do `build.js`. Při buildu zobrazí `✓ HTML div balance: OK (773 pairs)` nebo `⚠ WARNING: HTML div balance = N`.
+**(b) Method B Layer 1 obsahoval anotace po anotace→crop→save:**
+`history[0]` je "clean originál" invarianta. Po cropu byl přepsaný aktuálním ctx (obrázek + anotace). Fix: v `pCropApply` se history[0] vyrobí cropováním pristinního původního `history[0]` (přes drawImage s clip), ne přepsáním aktuálního ctx.
 
-**⚠ WAN 2.7 negative_prompt error** — Replicate API `wan-video/wan-2.7-image` tento parametr nepodporuje. Odstraněn ze všech 4 WAN modelů. `thinkingCheckbox` ponechán jen na `wan27_pro`. "Replicate" odstraněno z názvů modelů v dropdownu.
+**(c) Inpaint source z levého horního rohu po anotace→crop→inpaint:**
+`_annotateBaseB64` se nastavuje v `openAnnotateModal` a po cropu zůstával na původním plnorozměrném obrázku. Inpaint crop přes `drawImage(_annotateBaseB64, cropX, cropY, cropW, cropH, ...)` byl ze starých souřadnic aplikovaných na pre-crop obrázek → vzalo levý horní roh. Fix: `pCropApply` aktualizuje `_annotateBaseB64` cropnutým čistým base (stejný canvas co se používá pro history[0]).
 
-**⚠ Imagen 4 2K resolution — vyřešeno po 5. pokusu!** REST API parametr je `sampleImageSize` (Vertex AI naming), NIKOLI `imageSize` (SDK naming). Google SDK to interně mapuje, REST volání musí použít Vertex název. Platí jen pro Standard a Ultra (ne Fast).
-
+### 3. Inpaint soft-blend composite — posun/zmenšení výsledku
+V `_compositeAndSaveQueueJob` soft-blend path (aktivní při `maskBlur > 0`):
 ```js
-if (!model.id.includes('fast') && imageSize !== '1K') params.sampleImageSize = imageSize;
+rc.drawImage(ri, 0, 0);    // 3-param — natural size
+rc.drawImage(mi, 0, 0);    // 3-param — natural size
+cc.drawImage(resultCrop, cropX, cropY);
 ```
+Pokud model vrátil výsledek v menším rozlišení než `cropW×cropH` (častý případ pro nečtverce), content se nakreslil jen do levého horního rohu `resultCrop` canvasu a zbytek zůstal transparentní. Composite back pak vložil obsah posunutý nahoru-doleva vůči target oblasti.
 
-**⚠ Imagen 4 Ultra maxCount:** API vrací max 1 obrázek per call. `maxCount: 1` u Ultra je správně (UI count buttons se nezobrazí). Standard + Fast `maxCount: 4`.
+Fix: force 5-param drawImage s cílovými rozměry `cropW × cropH` pro `ri` i `mi`. Hard-blend path už 5-param měl.
 
-**⚠ Edit Tool Agent paměť** — v `callGeminiTextMultiTurn` se při OpenRouter path posílala jen poslední user message, ne celá historie. Nová funkce `_callOpenRouterMultiTurn()` konvertuje Gemini history formát → OpenAI messages format a posílá celou konverzaci.
+### 4. Z-Image Turbo — split T2I / I2I
+Dřív `zimage_turbo` byl hybrid: `refs: true, maxRefs: 1, i2iModel: true, strength: true`. Přepínal endpoint podle toho jestli má uživatel ref:
+- bez refu → `fal-ai/z-image/turbo` (T2I)
+- s refem → `fal-ai/z-image/turbo/image-to-image` (I2I)
 
-### 3. Resolution pixel info — empirické hodnoty
+**Problém:** strength slider se zobrazil vždy, i v T2I módu kde je irelevantní. Kromě toho slider se navíc skrýval/zobrazoval podle `refs.length > 0` ve dvou místech (`model-select.js` + `refs.js`).
 
-Nová lookup tabulka `_MODEL_LONG_SIDES` s naměřenými long-side hodnotami. `_approxDims(longSide, aspect)` počítá W×H z aspect ratio. FLUX a Z-Image zůstávají na přesných kalkulátorech (`calcFluxDims`, `calcZImageDims`). WAN 2.7 používá pixel whitelist `_WAN27_PIXELS`.
+**Rozdělení:**
+- `zimage_turbo` — čistě T2I, endpoint `fal-ai/z-image/turbo`, bez refs/strength
+- `zimage_turbo_i2i` — čistě I2I, endpoint `fal-ai/z-image/turbo/image-to-image`, ref required, strength slider aktivní vždy
 
-**Naměřené hodnoty (16:9):**
+Dropdown separator mezi Z-Image a WAN skupinami přidán (dříve sdíleli společnou skupinu).
 
-| Model | 1K | 2K | 3K | 4K |
-|-------|-----|-----|-----|-----|
-| NB2/Pro | 1376 | 2752 | — | 5504 |
-| NB1 | 1344 | — | — | — |
-| Imagen 4/Ultra | 1408 | **2816** | — | — |
-| Imagen Fast | 1408 | — | — | — |
-| SeeDream 4.5 | — | 2560 | — | 3840 |
-| SeeDream 5 Lite | — | 3136 | 4704 | — |
-| Kling V3/O3 | 1360 | 2720 | — | 5440 |
-| Qwen 2 | 1664 | 2048 | — | — |
-| Grok | 1408 | 2816 | — | — |
+### 5. Drobné UI fixy
+- **`\u25b8` bug** v negative prompt label (collapsible šipka): HTML text obsahoval JS escape `\u25b8` — HTML nezná JS escape, zobrazilo se literálně. Fix: přímé Unicode znaky `▸` / `▾` (funguje v HTML i JS kontextu).
+- **Strength slider visibility** — dvě redundantní podmínky (`model-select.js` + `refs.js`) používaly `refs.length > 0`. Druhá byla zastaralá z hybrid éry. Odstraněna; nyní řídí jediný bod v `model-select.js` podle `m.strength` flag.
 
-### 4. Prefix `[Reference images: ...]` — odstraněn
-Úplně odstraněn z `preprocessPromptForModel` (Gemini/xAI). Legacy prefix se stripuje vždy (i když žádné refs). `rewritePromptForModel` cleanup při každém přepnutí modelu. Styles a camera prefix pro Gemini **je nedotčený** — funguje beze změny.
+### 6. Segmind cleanup
+Segmind API klíč odstraněn z:
+- `template.html` — celý SEGMIND API KEY block
+- `setup.js` — localStorage load, `onSetupSegmindKey` handler, `API_KEY_FIELDS` entry
+- `spending.js` — `'segmind'` ze `SPEND_PROVIDERS`
 
-### 5. Crop tool v Annotate modálu
-Nový **✂ Crop** button v annotate toolbaru. DOM overlay nad canvasem s tmavou maskou okolo crop rectu.
-- **8 handlů**: 4 rohy (NW/NE/SW/SE) + 4 strany (N/E/S/W)
-- **Lock ratio** checkbox — zachovat aspect ratio při resize
-- **✓ Apply** / **✗ Cancel** tlačítka
-- Keyboard: **Enter** = apply, **Esc** = cancel
-- Min size: 20px, živý label s rozměry
-- Apply: canvas se resize, mask canvas také, history se resetuje
-- Architektura podporuje oba prefixy ('p' paint + 'a' annotate), v UI je jen v annotate
+Důvod: Segmind WAN 2.7 implementace je opuštěná (square-only output, v196en byl nahrazen Replicate s full aspect ratio whitelist). Odstranění rozbilo střídání pruhů v setup UI (Segmind byl mezi PIXVERSE a REPLICATE).
 
-### 6. Ostatní
-- Prompt upsampling/expansion/enhance zakázáno (FLUX/SeeDream/Qwen2)
-- Resolution 512 odstraněna u NB2 a FLUX
-- Checkbox `.chk-box` border zesílen z 1px na 1.5px s `var(--dim2)`
-- ⚡ ikona u assetů odstraněna (bod 9 z TODO)
-- `callImagen` přidán seed parametr
-- `grok_imagine_pro` default res: 2K
+Worker handler pro Segmind ponechán — cleanup Workeru v následující session.
 
 ---
 
-## Klíčové technické detaily
+## Změněné moduly
 
-### Unified panel architecture
-```
-models.js:   MODELS[key].resolutions  → labels for toggle
-             MODELS[key].resValues    → label→apiValue mapping
-             MODELS[key].maxCount     → which count row (4 or 10)
-             isUnifiedModel(m)        → true for 9 types
-             updateUnifiedResInfo()   → pixel info per model
-             _MODEL_LONG_SIDES        → empirical long-side table
-             _approxDims(ls, aspect)  → computes W×H
-
-model-select.js: selectModel(key) shows/hides by flags
-                 _buildResToggle, _setStepsDefaults, _setGuidanceDefaults
-
-generate.js: reads upRes, upSteps, upGuidance, upSeed, upNeg, upCount4/10,
-             upThinkRadio/Chk, upAccel, upSafetySlider/Chk, upStrength,
-             upGrounding, upRetry → same snap formats as before
-```
-
-### Element ID mapping (old → new)
-```
-nbRes/fluxQuality/sdQuality/klingRes/zimageRes/qwen2Res/grokRes/wan27Tier → upRes
-nbCount/fluxCount/sdCount/klingCount/zimageCount/qwen2Count → upCount4
-grokCount → upCount10
-fluxSteps/zimageSteps/qwen2Steps → upSteps
-fluxGuidance/zimageGuidance/qwen2Guidance → upGuidance
-fluxSeed/sdSeed/zimageSeed/qwen2Seed/wan27Seed → upSeed
-wan27Neg/zimageNeg/qwen2Neg → upNeg
-fluxSafety → upSafetySlider
-sdSafety/zimageSafety/qwen2Safety → upSafetyChk
-zimageAccel/qwen2Accel → upAccel
-zimageStrength → upStrength
-useSearch → upGrounding
-persistentRetry → upRetry
-thinking → upThinkRadio
-wan27Thinking → upThinkChk
-```
-
-### Imagen 4 REST API — 2K breakthrough
-```js
-// REST API: sampleImageSize (Vertex naming) for Standard+Ultra
-const params = { sampleCount, aspectRatio };
-if (!model.id.includes('fast') && imageSize !== '1K')
-  params.sampleImageSize = imageSize;  // "2K"
-
-// Ultra returns max 1 image per call → sampleCount forced to 1
-const sampleCount = model.id.includes('ultra') ? 1 : (snap?.sampleCount || 1);
-```
-
-### Edit Tool chat memory — OpenRouter multi-turn
-```js
-async function _callOpenRouterMultiTurn(systemPrompt, history, ...) {
-  const messages = [{role: 'system', content: systemPrompt}];
-  for (const turn of history) {
-    const role = turn.role === 'model' ? 'assistant' : 'user';
-    const content = (turn.parts || []).map(p => p.text || '').join('\n').trim();
-    if (content) messages.push({ role, content });
-  }
-  // POST to OpenRouter with full messages array
-}
-```
-
-### Crop tool architecture
-```
-DOM overlay (aCropOverlay) over annotate canvas:
-  - pcrop-rect with 8 handles (.nw .n .ne .e .se .s .sw .w)
-  - pcrop-size-lbl showing "W × H"
-  - box-shadow: 0 0 0 99999px rgba(0,0,0,.55) creates dark mask
-
-_pCropState: { prefix, x, y, w, h, lockAspect, aspectRatio, dragMode, dragStart }
-
-pCropApply():
-  1. const cropped = ctx.getImageData(x, y, w, h)
-  2. canvas.width = w; canvas.height = h
-  3. ctx.putImageData(cropped, 0, 0)
-  4. Same for maskCtx if exists
-  5. Reset history (no undo across crop boundary)
-```
+| Modul | Řádků | Popis změn |
+|-------|-------|------------|
+| paint.js | ~2080 | +80: annotCtx, annotSnapshot, annotHistory + všechny mirror operace v draw/undo/clear/crop/inpaint-resize. Method B přepsán bez diffu. pCropApply aktualizuje `_annotateBaseB64`. Soft-blend composite 5-param drawImage. |
+| models.js | ~638 | zimage_turbo split — T2I + I2I jako dva modely |
+| model-select.js | ~348 | Strength slider unconditional podle `m.strength`. zimage_turbo descriptions. I2I note "Input image required" (místo "No image = T2I"). |
+| refs.js | ~838 | Odstraněna zastaralá strength toggle logika (dvojí řízení) |
+| template.html | ~4940 | Z-Image dropdown split (3 options), separator k WAN, `\u25b8` → `▸` v neg prompt, Segmind block odstraněn |
+| setup.js | ~285 | Segmind load/handler/export odstraněn |
+| spending.js | ~285 | `'segmind'` ze SPEND_PROVIDERS |
 
 ---
 
 ## TODO (prioritní pořadí)
 
-1. Style Library "My Presets"
-2. Claid.ai via proxy
-3. GPT Image 1.5
-4. Hailuo 2.3
-5. Use button for V2V models
-6. Runway Gen-4 Image + Video (research hotový)
-7. Recraft V4
-8. ~~Unified panel refactor (images)~~ ✅ v200en
-9. ~~⚡ ikona u assetů~~ ✅ v200en
-10. Unified panel for video models (phase 2)
-11. Z-Image Edit (`fal-ai/z-image/edit`)
-12. Clarity 8×/16× via proxy
-13. Vidu Q3 Turbo
-14. Wan 2.6 R2V
-15. Seedance 2.0
-16. Ideogram V3
-17. Recraft V4
-18. GPT Image 1.5
-19. Hailuo 2.3
+1. **Style Library "My Presets"**
+2. **Claid.ai via proxy**
+3. **GPT Image 1.5**
+4. **Hailuo 2.3**
+5. **Use button for V2V models**
+6. **Runway Gen-4 Image + Video** (výzkum hotový)
+7. **Recraft V4**
+8. **Unified panel pro video modely** (fáze 2, analogicky k image unified v v200en)
+9. **Z-Image LoRA generation** (`fal-ai/z-image/turbo/lora` + `fal-ai/z-image/base/lora`) — UI pro až 3 LoRA modely s váhou 0.6–1.0
+10. **Z-Image LoRA trainer** (`fal-ai/z-image-trainer`) — kompletně jiný UX (ZIP upload, polling trénování)
+11. **Ideogram V3**
+
+### Dokončené v v201en
+- ✅ Paint layer refactor + 3 crop bugs + inpaint soft-blend fix
+- ✅ Z-Image Turbo T2I/I2I split + dropdown separator
+- ✅ Segmind cleanup
+
+### Odepsané
+- ~~Z-Image Edit (`fal-ai/z-image/edit`)~~ — endpoint v Z-Image rodině neexistuje (jen T2I `base`/`turbo`, I2I `turbo/image-to-image`, LoRA endpointy, trainer)
+- ~~Recraft Crisp upscale bug~~ — vyřešen (posílal se moc velký upscale; limity + kontroly přidány)
+- ~~Seedance 2.0~~ — přidáno
+- ~~WAN 2.6 R2V~~ — nebudeme řešit
+- ~~Vidu Q3 Turbo~~ — nebudeme řešit
+- ~~Clarity 8×/16× via proxy~~ — neřešíme
 
 ---
 
-## Pending pro v201en
+## Klíčové technické detaily
 
-Petr zmínil že bude mít ještě jeden problém — popsaný v příštím chatu.
+### Paint engine — 3 parallel canvases (v201en)
+```
+eng.canvas (display)     = base + strokes composite (viewing)
+eng.history[0]           = clean original image (invariant, never touched by strokes)
+_annotateMaskCanvas      = white strokes for inpaint mask (since v100)
+_annotateAnnotCanvas     = color strokes, transparent bg (NEW, for Method B export)
+
+Draw op (pen/shape/text/bucket):
+  1. Draw on state.ctx (display)        — user sees it immediately
+  2. Draw on state.maskCtx (monochrome) — inpaint mask updated
+  3. Draw on state.annotCtx (color)     — clean annotation layer
+  4. saveHistory() pushes all 3 snapshots
+
+Undo: pop from all 3 histories, putImageData back
+Clear: reset display to history[0], clear maskCtx + annotCtx
+Crop: getImageData(x,y,w,h) from all 3, resize canvases, reset histories
+      + history[0] regenerated from pristine full history[0] (drawImage clip)
+      + _annotateBaseB64 updated from new history[0]
+
+Method A save: eng.canvas.toDataURL()                  // already composite
+Method B save: { history[0], whiteBg + annotCanvas }   // no diff needed
+```
+
+### Z-Image endpoints (v201en)
+| Model | Endpoint | Type |
+|-------|----------|------|
+| `zimage_base` | `fal-ai/z-image/base` | T2I standard (28 steps, CFG, neg prompt) |
+| `zimage_turbo` | `fal-ai/z-image/turbo` | T2I ultra-fast (8 steps, acceleration) |
+| `zimage_turbo_i2i` | `fal-ai/z-image/turbo/image-to-image` | I2I (ref required, strength slider) |
+
+Dispatch v `callZImage`: `model.id` přímo jako endpoint path (žádná dynamika přepínání už není potřeba, ale legacy logika `i2iModel && refs.length > 0 → turbo/image-to-image` ponechána jako fallback pro případný refactor).
+
+### Inpaint composite (v201en)
+```js
+// Hard-blend (maskBlur = 0) — už byl OK
+cc.drawImage(ri, cropX, cropY, cropW, cropH);  // 5-param → force resize
+
+// Soft-blend (maskBlur > 0) — fix v v201en
+rc.drawImage(ri, 0, 0, cropW, cropH);  // force cropW×cropH
+rc.drawImage(mi, 0, 0, cropW, cropH);  // force cropW×cropH
+cc.drawImage(resultCrop, cropX, cropY);
+```
 
 ---
 
 ## Pravidla a principy
 
 - **⚠ CRITICAL — `/mnt/project/` je VŽDY stale. NIKDY ho nepoužívat.**
-- **Session start:** (1) načíst STAV.md z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) `node build.js NNNen → dist/`
-- **Syntax check po každém buildu:** `sed -n 'SCRIPT_START,SCRIPT_ENDp' dist/gis_vNNNen.html > /tmp/check.mjs && node --input-type=module < /tmp/check.mjs` → OK = "window is not defined"
-- **HTML validation** — build.js nyní zobrazuje `✓ HTML div balance: OK (N pairs)`. Pokud unbalanced, layout se rozbije.
+- **Session start:** (1) načíst `STAV.md` z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) `node build.js NNNen → dist/`
+- **Syntax check po buildu:** `sed -n 'SCRIPT_START,SCRIPT_ENDp' dist/gis_vNNNen.html > /tmp/check.mjs && node --input-type=module < /tmp/check.mjs` → OK = "window is not defined"
+- **HTML validation** — build.js zobrazuje `✓ HTML div balance: OK (N pairs)`
 - **NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele.**
-- **Vždy důkladně prozkoumat** (web search, probe APIs) než prohlásit že něco nejde. Imagen 2K to jasně ukázal — "nešlo to" 4×, pak 5. pokus s `sampleImageSize` fungoval napoprvé.
-- **REST API parameter names**: dokumentace obvykle ukazuje SDK jména (Python/JS). Při REST volání musí být Vertex AI konvence (např. `sampleImageSize` místo `imageSize`, `sampleCount` místo `numberOfImages`).
-- **Research API maturity + regional dostupnost** před integrací.
-- **Research přesný API whitelist** (size, aspect, maxRefs) — vždy kontrolovat playground/docs.
-- **fal.ai vs. direct APIs:** fal.ai ~15–30% dražší ale preferovaný pro nepravidelné použití.
+- **Vždy důkladně prozkoumat** (web search, probe APIs) než prohlásit že něco nejde.
+- **Research API maturity + regionální dostupnost** před integrací. Z-Image Edit je typický případ — endpoint v TODO, ale neexistuje. Research potvrdil že Z-Image rodina má jen T2I/I2I/LoRA/trainer.
+- **REST API parameter names**: Vertex AI naming pro Google REST (sampleImageSize, sampleCount), SDK naming v dokumentaci.
 - **Worker free tier:** 30s wall-clock limit — nikdy nepollovat uvnitř Workeru.
 - **Snap count v `addToQueue`:** každý nový model musí mít svůj count field.
 - **xAI concurrency limit:** max 2 concurrent requesty.
-- **Qwen 2 Edit maxRefs:** 3 (ne 4!). Ověřeno API errorem.
-- **Grok Pro maxRefs:** 1. Standard: 5.
-- **Ref prefix:** ODSTRANĚN ve v200en. Žádný `[Reference images: ...]`. Styles/camera prefix pro Gemini nedotčený.
+- **Qwen 2 Edit maxRefs:** 3. **Grok Pro maxRefs:** 1. **Standard:** 5.
+- **Ref prefix:** ODSTRANĚN ve v200en. Styles/camera prefix pro Gemini nedotčený.
 - **OpenRouter (Claude Sonnet 4.6)** je PRIMARY agent pro všechny tool features.
-- **xAI Video Edit payload:** `video: {url}` objekt, NE `video_url` flat string.
+- **xAI Video Edit payload:** `video: {url}` objekt.
+- **Dedicated I2I/Edit model flag `strength: true`** → slider zobrazit vždy (nezávisí na refs.length).
+- **Paint engine invariant:** `history[0]` = čistý originál, nikdy přepsán aktuálním ctx. `annotCanvas` = klon anotací, nezávislý na base.
 - **Rozhodnutí nedělat za Petra** — u složitějších funkcí prezentovat options.
 
 ---

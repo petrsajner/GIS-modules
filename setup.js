@@ -52,8 +52,6 @@ window.onload = () => {
   if (savedOpenRouter) { document.getElementById('setupOpenRouterKey').value = savedOpenRouter; updateSetupDot('setupOpenRouterDot', savedOpenRouter.length > 10); }
   const savedPixverse = localStorage.getItem('gis_pixverse_apikey');
   if (savedPixverse) { document.getElementById('setupPixverseKey').value = savedPixverse; updateSetupDot('setupPixverseDot', savedPixverse.length > 10); }
-  const savedSegmind = localStorage.getItem('gis_segmind_apikey');
-  if (savedSegmind) { document.getElementById('setupSegmindKey').value = savedSegmind; updateSetupDot('setupSegmindDot', savedSegmind.length > 10); }
   const savedReplicate = localStorage.getItem('gis_replicate_apikey');
   if (savedReplicate) { document.getElementById('setupReplicateKey').value = savedReplicate; updateSetupDot('setupReplicateDot', savedReplicate.length > 3); }
   const DEFAULT_PROXY = 'https://gis-proxy.petr-gis.workers.dev';
@@ -160,11 +158,6 @@ function onSetupPixverseKey(val) {
   updateSetupDot('setupPixverseDot', val.length > 10);
 }
 
-function onSetupSegmindKey(val) {
-  localStorage.setItem('gis_segmind_apikey', val);
-  updateSetupDot('setupSegmindDot', val.length > 10);
-}
-
 function onSetupReplicateKey(val) {
   localStorage.setItem('gis_replicate_apikey', val);
   updateSetupDot('setupReplicateDot', val.length > 3);
@@ -200,7 +193,6 @@ const API_KEY_FIELDS = [
   { key: 'gis_topaz_apikey',       label: 'Topaz API Key',       inputId: 'setupTopazKey',       dotId: 'setupTopazDot'       },
   { key: 'gis_openrouter_apikey',  label: 'OpenRouter API Key',  inputId: 'setupOpenRouterKey',  dotId: 'setupOpenRouterDot'  },
   { key: 'gis_pixverse_apikey',   label: 'PixVerse API Key',    inputId: 'setupPixverseKey',    dotId: 'setupPixverseDot'    },
-  { key: 'gis_segmind_apikey',   label: 'Segmind API Key',     inputId: 'setupSegmindKey',     dotId: 'setupSegmindDot'     },
   { key: 'gis_replicate_apikey', label: 'Replicate API Key',   inputId: 'setupReplicateKey',   dotId: 'setupReplicateDot'   },
   { key: 'gis_proxy_url',          label: 'Proxy URL',           inputId: 'setupProxyUrl',       dotId: 'setupProxyDot'       },
 ];

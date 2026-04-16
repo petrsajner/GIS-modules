@@ -1,6 +1,115 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 14. 4. 2026 · v199en*
+*Aktualizováno 16. 4. 2026 · v201en*
+
+---
+
+## Paint Engine — Parallel Annotation Layer (16. 4. 2026)
+
+**Problém:** Method B (Layers) save v annotate modálu používal **diff rekonstrukci** místo skutečného layer systému. Logika: `history[0]` = čistý originál (snapshot ctx po `openAnnotateModal`), aktuální `ctx` = obrázek + tahy. Diff pixel-by-pixel rekonstruoval tahy.
+
+**3 bugy odkryté postupně v jedné testovací session:**
+
+1. **Anotuj → crop → save B → bílý Layer 2:**
+   `pCropApply` přepisoval `history[0]` aktuálním ctx (cropnutá verze obrázku + anotace). Diff(current, history[0]) = 0 → všechno bílé pozadí → Layer 2 je bílá plocha.
+
+2. **Anotuj → crop → save B → špinavý Layer 1:**
+   Stejná příčina — `history[0]` obsahoval anotace. Layer 1 by měl být čistý orig, ale byl = obrázek + anotace.
+
+3. **Anotuj → crop → inpaint → source je levý horní roh:**
+   `_annotateBaseB64` (global, používaný inpaint crop preview) se nastavuje v `openAnnotateModal` a `pCropApply` ho neaktualizoval. Inpaint `drawImage(bi, cropX, cropY, ...)` kreslil z nových souřadnic na pre-crop obrázek.
+
+**Diskuse variant:**
+- **Varianta A: Opravit diff flow** (~30 řádků) — zachovat diff rekonstrukci, fix v pCropApply aby history[0] zůstal čistý originál.
+- **Varianta B: Refactor na skutečný separate annotation canvas** (~250 řádků) — diff pryč, Method B čte ze samostatného canvasu.
+
+Petr zvolil **variantu B** s odůvodněním "žádný diff — anotace má být samostatný layer".
+
+**Rozhodnutí: Paralelní annotation canvas (minimálně invazivní verze variant B):**
+Místo full render pipeline refactoru (display canvas by flatnoval base + annot při každém draw) přidán **paralelní `_annotateAnnotCanvas`** vedle existujícího `_annotateMaskCanvas`. Tahy se kreslí do 3 ctx zároveň:
+1. `state.ctx` (display) — user vidí okamžitě
+2. `state.maskCtx` — bílé tahy pro inpaint (legacy)
+3. `state.annotCtx` — **barevné tahy na transparentním pozadí (nové)**
+
+`history[0]` zůstává autoritativní "clean original" invariant. Po cropu se rekonstruuje cropováním pristinního `history[0]` přes drawImage s clip (ne přepsáním aktuálního ctx). `_annotateBaseB64` se aktualizuje ze stejného cropnutého canvasu.
+
+Method B export:
+- Layer 1 = `history[0]` PNG (čistý orig, automatically cropped when canvas was cropped)
+- Layer 2 = white fillRect + drawImage(annotCanvas) PNG (čisté tahy na bílém pozadí)
+
+**Rozsah:** ~80 řádků v paint.js (vs. odhad 250). Důvod: místo full render pipeline refactoru paralelní mirror. Žádné riziko regrese paint tabu, undo, inpaint integrace.
+
+**Soft-blend composite bonus fix:**
+V `_compositeAndSaveQueueJob` soft-blend path (`maskBlur > 0`) byly `rc.drawImage(ri, 0, 0)` a `rc.drawImage(mi, 0, 0)` 3-param → kreslí v přirozené velikosti. Pokud model vrátil výsledek v menším rozlišení než `cropW×cropH`, content byl v levém horním rohu resultCrop a composite back vložil posun. Fix: 5-param s cílovými rozměry `cropW × cropH`. Hard-blend už OK měl.
+
+---
+
+## Z-Image Turbo — Split T2I / I2I (16. 4. 2026)
+
+**Kontext:** `zimage_turbo` byl **hybrid model** — jeden dropdown option s dynamickým přepínáním endpointu:
+- bez refu → `fal-ai/z-image/turbo` (T2I)
+- s refem → `fal-ai/z-image/turbo/image-to-image` (I2I)
+
+UI flags: `refs: true, maxRefs: 1, i2iModel: true, strength: true`.
+
+**Problém:** Strength slider se zobrazil vždy (model má `strength: true`), i v T2I módu kdy je irelevantní. Navíc byl řízený dvěma nezávislými body:
+- `model-select.js` — `(m.strength && refs.length > 0)` při select modelu
+- `refs.js` — stejná podmínka při ref-change (zastaralé z hybrid éry)
+
+Při přepínání modelů nebo ref-change se slider objevoval/mizel nekonzistentně.
+
+**Rozhodnutí: Rozdělit na dva samostatné modely.**
+- `zimage_turbo` — čistě T2I, endpoint `fal-ai/z-image/turbo`, bez refs/strength/i2iModel
+- `zimage_turbo_i2i` — čistě I2I, endpoint `fal-ai/z-image/turbo/image-to-image`, `refs: true, maxRefs: 1, strength: true, i2iModel: true`, ref required
+
+Kombinovaný s čistším řízením strength slideru (jen v `model-select.js` podle `m.strength` flag, bez vazby na refs.length).
+
+**Alternativy zvážené a zamítnuté:**
+- Dynamicky skrývat strength podle stavu refs v jednom hybrid modelu — složitější logika, stále UX nejasné
+- Zachovat hybrid s upozorněním "strength works only with ref" — neřeší UX nekonzistenci
+
+**Ref upload label aktualizace:** "No image = T2I" (legacy z hybrid éry) → "Input image required". Odpovídá dedicated I2I sémantice.
+
+**Dropdown separator:** Z-Image a WAN byly ve stejné "skupině" (mezi dvěma `<option disabled>` separatory, bez mezi). Přidán separator → vizuálně oddělené sekce.
+
+---
+
+## Z-Image Edit — TODO odepsán (16. 4. 2026)
+
+**Kontext:** TODO položka "Z-Image Edit (`fal-ai/z-image/edit`)" byla v seznamu od paměťového snapshotu.
+
+**Research:** Z-Image rodina na fal.ai obsahuje:
+- `fal-ai/z-image/base` — T2I standard (6B params, 28 steps, CFG)
+- `fal-ai/z-image/turbo` — T2I ultra-fast (8 steps, acceleration)
+- `fal-ai/z-image/base/lora` — T2I base + LoRA array
+- `fal-ai/z-image/turbo/lora` — T2I turbo + LoRA array
+- `fal-ai/z-image/turbo/image-to-image` — strength-based I2I
+- `fal-ai/z-image-trainer` — LoRA training (ZIP dataset)
+
+**Žádný instruction-based edit endpoint** existuje (typu Qwen Edit / WAN Edit / FLUX Kontext). TODO položka založena na mylném předpokladu.
+
+**Rozhodnutí:** Odepsat z TODO. Místo toho:
+- Nahrazeno Z-Image Turbo T2I/I2I split (bod výše)
+- Přidáno nové TODO: **Z-Image LoRA generation** (fal-ai/z-image/{base,turbo}/lora) + **Z-Image LoRA trainer**
+
+---
+
+## Segmind — Odstraněn z klientu (16. 4. 2026)
+
+**Kontext:** Segmind API klíč byl v setup UI pro WAN 2.7 image generation & editing. V v196en WAN 2.7 přešel na Replicate (full aspect ratio whitelist vs. Segmind square-only). Segmind se nikde nepoužívá, klíč v setupu zůstal orphan.
+
+**Akutní motivace:** Přidáním PixVerse klíče do setupu bylo porušené střídání světlých/tmavých pruhů mezi Topaz/PixVerse/Segmind/Replicate/OpenRouter. Nejrychlejší oprava = odstranit nepoužívaný Segmind.
+
+**Rozhodnutí:** Odstranit z klientu:
+- `template.html` — celý SEGMIND API KEY block (11 řádků)
+- `setup.js` — localStorage load, `onSetupSegmindKey` handler, `API_KEY_FIELDS` entry
+- `spending.js` — `'segmind'` ze `SPEND_PROVIDERS`
+
+**Ponecháno (do příštího cleanupu):**
+- Worker `handlers/segmind.js` — mrtvý kód ve Workeru, neovlivňuje klient
+- `gis_segmind_apikey` klíč v localStorage uživatelů — orphan, ale neškodný
+
+**Výsledek:** Sekvence pruhů obnovena (TOPAZ → A, PIXVERSE → B, REPLICATE → A, OPENROUTER → B).
 
 ---
 

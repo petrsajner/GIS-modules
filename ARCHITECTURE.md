@@ -1,5 +1,5 @@
 # GIS — ARCHITEKTURA
-*Aktuální pro v199en · 14. 4. 2026*
+*Aktuální pro v201en · 16. 4. 2026*
 
 ---
 
@@ -246,6 +246,67 @@ let _grokVideoSrcId = null;              // gallery video ID for Edit/Extend
 setGrokVideoSrc(videoId)                 // called from useVideoFromGallery()
 onGrokVideoModeChange(mode)              // UI handler — visibility per mode
 ```
+
+---
+
+## Paint Engine architektura (v201en)
+
+### 3 paralelní offscreen canvases + display
+
+```javascript
+// createPaintEngine(prefix, canvas):
+state = {
+  canvas,          // display <canvas> user sees (base + strokes composited)
+  ctx,             // display context
+  history: [],     // snapshots of display ctx (for undo)
+  maskCtx,         // offscreen — monochrome white strokes (inpaint mask source)
+  maskHistory: [], // mirror history
+  annotCtx,        // offscreen — color strokes, transparent bg (Method B export source)  [NEW v201en]
+  annotHistory: [],// mirror history                                                      [NEW v201en]
+  ...
+}
+
+// Invariant: history[0] = clean original image (never touched by strokes)
+// openAnnotateModal → ctx.drawImage(img, 0, 0) → saveHistory() → history[0] = clean
+```
+
+### Kreslící operace (pen, shape, text, flood fill)
+
+Každý draw krok updatuje **3 ctx paralelně**:
+```javascript
+// 1. Main ctx — user sees immediately
+applyStyle();
+state.ctx.lineTo(x, y); state.ctx.stroke();
+
+// 2. Mask ctx — monochrome white (inpaint mask)
+if (state.maskCtx) {
+  maskApply(isErase);  // strokeStyle/fillStyle = '#ffffff'
+  state.maskCtx.lineTo(x, y); state.maskCtx.stroke();
+}
+
+// 3. Annotation ctx — user color, transparent bg (clean layer for Method B)
+if (state.annotCtx) {
+  annotApply(isErase);  // strokeStyle = state.color
+  state.annotCtx.lineTo(x, y); state.annotCtx.stroke();
+}
+```
+
+### Undo / Clear / Crop synchronizace
+
+- **Undo:** pop z history, maskHistory, annotHistory; putImageData zpět do každého ctx
+- **Clear:** ctx.putImageData(history[0], 0, 0); clearRect(maskCtx); clearRect(annotCtx)
+- **Crop (pCropApply):** getImageData(x,y,w,h) z každého ctx, resize 3 canvases, reset 3 histories
+  - `history[0]` regenerován z pristinního původního history[0] přes drawImage clip (ne přepsáním aktuálního ctx — jinak by ztratil "clean original" invariant)
+  - `_annotateBaseB64` globální aktualizován z cropnutého clean base (pro inpaint crop preview)
+
+### Method A vs B export
+
+**A (composite):** `eng.canvas.toDataURL()` — base + strokes už sloučené v display ctx
+**B (layers):**
+- Layer 1 = `history[0]` jako PNG (clean original, automatically cropped if canvas was cropped)
+- Layer 2 = fillRect(white) + drawImage(annotCanvas) PNG (čisté barevné tahy na bílém pozadí)
+
+**Bez diffu** — annotCanvas je autoritativní zdroj anotačního layeru od v201en.
 
 ---
 
