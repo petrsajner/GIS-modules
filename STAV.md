@@ -1,79 +1,114 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v201en
-## Příští verze: v202en
-## Datum: 2026-04-16
+## Aktuální verze: v202en
+## Příští verze: v203en
+## Datum: 2026-04-17
 ## Worker verze: 2026-16 (beze změny)
 
 ---
 
-## Co je v v201en (oproti v200en)
+## Co je v v202en (oproti v201en)
 
-### 1. Paint Engine — paralelní annotation layer
-Přidán `_annotateAnnotCanvas` jako paralelní offscreen canvas vedle `_annotateMaskCanvas`. Tahy se nadále kreslí do hlavního display ctx (pro okamžitou vizibilitu) a zároveň do dedikovaného annotation canvasu (barevně, transparentní pozadí). Method B už nepoužívá diff rekonstrukci — čte přímo z `_annotateAnnotCanvas`.
+Čtyři fixy regresí po refaktoringu na Unified Image Panel + kompletní přepracování download flow (gallery + video library).
 
-**Architektura:**
-- `eng.canvas` (display) — composite obrázku + tahů (pro viewing)
-- `eng.history[0]` — čistý originální obrázek (nikdy se nemění tahy)
-- `_annotateMaskCanvas` — bílé tahy pro inpaint masku (beze změny od před)
-- `_annotateAnnotCanvas` — **nové** — barevné tahy na transparentním pozadí
+### 1. `RETRY_MAX is not defined` — crash při persistent retry (#4)
+`output-render.js` na dvou místech (řádky 27 a 75 pre-fix) používalo neexistující konstantu `RETRY_MAX`. `generate.js` ji správně nahradil `job.retryTotal` už dříve, ale output-render.js zůstal. Crash vyhazoval `runJob`:
 
-Draw operace (pen, shape, text, flood fill) kreslí do všech 3 ctx: display ctx + maskCtx + annotCtx. Undo / clear / crop synchronně resetují všechny tři.
-
-**Co se tím vyřešilo:**
-- "Anotuj → crop → Save B" už nevrací bílou plochu jako layer 2 (byl to diff(ctx - history[0]) = 0 po cropu, který přepisoval history[0] aktuálním ctx)
-- Čistý annotation layer bez závislosti na stavu obrázku
-- Odstraněna diff rekonstrukce — robustnější chování
-
-### 2. Crop bugs vyřešené
-Tři bugy v crop flow, postupně odkryté:
-
-**(a) Method B Layer 2 prázdný po anotace→crop→save:**
-`pCropApply` přepisoval `history[0]` aktuálním ctx (= obrázek + anotace). Diff s current=orig = 0 → bílá plocha. Fixed přes nový annotCanvas (bod 1).
-
-**(b) Method B Layer 1 obsahoval anotace po anotace→crop→save:**
-`history[0]` je "clean originál" invarianta. Po cropu byl přepsaný aktuálním ctx (obrázek + anotace). Fix: v `pCropApply` se history[0] vyrobí cropováním pristinního původního `history[0]` (přes drawImage s clip), ne přepsáním aktuálního ctx.
-
-**(c) Inpaint source z levého horního rohu po anotace→crop→inpaint:**
-`_annotateBaseB64` se nastavuje v `openAnnotateModal` a po cropu zůstával na původním plnorozměrném obrázku. Inpaint crop přes `drawImage(_annotateBaseB64, cropX, cropY, cropW, cropH, ...)` byl ze starých souřadnic aplikovaných na pre-crop obrázek → vzalo levý horní roh. Fix: `pCropApply` aktualizuje `_annotateBaseB64` cropnutým čistým base (stejný canvas co se používá pro history[0]).
-
-### 3. Inpaint soft-blend composite — posun/zmenšení výsledku
-V `_compositeAndSaveQueueJob` soft-blend path (aktivní při `maskBlur > 0`):
-```js
-rc.drawImage(ri, 0, 0);    // 3-param — natural size
-rc.drawImage(mi, 0, 0);    // 3-param — natural size
-cc.drawImage(resultCrop, cropX, cropY);
 ```
-Pokud model vrátil výsledek v menším rozlišení než `cropW×cropH` (častý případ pro nečtverce), content se nakreslil jen do levého horního rohu `resultCrop` canvasu a zbytek zůstal transparentní. Composite back pak vložil obsah posunutý nahoru-doleva vůči target oblasti.
+Uncaught (in promise) ReferenceError: RETRY_MAX is not defined
+    at renderQueueOverlay → runJob → runJobAndContinue
+```
 
-Fix: force 5-param drawImage s cílovými rozměry `cropW × cropH` pro `ri` i `mi`. Hard-blend path už 5-param měl.
+**Fix:** `RETRY_MAX` → `job.retryTotal || '?'` (line 27, elapsed ticker) a `j.retryTotal || '?'` (line 75, main overlay map).
 
-### 4. Z-Image Turbo — split T2I / I2I
-Dřív `zimage_turbo` byl hybrid: `refs: true, maxRefs: 1, i2iModel: true, strength: true`. Přepínal endpoint podle toho jestli má uživatel ref:
-- bez refu → `fal-ai/z-image/turbo` (T2I)
-- s refem → `fal-ai/z-image/turbo/image-to-image` (I2I)
+### 2. Queue overlay „3 running, nic v listu" — sekundární efekt (#3)
+`renderQueueOverlay` updatovala badge (`3 running`) **před** `.map()` renderem. Crash na `RETRY_MAX` uvnitř template literálu v mapu → `list.innerHTML = ...` se nikdy nevykonalo → badge ukazuje aktivitu, list je prázdný. Opravou #4 zmizelo.
 
-**Problém:** strength slider se zobrazil vždy, i v T2I módu kde je irelevantní. Kromě toho slider se navíc skrýval/zobrazoval podle `refs.length > 0` ve dvou místech (`model-select.js` + `refs.js`).
+### 3. Cancel pro running joby — abort mechanismus (#3 navíc)
+`cancelJob(id)` v generate.js byl filter `j.id !== id || j.status !== 'pending'` — pro running job no-op. V overlay byl ✕ button taky jen u pending. User neměl jak zastavit běžící generaci.
 
-**Rozdělení:**
-- `zimage_turbo` — čistě T2I, endpoint `fal-ai/z-image/turbo`, bez refs/strength
-- `zimage_turbo_i2i` — čistě I2I, endpoint `fal-ai/z-image/turbo/image-to-image`, ref required, strength slider aktivní vždy
+**Soft-cancel implementace:**
+- `cancelJob` pro running: `job.cancelled = true`, `job.status = 'error'`, `job.errorMsg = 'Cancelled by user'`, `job.abort.abort()`, odstranění placeholderů, render.
+- `runJob` init: `if (!job.abort) job.abort = new AbortController();`
+- `runJob` success path: `if (job.cancelled) return;` před `status = 'done'`.
+- `runJob` catch path: `if (job.cancelled) return;` před zobrazením error placeholderu.
+- `runJobAndContinue`: pokud `job.cancelled` → odstranit z fronty a spustit další pending.
+- Cancel button v overlay **i v main queue panelu** pro running jobs, nejen pending.
 
-Dropdown separator mezi Z-Image a WAN skupinami přidán (dříve sdíleli společnou skupinu).
+**Trade-off:** API request se dokončí na pozadí (peníze se spotřebují), výsledek se zahodí. Handlery nepředávají `signal` do fetch calls — to by byl full refactor všech call* funkcí. `AbortController` je připraven pro budoucí rozšíření.
 
-### 5. Drobné UI fixy
-- **`\u25b8` bug** v negative prompt label (collapsible šipka): HTML text obsahoval JS escape `\u25b8` — HTML nezná JS escape, zobrazilo se literálně. Fix: přímé Unicode znaky `▸` / `▾` (funguje v HTML i JS kontextu).
-- **Strength slider visibility** — dvě redundantní podmínky (`model-select.js` + `refs.js`) používaly `refs.length > 0`. Druhá byla zastaralá z hybrid éry. Odstraněna; nyní řídí jediný bod v `model-select.js` podle `m.strength` flag.
+### 4. Rerun spustil celý job místo 1 karty (#2)
+`rerunJob` v output-placeholder.js destructoval job a předával zbytek do `addToQueue(jobData)`. `addToQueue` čte `count` z `geminiCount/fluxCount/sdCount/klingCount/zimageCount/qwen2Count/wan27Snap.count/xaiSnap.grokCount/imagenSnap.sampleCount` a vytvoří N placeholderů. Pokud původní job měl 4, rerun vytvořil 4 nové — místo 1 obnovy chybujícího tile.
 
-### 6. Segmind cleanup
-Segmind API klíč odstraněn z:
-- `template.html` — celý SEGMIND API KEY block
-- `setup.js` — localStorage load, `onSetupSegmindKey` handler, `API_KEY_FIELDS` entry
-- `spending.js` — `'segmind'` ze `SPEND_PROVIDERS`
+**Fix:** Před `addToQueue(jobData)` přepsat všechny count fields na 1 (obdoba `_batchForceSnap` větve). Snaps se klonují spread operátorem, aby se neměnil originál v paměti.
 
-Důvod: Segmind WAN 2.7 implementace je opuštěná (square-only output, v196en byl nahrazen Replicate s full aspect ratio whitelist). Odstranění rozbilo střídání pruhů v setup UI (Segmind byl mezi PIXVERSE a REPLICATE).
+### 5. Reuse z gallery neobnovila parametry — saveToGallery + reuseJobFromGallery (#1)
 
-Worker handler pro Segmind ponechán — cleanup Workeru v následující session.
+**Vrstva A — `saveToGallery` (db.js) ukládala minimum:**
+- gemini: thinking, refs, ratio, size
+- flux/seedream/wan27r/xai/luma/imagen: seed, size, ratio (nic víc)
+- další typy: částečně
+
+Po refaktoringu na Unified Panel je potřeba uložit všechny parametry které panel ovládá.
+
+**Fix:** Rozšířena na per-type save se všemi UI parametry (imageSize, aspectRatio, steps, guidance, safetyTolerance, negPrompt, acceleration, strength, persistentRetry, useSearch, thinking, grokRes, tier, sizeTier, resolution, klingResolution, imgWeight, styleWeight, modifyWeight). Zdroj pravdy = `snap` z `batchMeta` (= job objektu), kde má generate.js kompletní UI state při submitu. `result` objekty z handlerů obsahují jen returned fields (seed/size/ratio) — snap má zbytek.
+
+**Vrstva B — `reuseJobFromGallery` (gallery.js) znala okleštěný subset:**
+- Nevolala setAspectRatioSafe pro aspectRatio, jen pro ratio (identické ale ne vždy)
+- upRes jen pro kling a zimage — gemini/flux/seedream/qwen2/wan27/xai/imagen vynecháno
+- upCount4/10 vůbec nenastavovala
+- Chybělo: upSafetyChk, upSafetySlider, upStrength, upRetry, upGrounding, upThinkChk, sizeTier pro wan, grokRes pro xai, imageSize pro gemini/imagen
+- thinking používal neexistující `upTr-high`/`upTr-min` IDs (ve v200en přejmenováno na `upThinkRadio`)
+
+**Fix:** Kompletní přepis — teď paralelní s `loadJobParamsToForm` (output-placeholder.js), ale čte z `item.params` místo z `job.*Snap`. Pokrývá všechny unified modely (gemini, imagen, flux, seedream, kling, zimage, qwen2, wan27r, proxy_xai) a Luma.
+
+### 6. Bonus — `loadJobParamsToForm` defensive fix
+Reuse z error karty nevždy obnovoval `upCount4/10`. Příčina: `_reuseCount` měla early return pro `count <= 1` → neodpálilo `_setRadio`. Nic se nezobrazilo. Také chyběl `updateUnifiedResInfo()` call na konci.
+
+**Fix:** `_reuseCount` vždy nastaví radio (i pro 1). Přidán `updateUnifiedResInfo()` volání před `switchView('gen')`.
+
+### 7. Gallery + Video download — kompletní overhaul
+
+**Problémy před v202en:**
+- **Gallery ZIP:** `exportSelected` loadovala JSZip z `cdnjs.cloudflare.com` (CDN závislost!). Na `file://` protokolu občas selže network load bez viditelné chyby → user nic neviděl, ZIP se nestáhl.
+- **Gallery Individual PNG:** `showSaveFilePicker` v loopu = dialog pro **každý** soubor zvlášť. Pro dávku 10 obrázků = 10 dialogů.
+- **Video library:** `for (id of ids) videoDownloadById(id)` = každý blob `a.click()` → Chrome default Downloads folder. Bez možnosti volby a žádná paměť.
+- **Obojí:** neukládala se cesta → po restartu aplikace user musel znovu vybírat.
+
+**Petr requirement:** "Vše (obrazky i videa) ma byt na mem lokalnim pocitaci. Nechci nic mit na CDN."
+
+**Fix (3 vrstvy):**
+
+**(a) IndexedDB v8 — nová `prefs` store** pro perzistenci `FileSystemDirectoryHandle`. Chrome podporuje structured clone FileSystemDirectoryHandle do IDB — handle přežívá restart aplikace.
+
+**(b) Helper API v db.js:**
+- `prefsGet(key)` / `prefsPut(key, value)` / `prefsDelete(key)` — generic key/value access
+- `ensurePermission(handle, mode)` — queryPermission → requestPermission flow (handles 'granted' | 'prompt' | 'denied')
+- `pickDownloadDir(kind, {forceDialog})` — otevře `showDirectoryPicker({startIn: lastHandle, id: 'gis-<kind>'})` → user vybere folder (default = last used) → handle se uloží do prefs. `forceDialog: false` použije silent reuse pokud granted.
+- `writeFileToDir(dir, name, blob)` — `dir.getFileHandle(name, {create:true})` + `createWritable()` + write + close
+
+**(c) Inline ZIP writer (žádné CDN!):**
+- `_GIS_CRC_TABLE` — pre-generated CRC32 lookup table (Uint32Array, 256 entries)
+- `_gisCrc32(bytes)` — standard CRC32
+- `buildStoreOnlyZip(files)` — postaví ZIP blob podle [APPNOTE 4.4.x](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT):
+  - Local File Header (30B + name) + raw file data per entry
+  - Central Directory File Header (46B + name) per entry
+  - End of Central Directory Record (22B)
+  - Method = 0 (store, no compression — optimal pro PNG/MP4)
+  - UTF-8 flag bit 11 set pro Unicode filenames
+  - ~80 řádků celkem
+
+**Flow v praxi (gallery Download):**
+1. User vybere N obrázků, klikne Download
+2. Dialog: "Individual PNG files" nebo "ZIP archive"
+3. **PNG flow:** `pickDownloadDir('images')` → Chrome otevře directory picker (startIn = last used folder, nebo Downloads pro first run). User OK/změní → handle uložen do `prefs.downloadDir_images`. Silent zápis všech obrázků do folderu.
+4. **ZIP flow:** `showSaveFilePicker({id:'gis-zip', startIn: lastImagesDir})` — Chrome respektuje `id` pro vlastní persistence. Build ZIP inline (žádný JSZip), write.
+
+**Video library Download:** analogicky — `pickDownloadDir('videos')` → persist v `prefs.downloadDir_videos`. Silent bulk zápis.
+
+**Fallback pro prohlížeče bez directory picker** (Firefox, Safari < TBD): starý flow — `a.click()` pro každý soubor do default Downloads. Neutrhne to funkčnost, jen tam chybí folder selection.
+
+**Google Fonts (`fonts.googleapis.com`) v template.html** je jediný zbývající externí resource. Používá se pro Syne + IBM Plex Mono UI fonty. Není to user data (obrázky/videa) takže by mohlo zůstat, ale pro úplnou offline-first aplikaci by šlo nahradit embedded @font-face blocks s base64 woff2. **Decision: pending user confirmation.**
 
 ---
 
@@ -81,13 +116,12 @@ Worker handler pro Segmind ponechán — cleanup Workeru v následující sessio
 
 | Modul | Řádků | Popis změn |
 |-------|-------|------------|
-| paint.js | ~2080 | +80: annotCtx, annotSnapshot, annotHistory + všechny mirror operace v draw/undo/clear/crop/inpaint-resize. Method B přepsán bez diffu. pCropApply aktualizuje `_annotateBaseB64`. Soft-blend composite 5-param drawImage. |
-| models.js | ~638 | zimage_turbo split — T2I + I2I jako dva modely |
-| model-select.js | ~348 | Strength slider unconditional podle `m.strength`. zimage_turbo descriptions. I2I note "Input image required" (místo "No image = T2I"). |
-| refs.js | ~838 | Odstraněna zastaralá strength toggle logika (dvojí řízení) |
-| template.html | ~4940 | Z-Image dropdown split (3 options), separator k WAN, `\u25b8` → `▸` v neg prompt, Segmind block odstraněn |
-| setup.js | ~285 | Segmind load/handler/export odstraněn |
-| spending.js | ~285 | `'segmind'` ze SPEND_PROVIDERS |
+| output-render.js | ~1794 | RETRY_MAX → job.retryTotal (2 místa); cancel button pro running jobs v queue overlay |
+| generate.js | ~937 | cancelJob full rewrite (abort pro running); runJob.abort init; runJob respektuje job.cancelled v success + catch; runJobAndContinue odklízí cancelled z fronty; statusHtml s cancel i pro running |
+| output-placeholder.js | ~530 | rerunJob force count=1 (všechna count pole + snap clones); loadJobParamsToForm._reuseCount defensive (vždy nastaví i pro 1); updateUnifiedResInfo() trigger |
+| db.js | ~1150 | **+370**: saveToGallery snap-first params pro 10 typů modelů; IDB v8 + prefs store; prefsGet/Put/Delete helpers; pickDownloadDir + writeFileToDir + ensurePermission (File System Access API persistence); inline store-only ZIP writer (CRC32 + LFH + CDFH + EOCD) bez JSZip/CDN; exportSelected přepsána (directory picker flow pro PNG, inline ZIP pro archive) |
+| gallery.js | ~2057 | reuseJobFromGallery kompletní rewrite paralelní s loadJobParamsToForm; pokrývá všechny unified modely + Luma |
+| video.js | ~5265 | videoDownloadSelected přepsána — directory picker s persistencí (downloadDir_videos) + bulk silent write; fallback na a.click loop pro nekompatibilní prohlížeče |
 
 ---
 
@@ -101,82 +135,126 @@ Worker handler pro Segmind ponechán — cleanup Workeru v následující sessio
 6. **Runway Gen-4 Image + Video** (výzkum hotový)
 7. **Recraft V4**
 8. **Unified panel pro video modely** (fáze 2, analogicky k image unified v v200en)
-9. **Z-Image LoRA generation** (`fal-ai/z-image/turbo/lora` + `fal-ai/z-image/base/lora`) — UI pro až 3 LoRA modely s váhou 0.6–1.0
-10. **Z-Image LoRA trainer** (`fal-ai/z-image-trainer`) — kompletně jiný UX (ZIP upload, polling trénování)
+9. **Z-Image LoRA generation** (`fal-ai/z-image/turbo/lora` + `fal-ai/z-image/base/lora`)
+10. **Z-Image LoRA trainer** (`fal-ai/z-image-trainer`)
 11. **Ideogram V3**
 
-### Dokončené v v201en
-- ✅ Paint layer refactor + 3 crop bugs + inpaint soft-blend fix
-- ✅ Z-Image Turbo T2I/I2I split + dropdown separator
-- ✅ Segmind cleanup
+### Dokončené v v202en
+- ✅ RETRY_MAX crash + queue overlay desync (#4 + #3)
+- ✅ Cancel pro running joby (abort mechanismus)
+- ✅ Rerun single-card fix (#2)
+- ✅ Reuse z gallery kompletní restore (#1)
+- ✅ loadJobParamsToForm defensive count + resInfo refresh
+- ✅ Gallery + Video download overhaul — directory picker + persistence + inline ZIP (zero CDN)
 
-### Odepsané
-- ~~Z-Image Edit (`fal-ai/z-image/edit`)~~ — endpoint v Z-Image rodině neexistuje (jen T2I `base`/`turbo`, I2I `turbo/image-to-image`, LoRA endpointy, trainer)
-- ~~Recraft Crisp upscale bug~~ — vyřešen (posílal se moc velký upscale; limity + kontroly přidány)
-- ~~Seedance 2.0~~ — přidáno
-- ~~WAN 2.6 R2V~~ — nebudeme řešit
-- ~~Vidu Q3 Turbo~~ — nebudeme řešit
-- ~~Clarity 8×/16× via proxy~~ — neřešíme
+### Známá omezení přenášená do v203en+
+- **Hard abort API requestů:** cancelJob nastavuje `job.abort.abort()` ale call* handlery (callGemini, callFlux, callImagen, atd.) nepředávají `signal` do fetch. Full hard-abort vyžaduje refactor všech handlerů — pro teď soft-cancel (request dokončí, výsledek se zahodí).
+- **Segmind Worker handler cleanup** — stále pending (non-critical).
+- **Google Fonts** (template.html, fonts.googleapis.com) — jediný zbývající CDN resource. Decision: zda embedded @font-face s woff2 base64, nebo ponechat. Závisí na preferencích uživatele.
 
 ---
 
 ## Klíčové technické detaily
 
-### Paint engine — 3 parallel canvases (v201en)
+### Queue cancel flow (v202en)
 ```
-eng.canvas (display)     = base + strokes composite (viewing)
-eng.history[0]           = clean original image (invariant, never touched by strokes)
-_annotateMaskCanvas      = white strokes for inpaint mask (since v100)
-_annotateAnnotCanvas     = color strokes, transparent bg (NEW, for Method B export)
-
-Draw op (pen/shape/text/bucket):
-  1. Draw on state.ctx (display)        — user sees it immediately
-  2. Draw on state.maskCtx (monochrome) — inpaint mask updated
-  3. Draw on state.annotCtx (color)     — clean annotation layer
-  4. saveHistory() pushes all 3 snapshots
-
-Undo: pop from all 3 histories, putImageData back
-Clear: reset display to history[0], clear maskCtx + annotCtx
-Crop: getImageData(x,y,w,h) from all 3, resize canvases, reset histories
-      + history[0] regenerated from pristine full history[0] (drawImage clip)
-      + _annotateBaseB64 updated from new history[0]
-
-Method A save: eng.canvas.toDataURL()                  // already composite
-Method B save: { history[0], whiteBg + annotCanvas }   // no diff needed
+User klikne ✕ na running job
+  ↓
+cancelJob(id)
+  ↓ job.status = 'running'?
+  ├─ job.cancelled = true
+  ├─ job.status    = 'error'
+  ├─ job.errorMsg  = 'Cancelled by user'
+  ├─ job.abort.abort()          ← AbortController signál
+  ├─ placeholder cards removed
+  └─ renderQueue()              ← UI reaguje okamžitě
+  
+API request běží dál (ztracené peníze)
+  ↓
+runJob success path:
+  if (job.cancelled) return;    ← výsledek se zahodí
+                                   saveToGallery se NEvolá
+runJob catch path:
+  if (job.cancelled) return;    ← showErrorPlaceholder se NEvolá
+  
+runJobAndContinue:
+  dekrement runningModelCounts
+  if (job.cancelled) jobQueue.filter(out)
+  tryStartJobs()                ← další pending spustí
 ```
 
-### Z-Image endpoints (v201en)
-| Model | Endpoint | Type |
-|-------|----------|------|
-| `zimage_base` | `fal-ai/z-image/base` | T2I standard (28 steps, CFG, neg prompt) |
-| `zimage_turbo` | `fal-ai/z-image/turbo` | T2I ultra-fast (8 steps, acceleration) |
-| `zimage_turbo_i2i` | `fal-ai/z-image/turbo/image-to-image` | I2I (ref required, strength slider) |
+### Reuse params flow (v202en)
+```
+saveToGallery(result, prompt, folder, refsCopy, rawPrompt, job)
+  ↓
+snap = job.{gemini|imagen|flux|sd|kling|zimage|qwen2|wan27|xai|luma}Snap
+  ↓
+params = { …result fields, …snap fields }
+  ↓
+dbPut('images', { …, params, … })
 
-Dispatch v `callZImage`: `model.id` přímo jako endpoint path (žádná dynamika přepínání už není potřeba, ale legacy logika `i2iModel && refs.length > 0 → turbo/image-to-image` ponechána jako fallback pro případný refactor).
+─── later ───
 
-### Inpaint composite (v201en)
-```js
-// Hard-blend (maskBlur = 0) — už byl OK
-cc.drawImage(ri, cropX, cropY, cropW, cropH);  // 5-param → force resize
+reuseJobFromGallery(item)
+  ↓
+selectModel(item.modelKey)      ← resetuje panel na defaults
+  ↓
+setAspectRatioSafe(p.aspectRatio || p.ratio)
+  ↓
+per-type restore (parallel to loadJobParamsToForm):
+  upRes, upSeed, upSteps, upGuidance, upNeg, upAccel,
+  upSafetyChk, upSafetySlider, upStrength, upThinkRadio,
+  upThinkChk, upGrounding, upRetry, upCount4/10
+  ↓
+updateUnifiedResInfo()
+```
 
-// Soft-blend (maskBlur > 0) — fix v v201en
-rc.drawImage(ri, 0, 0, cropW, cropH);  // force cropW×cropH
-rc.drawImage(mi, 0, 0, cropW, cropH);  // force cropW×cropH
-cc.drawImage(resultCrop, cropX, cropY);
+### Rerun single-card (v202en)
+```
+rerunJob(cardKey)
+  ↓
+jobData = job - {id, status, startedAt, elapsed, retryAttempt, retryTotal,
+                 pendingCards, requestId, cancelled, abort}
+  ↓
+OVERRIDE: všechna count pole = 1
+  geminiCount, fluxCount, sdCount, klingCount, zimageCount, qwen2Count = 1
+  xaiSnap.grokCount, imagenSnap.sampleCount, wan27Snap.count, mysticSnap.count = 1
+  (snap clones via spread — originál v jobu se nezmění)
+  ↓
+addToQueue(jobData)  →  1 placeholder card
+  ↓
+insertBefore(new, oldErrorCard) + removeChild(oldErrorCard)
 ```
 
 ---
 
 ## Pravidla a principy
 
+### Runtime boundaries & distribution philosophy
+GIS běží jako **single-file HTML přes `file://` v Chromu**. To je sandboxed browser environment, ne desktop aplikace. Plně akceptujeme jeho limity pro současnou fázi vývoje:
+
+- **No CDN for libraries/code** — žádný JSZip, lodash, ani jiná utility knihovna z cdnjs/jsdelivr/unpkg. Pokud knihovna potřeba → inline nebo napsat vlastní minimální implementaci. CDN resources mají "omezenou dobu uložení" a závislost na externím serveru narušuje offline deterministický běh.
+- **CDN for UI styling OK** — Google Fonts (Syne, IBM Plex Mono) zůstává. GIS musí být vždy online (AI API calls), a fonty nejsou user data. Font caching Chrome řeší sám.
+- **User data vždy lokálně** — obrázky, videa, reference, API klíče, nastavení. Nic se neukládá na externí servery (vyjma dočasných uploadů k AI providerům během generování).
+- **File System Access API na file:// je flaky** — `showSaveFilePicker` a `showDirectoryPicker` občas tiše selhávají na file:// protokolu. Detekce `_IS_FILE_PROTOCOL` → bypass FS API → spolehlivý `a.click()` fallback s viditelným progress overlayem.
+
+### Desktop app (Tauri) — later, not now
+Přechod do Tauri přijde až budou **konkrétní hard-limity vyzkoušené, ne spekulativní**. Triggery pro migraci:
+- Native OS dialogy místo Chrome verze
+- Volání jiných programů (ffmpeg, Photoshop, DaVinci — open/export integrace)
+- Robustní lokální databáze (SQLite) — IndexedDB quota limity začnou vadit u velkých galerií
+- Absolutní file paths, file watching, shell integration
+- Zrušení Cloudflare Worker proxy (Tauri HTTP client nemá CORS restrikce)
+
+Aktuální zaměření: **vycítit všechny hranice prohlížeče v GIS, dotáhnout maximum funkčnosti single-file HTML, pak migrovat s konkrétním seznamem potřebných systémových integrací.**
+
+### Technical rules
 - **⚠ CRITICAL — `/mnt/project/` je VŽDY stale. NIKDY ho nepoužívat.**
 - **Session start:** (1) načíst `STAV.md` z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) `node build.js NNNen → dist/`
-- **Syntax check po buildu:** `sed -n 'SCRIPT_START,SCRIPT_ENDp' dist/gis_vNNNen.html > /tmp/check.mjs && node --input-type=module < /tmp/check.mjs` → OK = "window is not defined"
+- **Syntax check po buildu:** build produkuje HTML s `<script data-cfasync>` injection mimo naši kontrolu — awk `/^<script>$/` nezachytí. Použij Node extraction: `const idx = html.lastIndexOf('<script>'); const end = html.indexOf('</script>', idx); ...`. OK výstup = `ReferenceError: window is not defined`.
 - **HTML validation** — build.js zobrazuje `✓ HTML div balance: OK (N pairs)`
 - **NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele.**
 - **Vždy důkladně prozkoumat** (web search, probe APIs) než prohlásit že něco nejde.
-- **Research API maturity + regionální dostupnost** před integrací. Z-Image Edit je typický případ — endpoint v TODO, ale neexistuje. Research potvrdil že Z-Image rodina má jen T2I/I2I/LoRA/trainer.
-- **REST API parameter names**: Vertex AI naming pro Google REST (sampleImageSize, sampleCount), SDK naming v dokumentaci.
 - **Worker free tier:** 30s wall-clock limit — nikdy nepollovat uvnitř Workeru.
 - **Snap count v `addToQueue`:** každý nový model musí mít svůj count field.
 - **xAI concurrency limit:** max 2 concurrent requesty.
@@ -186,6 +264,9 @@ cc.drawImage(resultCrop, cropX, cropY);
 - **xAI Video Edit payload:** `video: {url}` objekt.
 - **Dedicated I2I/Edit model flag `strength: true`** → slider zobrazit vždy (nezávisí na refs.length).
 - **Paint engine invariant:** `history[0]` = čistý originál, nikdy přepsán aktuálním ctx. `annotCanvas` = klon anotací, nezávislý na base.
+- **Queue cancel invariant:** `cancelJob` nastavuje `job.cancelled` ale NEdekrementuje runningModelCounts — to dělá `runJobAndContinue` po return z runJob (deterministic slot release).
+- **saveToGallery snap fallback:** result objekty z call* handlerů obsahují jen returned fields. Pro kompletní params persistence čti ze `batchMeta.*Snap` (= job.*Snap).
+- **Download UX na file://:** vždy viditelný `dlProgShow/Update/Hide` overlay. Žádné tiché operace — normální user bez feedbacku usoudí že aplikace nefunguje.
 - **Rozhodnutí nedělat za Petra** — u složitějších funkcí prezentovat options.
 
 ---

@@ -3452,7 +3452,10 @@ function videoToggleSelect(id) {
 function updateVideoBulkBar() {
   const bar = document.getElementById('videoBulkBar');
   const countEl = document.getElementById('videoSelCount');
-  if (bar) bar.style.display = videoSelectedIds.size > 0 ? 'flex' : 'none';
+  // Unified bulk bar pattern: .lib-bulk.show — viz template.html CSS sekce
+  // "UNIFIED LIBRARY TOOLBARS". Ne pouzivat style.display — prepsalo by display:flex
+  // nastavene v show class, a bar by se objevil i kdyz nema byt.
+  if (bar) bar.classList.toggle('show', videoSelectedIds.size > 0);
   if (countEl) countEl.textContent = videoSelectedIds.size;
 }
 
@@ -3572,8 +3575,312 @@ async function videoDownloadById(id) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+// Bulk video download — viditelný progress overlay + file:// protocol awareness.
+// Flow:
+//   - Na http(s)://: directory picker (FS API) s persistencí downloadDir_videos → silent bulk write
+//   - Na file://: sekvenční a.click() do Chrome Downloads (FS API je tam nespolehlivé)
+// V obou případech progress overlay během celé operace + toast s jasným výsledkem.
 async function videoDownloadSelected() {
-  for (const id of videoSelectedIds) await videoDownloadById(id);
+  if (!videoSelectedIds.size) return;
+  const ids = [...videoSelectedIds];
+
+  // Načíst všechna videa pod progress overlay
+  dlProgShow(`↓ Download ${ids.length} video${ids.length > 1 ? 's' : ''}`, 'Loading videos from library…');
+  dlProgUpdate('Loading videos from library…', 0, 100);
+  await new Promise(r => setTimeout(r, 30));
+
+  const records = [];
+  for (let i = 0; i < ids.length; i++) {
+    const rec = await dbGet('videos', ids[i]).catch(() => null);
+    if (rec?.videoData) records.push(rec);
+    if (i % 2 === 1 || i === ids.length - 1) {
+      dlProgUpdate(`Loading… ${i + 1} / ${ids.length}`, i + 1, ids.length);
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  if (!records.length) {
+    dlProgHide();
+    toast('No videos to download', 'err');
+    return;
+  }
+
+  const makeName = (rec) => `${(rec.modelKey || 'video').replace(/[^\w-]/g, '_')}-${new Date(rec.ts).toISOString().slice(0,10)}-${rec.id.slice(-6)}.mp4`;
+
+  try {
+    // Primární cesta: directory picker (jen mimo file://)
+    if (_HAS_FS_API) {
+      let dir = null;
+      dlProgHide(); // skryj během picker dialogu
+      try {
+        dir = await pickDownloadDir('videos', { forceDialog: true });
+      } catch (e) {
+        console.warn('[GIS] pickDownloadDir(videos) failed:', e);
+      }
+      if (dir) {
+        dlProgShow(`🎬 Saving to "${dir.name}"`, `0 / ${records.length}`);
+        let saved = 0, failed = 0;
+        const failures = [];
+        for (let i = 0; i < records.length; i++) {
+          const rec = records[i];
+          try {
+            const blob = new Blob([rec.videoData], { type: 'video/mp4' });
+            await writeFileToDir(dir, makeName(rec), blob);
+            saved++;
+          } catch (e) {
+            failed++;
+            failures.push(makeName(rec) + ': ' + e.message);
+          }
+          dlProgUpdate(`${saved + failed} / ${records.length}`, saved + failed, records.length);
+        }
+        dlProgHide();
+        if (failed === 0) {
+          console.log(`[GIS] Saved ${saved} videos to folder "${dir.name}"`);
+          toast(`✓ Saved ${saved} video${saved > 1 ? 's' : ''} to "${dir.name}"`, 'ok');
+        } else {
+          console.error('[GIS] Video save failures:', failures);
+          toast(`Saved ${saved}, ${failed} failed — see console`, 'err');
+        }
+        return;
+      }
+      // Picker cancelled/failed → pokračovat na fallback
+    }
+
+    // Fallback: sekvenční a.click() do Chrome Downloads (funguje i na file://)
+    dlProgShow(`🎬 Downloading videos`, `0 / ${records.length} — files go to Chrome Downloads`);
+    let saved = 0;
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      try {
+        const blob = new Blob([rec.videoData], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = makeName(rec);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        saved++;
+      } catch (e) {
+        console.error('[GIS] Video download failed:', e);
+      }
+      dlProgUpdate(`${saved} / ${records.length} — files go to Chrome Downloads`, saved, records.length);
+      // Delay je kritický — Chrome blokuje rychlé dávkové downloads
+      await new Promise(r => setTimeout(r, 300));
+    }
+    dlProgHide();
+    console.log(`[GIS] Downloaded ${saved} videos to Chrome Downloads`);
+    toast(`✓ Downloaded ${saved} video${saved > 1 ? 's' : ''} to Chrome Downloads`, 'ok');
+  } catch (e) {
+    dlProgHide();
+    console.error('[GIS] Video bulk download failed:', e);
+    toast('Download failed: ' + e.message, 'err');
+  }
+}
+
+// ── Video library archive — JSON export/import ──────────────────────
+// Analogicky k exportGallery() / importGallery() v gallery.js.
+// Ukládá: všechna videa z IDB store 'videos' (s binary videoData jako
+// base64) + všechny folders z 'videoFolders'. Binary data jsou Uint8Array
+// nebo ArrayBuffer — pro JSON serializaci musí být konvertovány na base64.
+async function exportVideoArchive() {
+  const ts = new Date().toISOString().slice(0,10);
+
+  // Step 1: save picker — musí být v user gesture, před await ops
+  let fileHandle = null;
+  const suggestedName = `gis-video-archive-${ts}.json`;
+  if (_HAS_FS_API) {
+    try {
+      fileHandle = await window.showSaveFilePicker({
+        id: 'gis-video-archive',
+        suggestedName,
+        types: [{ description: 'GIS Video Archive', accept: { 'application/json': ['.json'] } }]
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      fileHandle = null; // fallback na a.click
+    }
+  }
+
+  try {
+    dlProgShow('↓ Archiving video library', 'Loading videos from library…');
+    dlProgUpdate('Loading videos from library…', 0, 100);
+    await new Promise(r => setTimeout(r, 30));
+
+    const videos  = await dbGetAll('videos');
+    const folders = await dbGetAll('videoFolders');
+
+    if (!videos.length) {
+      dlProgHide();
+      toast('Video library is empty', 'err');
+      return;
+    }
+
+    // Step 2: serialize per-video (binary → base64).
+    // Progress bar: 0-90% pro videa, 90-100% pro JSON write.
+    dlProgUpdate(`Serializing videos… 0 / ${videos.length}`, 0, videos.length);
+    await new Promise(r => setTimeout(r, 30));
+
+    // Build JSON incrementally to avoid mega-string concatenation + blok hlavního threadu
+    const header = JSON.stringify({
+      version: 1,
+      type: 'video-archive',
+      exportedAt: new Date().toISOString(),
+      videoCount: videos.length,
+      folders,
+    });
+    const parts = [header.slice(0, -1) + ', "videos": ['];
+    let totalBytes = 0;
+
+    for (let i = 0; i < videos.length; i++) {
+      const v = videos[i];
+      // videoData je ArrayBuffer nebo Uint8Array — konvertovat na base64
+      let videoDataB64 = null;
+      if (v.videoData) {
+        const bytes = v.videoData instanceof Uint8Array
+          ? v.videoData
+          : new Uint8Array(v.videoData);
+        totalBytes += bytes.length;
+        // chunk-by-chunk fromCharCode — velká videa by přetekla stack jinak
+        let bin = '';
+        const CHUNK = 8192;
+        for (let k = 0; k < bytes.length; k += CHUNK) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(k, k + CHUNK));
+        }
+        videoDataB64 = btoa(bin);
+      }
+      const serializable = { ...v, videoData: videoDataB64 };
+      if (i > 0) parts.push(',');
+      parts.push(JSON.stringify(serializable));
+
+      if (i % 3 === 2 || i === videos.length - 1) {
+        const mb = (totalBytes / 1024 / 1024).toFixed(1);
+        dlProgUpdate(`Serializing videos… ${i + 1} / ${videos.length} (${mb} MB)`, i + 1, videos.length);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    parts.push(']}');
+
+    const mbTotal = (totalBytes / 1024 / 1024).toFixed(1);
+    dlProgUpdate(`Writing archive… (${mbTotal} MB)`, 95, 100);
+    await new Promise(r => setTimeout(r, 30));
+    const blob = new Blob(parts, { type: 'application/json' });
+    const filename = `gis-video-archive-${ts}-${videos.length}vid.json`;
+
+    if (fileHandle) {
+      try {
+        const ws = await fileHandle.createWritable();
+        await ws.write(blob);
+        await ws.close();
+        dlProgHide();
+        toast(`✓ Archived — ${videos.length} videos (${mbTotal} MB)`, 'ok');
+        return;
+      } catch (e) {
+        console.warn('[GIS] Video archive write failed, falling back to a.click():', e);
+      }
+    }
+    // Fallback: blob URL + a.click()
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    dlProgHide();
+    toast(`✓ Archive downloaded: ${filename} (${mbTotal} MB)`, 'ok');
+  } catch (e) {
+    dlProgHide();
+    console.error('[GIS] Video archive failed:', e);
+    toast('Archive failed: ' + e.message, 'err');
+  }
+}
+
+async function importVideoArchive(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  input.value = ''; // reset input aby uzivatel mohl znovu vybrat stejny soubor
+
+  try {
+    dlProgShow('↑ Loading video archive', 'Reading file…');
+    dlProgUpdate('Reading file…', 5, 100);
+    await new Promise(r => setTimeout(r, 30));
+
+    const text = await file.text();
+    dlProgUpdate('Parsing JSON…', 20, 100);
+    await new Promise(r => setTimeout(r, 0));
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('Invalid JSON file: ' + e.message);
+    }
+    if (!data || data.type !== 'video-archive' || !Array.isArray(data.videos)) {
+      throw new Error('Not a valid video archive (missing type or videos field)');
+    }
+
+    const total = data.videos.length;
+    if (!total) {
+      dlProgHide();
+      toast('Archive is empty', 'err');
+      return;
+    }
+
+    // Folders first
+    if (Array.isArray(data.folders)) {
+      for (const f of data.folders) {
+        try { await dbPut('videoFolders', f); } catch (_) {}
+      }
+    }
+
+    // Videos — convert base64 → Uint8Array → ArrayBuffer for dbPut
+    let imported = 0, skipped = 0;
+    for (let i = 0; i < total; i++) {
+      const v = data.videos[i];
+      try {
+        // Skip if already exists (same id)
+        const existing = await dbGet('videos', v.id).catch(() => null);
+        if (existing) { skipped++; }
+        else {
+          // Convert base64 videoData back to Uint8Array
+          let videoBytes = null;
+          if (v.videoData && typeof v.videoData === 'string') {
+            const bin = atob(v.videoData);
+            videoBytes = new Uint8Array(bin.length);
+            for (let k = 0; k < bin.length; k++) videoBytes[k] = bin.charCodeAt(k);
+          }
+          await dbPut('videos', { ...v, videoData: videoBytes });
+          // Pokud je video_meta store to supportuje, write meta tez
+          try {
+            if (typeof dbPatchVideoMeta === 'function') {
+              // dbPatchVideoMeta existuje v v202en ale meta saveVideoMeta-style
+              await dbPut('video_meta', {
+                id: v.id, ts: v.ts, model: v.model, modelKey: v.modelKey,
+                prompt: v.prompt, rawPrompt: v.rawPrompt, folder: v.folder, dims: v.dims,
+              });
+            }
+          } catch (_) {}
+          imported++;
+        }
+      } catch (e) {
+        console.error('[GIS] Failed to import video:', v.id, e);
+        skipped++;
+      }
+      if (i % 2 === 1 || i === total - 1) {
+        dlProgUpdate(`Importing… ${imported + skipped} / ${total}`, imported + skipped, total);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    dlProgHide();
+    if (typeof renderVideoGallery === 'function') renderVideoGallery();
+    if (typeof renderVideoFolders === 'function') renderVideoFolders();
+    if (skipped) toast(`✓ Imported ${imported}, skipped ${skipped} (already in library)`, 'ok');
+    else toast(`✓ Imported ${imported} videos`, 'ok');
+  } catch (e) {
+    dlProgHide();
+    console.error('[GIS] Video archive import failed:', e);
+    toast('Import failed: ' + e.message, 'err');
+  }
 }
 
 // ── Reuse video setup ─────────────────────────────────────

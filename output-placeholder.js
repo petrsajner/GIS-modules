@@ -256,13 +256,27 @@ function showErrorPlaceholder(cardEl, job, msg) {
     </div>`;
 }
 
-// Immediately re-queues the failed job with identical parameters
+// Immediately re-queues the failed job with identical parameters — FORCED single-card rerun
 function rerunJob(cardKey) {
   const card = document.querySelector(`[data-card-key="${cardKey}"]`);
   const job = card?._job;
   if (!job) { toast('Cannot rerun — job data lost', 'err'); return; }
   const { id, status, startedAt, elapsed, retryAttempt, retryTotal, pendingCards,
-          requestId, cancelled, ...jobData } = job;
+          requestId, cancelled, abort, ...jobData } = job;
+
+  // Force count=1 — uživatel chce znovu právě TUTO jednu chybující kartu,
+  // ne celý původní job o N paralelních obrázcích. (addToQueue čte count z těchto polí.)
+  jobData.geminiCount = 1;
+  jobData.fluxCount   = 1;
+  jobData.sdCount     = 1;
+  jobData.klingCount  = 1;
+  jobData.zimageCount = 1;
+  jobData.qwen2Count  = 1;
+  if (jobData.xaiSnap)     jobData.xaiSnap     = { ...jobData.xaiSnap,     grokCount:   1 };
+  if (jobData.imagenSnap)  jobData.imagenSnap  = { ...jobData.imagenSnap,  sampleCount: 1 };
+  if (jobData.wan27Snap)   jobData.wan27Snap   = { ...jobData.wan27Snap,   count:       1 };
+  if (jobData.mysticSnap)  jobData.mysticSnap  = { ...jobData.mysticSnap,  count:       1 };
+
   _suppressPlaceholderScroll = true;
   addToQueue(jobData);
   _suppressPlaceholderScroll = false;
@@ -320,12 +334,19 @@ async function loadJobParamsToForm(job) {
   if (job.modelKey && typeof selectModel === 'function') selectModel(job.modelKey);
   const m = MODELS[job.modelKey] || job.model;
 
-  // Helper — set unified count radio
+  // Helper — set unified count radio (always — even for count=1 we explicitly set it)
   const _reuseCount = (count, mdl) => {
-    if (!count || count <= 1) return;
+    const n = parseInt(count) || 1;
     const mc = mdl?.maxCount || 4;
-    if (mc <= 4) { _setRadio('upCount4', String(count)); document.getElementById('upCount4Val').textContent = count; }
-    else         { _setRadio('upCount10', String(count)); document.getElementById('upCount10Val').textContent = count; }
+    if (mc <= 4) {
+      _setRadio('upCount4', String(n));
+      const vEl = document.getElementById('upCount4Val');
+      if (vEl) vEl.textContent = n;
+    } else {
+      _setRadio('upCount10', String(n));
+      const vEl = document.getElementById('upCount10Val');
+      if (vEl) vEl.textContent = n;
+    }
   };
 
   // ── 3. Model-specific params ──
@@ -483,6 +504,8 @@ async function loadJobParamsToForm(job) {
   }
 
   // ── 5. Switch to gen view and confirm ──
+  // Trigger UI refresh — unified res info (pixel dimensions next to resolution label)
+  if (typeof updateUnifiedResInfo === 'function') updateUnifiedResInfo();
   switchView('gen');
   setGenMode('image');
   if (refs.length)

@@ -310,6 +310,11 @@ async function runJobAndContinue(job) {
   const count = runningModelCounts.get(job.modelId) || 1;
   if (count <= 1) runningModelCounts.delete(job.modelId);
   else runningModelCounts.set(job.modelId, count - 1);
+  // Cancelled joby ihned vyhodit z fronty — error status by jinak čekal na auto-clear
+  if (job.cancelled) {
+    jobQueue = jobQueue.filter(j => j.id !== job.id);
+    renderQueue();
+  }
   tryStartJobs(); // okamžitě spustit další waitingcí job pro tento model
 }
 
@@ -381,6 +386,7 @@ async function runJob(job) {
   job.status = 'running';
   job.startedAt = Date.now();
   job.retryAttempt = 0;
+  if (!job.abort) job.abort = new AbortController(); // cancel/abort support (respect by cancelJob)
   renderQueue();
   try {
     if (job.isUpscale) {
@@ -747,11 +753,13 @@ async function runJob(job) {
       trackSpend('freepik', '_magnific');
       await replacePlaceholder(cardEl, result, job.prompt, galId);
     }
+    if (job.cancelled) return; // cancelJob už nastavil status + odstranil placeholdery
     job.status = 'done';
     job.retryAttempt = 0;
     job.elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1) + 's';
     renderQueue();
   } catch(e) {
+    if (job.cancelled) return; // cancelJob už nastavil status; ignoruj abort/residual errors
     job.status = 'error';
     job.errorMsg = e.message;
     console.error('[GIS] Job error:', job.label || job.modelId, '\n', e.message);
@@ -820,9 +828,9 @@ function renderQueue() {
       j.status === 'pending'
         ? `<span>waiting</span><button onclick="cancelJob('${j.id}')" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0;line-height:1;" title="Cancel">✕</button>`
         : j.status === 'running' && j.retryAttempt > 0
-          ? `<span>retry ${j.retryAttempt}/${j.retryTotal || '?'}…</span>`
+          ? `<span>retry ${j.retryAttempt}/${j.retryTotal || '?'}…</span><button onclick="cancelJob('${j.id}')" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0;line-height:1;" title="Cancel">✕</button>`
           : j.status === 'running'
-            ? '<span>⟳ generating…</span>'
+            ? `<span>⟳ generating…</span><button onclick="cancelJob('${j.id}')" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0;line-height:1;" title="Cancel">✕</button>`
             : j.status === 'done'
               ? `<span>✓ ${j.elapsed}</span>`
               : '<span>⚠ error</span>';
@@ -850,8 +858,37 @@ function clearDoneJobs() {
 }
 
 function cancelJob(id) {
-  jobQueue = jobQueue.filter(j => j.id !== id || j.status !== 'pending');
-  renderQueue();
+  const job = jobQueue.find(j => j.id === id);
+  if (!job) return;
+
+  if (job.status === 'pending') {
+    // Pending: job ještě neběží → vyhodit z fronty + odstranit placeholdery
+    (job.pendingCards || []).forEach(card => {
+      if (card?.parentNode) card.parentNode.removeChild(card);
+    });
+    jobQueue = jobQueue.filter(j => j.id !== id);
+    renderQueue();
+    return;
+  }
+
+  if (job.status === 'running') {
+    // Running: soft-cancel. API request může doběhnout na pozadí, ale:
+    //   - runJob zkontroluje job.cancelled před saveToGallery / status='done'
+    //   - placeholdery odstraníme okamžitě → UI reaguje hned
+    //   - runJobAndContinue uvolní concurrency slot a spustí další pending
+    job.cancelled = true;
+    job.status    = 'error';
+    job.errorMsg  = 'Cancelled by user';
+    if (job.abort && typeof job.abort.abort === 'function') {
+      try { job.abort.abort(); } catch (_) { /* noop */ }
+    }
+    (job.pendingCards || []).forEach(card => {
+      if (card?.parentNode) card.parentNode.removeChild(card);
+    });
+    job.pendingCards = []; // runJob catch nezkouší už nic zobrazovat
+    renderQueue();
+    if (typeof toast === 'function') toast('Job cancelled', 'ok');
+  }
 }
 
 function cancelAllPending() {

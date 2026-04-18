@@ -1239,73 +1239,161 @@ async function reuseJobFromGallery(item) {
   renderStyleTags();
   renderCameraTags();
   updateCameraBtn();
-  if (item.modelKey) selectModel(item.modelKey);
-  if (item.params?.ratio) setAspectRatioSafe(item.params.ratio);
-  if (item.params?.thinking) {
-    const el = document.getElementById(item.params.thinking === 'high' ? 'upTr-high' : 'upTr-min');
-    if (el) el.checked = true;
-  }
+
+  if (item.modelKey && typeof selectModel === 'function') selectModel(item.modelKey);
   const model = MODELS[item.modelKey];
-  // Unified resolution restore
+  const p = item.params || {};
+
+  // ── Helpers (mirror loadJobParamsToForm, reading from `p`) ──────
+  const _setFld = (val) => {
+    if (!val) return;
+    const el = document.getElementById('targetFolder');
+    if (el) el.value = val;
+  };
+  const _setRadio = (name, value) => {
+    if (value == null || value === '') return;
+    const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
+    if (el) el.checked = true;
+  };
+  const _setSlider = (inputId, labelId, value, fmt) => {
+    if (value === undefined || value === null) return;
+    const el = document.getElementById(inputId);
+    if (el) el.value = value;
+    const lbl = document.getElementById(labelId);
+    if (lbl) lbl.textContent = fmt ? fmt(value) : value;
+  };
+
+  // ── Aspect ratio — universal first step ──
+  const aspect = p.aspectRatio || p.ratio || null;
+  if (aspect) setAspectRatioSafe(aspect);
+
+  // ── Unified panel — per-type restore (parallel to loadJobParamsToForm) ──
   if (model && isUnifiedModel(model)) {
-    const p = item.params || {};
-    // Seed
-    if (p.seed) { const el = document.getElementById('upSeed'); if (el) el.value = p.seed !== '—' ? p.seed : ''; }
-    // Resolution — map from saved value to upRes label
-    if (model.type === 'kling' && p.klingResolution) {
-      const rEl = document.querySelector(`input[name="upRes"][value="${p.klingResolution}"]`);
-      if (rEl) rEl.checked = true;
+    const t = model.type;
+
+    if (t === 'gemini') {
+      _setRadio('upRes', p.imageSize || '1K');
+      _setRadio('upThinkRadio', p.thinkingLevel || p.thinking || 'minimal');
+      const se = document.getElementById('upGrounding');
+      if (se) se.checked = !!p.useSearch;
+      const re = document.getElementById('upRetry');
+      if (re) re.checked = !!p.persistentRetry;
     }
-    if (model.type === 'zimage' && p.imageSize && model.resValues) {
-      const label = Object.entries(model.resValues).find(([,v]) => String(v) === String(p.imageSize))?.[0];
-      if (label) { const rEl = document.querySelector(`input[name="upRes"][value="${label}"]`); if (rEl) rEl.checked = true; }
+
+    else if (t === 'imagen') {
+      _setRadio('upRes', p.imageSize || '1K');
+      if (p.seed) { const e = document.getElementById('upSeed'); if (e) e.value = p.seed; }
     }
-    // Steps
-    if (p.steps) {
-      const el = document.getElementById('upSteps');
-      if (el) { el.value = p.steps; document.getElementById('upStepsVal').textContent = p.steps; }
+
+    else if (t === 'flux') {
+      // Reverse-map tier → upRes label
+      if (p.tier != null && model.resValues) {
+        const label = Object.entries(model.resValues).find(([,v]) => v === p.tier)?.[0];
+        if (label) _setRadio('upRes', label);
+      }
+      const seedEl = document.getElementById('upSeed');
+      if (seedEl) seedEl.value = (p.seed && p.seed !== '—') ? p.seed : '';
+      _setSlider('upSteps',    'upStepsVal',    p.steps,    v => v);
+      _setSlider('upGuidance', 'upGuidanceVal', p.guidance, v => parseFloat(v).toFixed(1));
+      const safeEl = document.getElementById('upSafetySlider');
+      if (safeEl && p.safetyTolerance !== undefined) {
+        safeEl.value = p.safetyTolerance;
+        document.getElementById('upSafetySliderVal').textContent = p.safetyTolerance;
+      }
     }
-    // Guidance
-    if (p.guidance && model.guidance) {
-      const el = document.getElementById('upGuidance');
-      if (el) { el.value = p.guidance; document.getElementById('upGuidanceVal').textContent = parseFloat(p.guidance).toFixed(1); }
+
+    else if (t === 'seedream') {
+      _setRadio('upRes', p.resolution || '2K');
+      const seedEl = document.getElementById('upSeed');
+      if (seedEl) seedEl.value = (p.seed && p.seed !== '—') ? p.seed : '';
+      const safeEl = document.getElementById('upSafetyChk');
+      if (safeEl) safeEl.checked = p.safety !== false;
     }
-    // Neg prompt
-    if (p.negPrompt !== undefined && model.negPrompt) {
-      const el = document.getElementById('upNeg');
-      if (el) el.value = p.negPrompt;
+
+    else if (t === 'kling') {
+      _setRadio('upRes', p.klingResolution || '1K');
     }
-    // Acceleration
-    if (p.acceleration) {
-      const rEl = document.querySelector(`input[name="upAccel"][value="${p.acceleration}"]`);
-      if (rEl) rEl.checked = true;
+
+    else if (t === 'zimage') {
+      // Reverse-map imageSize (MP value) → upRes label
+      if (p.imageSize && model.resValues) {
+        const label = Object.entries(model.resValues).find(([,v]) => String(v) === String(p.imageSize))?.[0];
+        if (label) _setRadio('upRes', label);
+      }
+      const seedEl = document.getElementById('upSeed');
+      if (seedEl) seedEl.value = (p.seed && p.seed !== '—') ? p.seed : '';
+      _setSlider('upSteps',    'upStepsVal',    p.steps,    v => v);
+      if (p.guidance != null) _setSlider('upGuidance', 'upGuidanceVal', p.guidance, v => parseFloat(v).toFixed(1));
+      const negEl = document.getElementById('upNeg');
+      if (negEl && p.negPrompt !== undefined) negEl.value = p.negPrompt;
+      _setRadio('upAccel', p.acceleration || 'regular');
+      const safeEl = document.getElementById('upSafetyChk');
+      if (safeEl) safeEl.checked = p.safety !== false;
+      const strEl = document.getElementById('upStrength');
+      if (strEl && p.strength !== undefined && p.strength !== null) {
+        strEl.value = p.strength;
+        document.getElementById('upStrengthVal').textContent = parseFloat(p.strength).toFixed(2);
+      }
     }
-    // Update res info
+
+    else if (t === 'qwen2') {
+      _setRadio('upRes', p.resolution || '1K');
+      const seedEl = document.getElementById('upSeed');
+      if (seedEl) seedEl.value = (p.seed && p.seed !== '—') ? p.seed : '';
+      _setSlider('upSteps',    'upStepsVal',    p.steps,    v => v);
+      _setSlider('upGuidance', 'upGuidanceVal', p.guidance, v => parseFloat(v).toFixed(1));
+      _setRadio('upAccel', p.acceleration || 'regular');
+      const safeEl = document.getElementById('upSafetyChk');
+      if (safeEl) safeEl.checked = p.safety !== false;
+      const negEl = document.getElementById('upNeg');
+      if (negEl && p.negPrompt !== undefined) negEl.value = p.negPrompt;
+    }
+
+    else if (t === 'wan27r') {
+      if (p.sizeTier) _setRadio('upRes', p.sizeTier);
+      const thinkEl = document.getElementById('upThinkChk');
+      if (thinkEl) thinkEl.checked = !!p.thinking;
+      const seedEl = document.getElementById('upSeed');
+      if (seedEl) seedEl.value = (p.seed && p.seed !== '—') ? p.seed : '';
+      const negEl = document.getElementById('upNeg');
+      if (negEl && p.negPrompt) negEl.value = p.negPrompt;
+    }
+
+    else if (t === 'proxy_xai') {
+      if (p.grokRes) _setRadio('upRes', String(p.grokRes).toUpperCase());
+    }
+
     if (typeof updateUnifiedResInfo === 'function') updateUnifiedResInfo();
   }
 
-  // Obnovit reference ze snapshotu
+  // ── Non-unified panels (Luma) ──
+  if (model?.type === 'proxy_luma') {
+    const imgWEl = document.getElementById('lumaImgWeight');
+    if (imgWEl && p.imgWeight !== undefined) imgWEl.value = p.imgWeight;
+    const styleWEl = document.getElementById('lumaStyleWeight');
+    if (styleWEl && p.styleWeight !== undefined) styleWEl.value = p.styleWeight;
+    const modWEl = document.getElementById('lumaModifyWeight');
+    if (modWEl && p.modifyWeight !== undefined) modWEl.value = p.modifyWeight;
+  }
+
+  _setFld(item.folder);
+
+  // ── Obnovit reference ze snapshotu ──
   if (item.usedRefs?.length) {
     refs = [];
     for (const snap of item.usedRefs) {
       if (refs.length >= getRefMax()) break;
-      // Načíst asset z DB (v102+ snap má assetId, starší může mít imageData inline)
       let asset = null;
-      if (snap.assetId) {
-        asset = await dbGet('assets', snap.assetId);
-      }
-      // Pokud asset v DB neexistuje ale máme inline data (starší snapshot) — uložit do DB
-      if (!asset && snap.imageData) {
-        asset = await createAsset(snap.imageData, snap.mimeType || 'image/png', 'generated');
-      }
+      if (snap.assetId) asset = await dbGet('assets', snap.assetId);
+      if (!asset && snap.imageData) asset = await createAsset(snap.imageData, snap.mimeType || 'image/png', 'generated');
       if (!asset?.imageData) continue;
       refs.push({
-        assetId: asset.id,
-        autoName: snap.autoName || asset.autoName || null,
+        assetId:   asset.id,
+        autoName:  snap.autoName || asset.autoName || null,
         userLabel: snap.userLabel || '',
-        mimeType: asset.mimeType || snap.mimeType || 'image/png',
-        thumb: asset.thumb || null,
-        dims: asset.dims || null,
+        mimeType:  asset.mimeType || snap.mimeType || 'image/png',
+        thumb:     asset.thumb || null,
+        dims:      asset.dims  || null,
       });
     }
     renderRefThumbs();
@@ -1314,7 +1402,7 @@ async function reuseJobFromGallery(item) {
 
   if (!item.usedRefs?.length) toast('Parameters loaded from gallery', 'ok');
 
-  // Obnovit batch styl nebo kameru — přepnout zpět na Combine pro normální použití
+  // ── Batch style/camera restore ──
   if (item.batchStyle) {
     const s = STYLES.find(x => x.id === item.batchStyle.id);
     if (s) {

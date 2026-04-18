@@ -335,7 +335,18 @@ input[type=file] { display:none; }
 
 .ibtn.upscale-btn:hover { border-color:#bb88ff; color:#bb88ff; }
 .ibtn.reuse-btn:hover { border-color:#66cc88; color:#66cc88; }
-.ibtn.danger:hover { border-color:var(--red); color:#e08888; }
+
+/* Danger button — trvale červený (ne jen hover). Používá se pro Delete akce
+   napříč všemi knihovnami (Gallery, Video, Assets). */
+.ibtn.danger {
+  border-color:rgba(224,100,100,.55);
+  color:#e08888;
+}
+.ibtn.danger:hover {
+  border-color:var(--red);
+  color:#ff7b7b;
+  background:rgba(224,100,100,.08);
+}
 
 /* ═══ GALLERY TAB ═══ */
 #galleryView { display:none; flex:1; overflow:hidden; flex-direction:column; }
@@ -715,8 +726,61 @@ input[type=file] { display:none; }
 .folder-item:hover .folder-del { opacity:1; }
 .folder-del:hover { color:var(--red); }
 
-/* Gallery grid */
-#galleryGrid { flex:1; overflow-y:auto; padding:16px; }
+/* Gallery grid wrapper — flex column, toolbar + bulk bar fixed, grid scroll */
+#galleryGrid { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.gal-grid {
+  flex:1; overflow-y:auto; padding:16px;
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px;
+  align-content:start;
+}
+/* ═══════════════════════════════════════════════════════════
+   UNIFIED LIBRARY TOOLBARS (Gallery / Video / Assets)
+   ───────────────────────────────────────────────────────────
+   Pattern: grid wrapper = flex column, grid samotny ma overflow-y,
+   toolbar + bulk bar sticky nad nim. Main toolbar ma sticky top:0,
+   bulk bar sticky top:(toolbar height) takze se nelepi pod sebe
+   (resime pres pozicni order — bulk je hned pod v DOM, flex-shrink:0).
+
+   Zakladni layout:
+     <div grid-wrapper style="display:flex; flex-direction:column; overflow:hidden;">
+       <div class="lib-toolbar">...</div>       flex-shrink:0
+       <div class="lib-bulk show">...</div>     flex-shrink:0
+       <div class="lib-grid">...</div>          flex:1; overflow-y:auto
+     </div>
+   ═══════════════════════════════════════════════════════════ */
+
+/* Main toolbar — stejny styl pro vsechny tri knihovny */
+.lib-toolbar {
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 16px;
+  background:var(--s1);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+  z-index:2;
+}
+.lib-toolbar .lib-right {
+  margin-left:auto; display:flex; gap:6px; align-items:center;
+}
+
+/* Bulk selection bar — objevi se kdyz je neco vybrano.
+   Pozice: PO .lib-toolbar, PRED gridem. Sticky = zustava viditelna
+   pri scrollovani gridu (uzivatel nikdy neztrati akce). */
+.lib-bulk {
+  display:none;
+  align-items:center; gap:10px;
+  padding:10px 16px;
+  background:rgba(212,160,23,.08);
+  border-bottom:2px solid var(--accent);
+  font-size:11px;
+  flex-shrink:0;
+  z-index:2;
+}
+.lib-bulk.show { display:flex; }
+.lib-bulk-label { font-size:11px; color:var(--accent); font-weight:600; white-space:nowrap; }
+.lib-bulk-spacer { flex:1; }  /* Oddeluje primary akce (vlevo) od destructive (vpravo) */
+
+/* Legacy aliasy — stare tridy .gal-toolbar, .gal-bulk redirectuji
+   na nove styly (ponechavam jen .gal-bulk-label kvuli historicke kompatibilite) */
 .gal-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
 .gal-search {
   flex:1; min-width:160px; background:var(--s2); border:1px solid var(--border); color:var(--text);
@@ -761,7 +825,6 @@ input[type=file] { display:none; }
 .gal-filter-active-label { flex:1; }
 
 .ibtn.filter-on { border-color:var(--accent); color:var(--accent); }
-.gal-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
 .gal-item { cursor:pointer; position:relative; background:var(--s2); border:1px solid var(--border); overflow:hidden; transition:border-color .15s, transform .15s; }
 .gal-item:hover { border-color:var(--accent); transform:translateY(-1px); }
 .gal-item img { width:100%; aspect-ratio:1; object-fit:cover; display:block; }
@@ -775,7 +838,6 @@ input[type=file] { display:none; }
 .gal-empty { text-align:center; padding:60px 20px; color:var(--dim); font-size:11px; line-height:1.8; }
 
 .gal-bulk-count { color:var(--accent); font-weight:500; }
-.ibtn.danger:hover { border-color:var(--red); color:var(--red); }
 
 /* Modal */
 #modal { position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:200; display:none; align-items:center; justify-content:center; padding:8px; pointer-events:none; }
@@ -1322,13 +1384,7 @@ select.inpaint-num option { background:#fff; color:#111; }
   border-top:none; border-left:none; transform:rotate(45deg);
 }
 
-.gal-bulk {
-  padding:10px 16px; background:rgba(212,160,23,.08);
-  border-bottom:2px solid var(--accent);
-  display:none; align-items:center; gap:10px; font-size:11px;
-}
-.gal-bulk.show { display:flex; }
-.gal-bulk-label { font-size:11px; color:var(--accent); font-weight:600; white-space:nowrap; }
+/* .gal-bulk nahrazeno .lib-bulk — viz UNIFIED LIBRARY TOOLBARS sekce vyse */
 
 /* ── Srdíčko na thumbnailech ── */
 .gal-heart {
@@ -3710,22 +3766,34 @@ select.inpaint-num option { background:#fff; color:#111; }
     </div>
     <!-- Main grid -->
     <div id="assetGridWrap" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-      <!-- Toolbar — stejný styl jako galerie -->
-      <div class="gal-toolbar" style="padding:10px 16px;border-bottom:1px solid var(--border);background:var(--s1);flex-shrink:0;">
-        <input type="text" class="ctrl-input" id="assetSearch" placeholder="Search assets..." oninput="renderAssets()" style="width:160px;font-size:11px;padding:5px 9px;">
-        <select id="assetSort" onchange="renderAssets()" style="background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
+      <!-- Main toolbar: search / sort / filter / count + right-aligned library actions -->
+      <div class="lib-toolbar">
+        <input type="text" class="gal-search" id="assetSearch" placeholder="Search assets..." oninput="renderAssets()" style="width:180px;">
+        <select id="assetSort" onchange="renderAssets()" class="gal-sort">
           <option value="newest">Newest</option>
           <option value="oldest">Oldest</option>
           <option value="name">By name</option>
         </select>
-        <span id="assetCount" style="font-size:11px;color:var(--dim);">0 assets</span>
-        <div style="flex:1;"></div>
         <button class="ibtn" id="assetFilterBtn" onclick="toggleAssetFilterPanel()" title="Filter by date">⚙ Filter</button>
-        <button class="ibtn" onclick="selectAllAssets()" style="font-size:11px;">☑ Select all</button>
-        <button class="ibtn" onclick="exportSelectedAssets()" style="font-size:11px;">↓ Export</button>
-        <button class="ibtn" onclick="document.getElementById('assetUploadInput').click()" style="font-size:11px;border-color:var(--accent);color:var(--accent);">↑ Upload asset</button>
-        <input type="file" id="assetUploadInput" multiple accept="image/*" style="display:none" onchange="uploadAssetsFromFile(this.files)">
+        <span id="assetCount" class="gal-count">0 assets</span>
+        <div class="lib-right">
+          <button class="ibtn" onclick="selectAllAssets()" title="Select all visible assets">☑ Select all</button>
+          <button class="ibtn" onclick="document.getElementById('assetUploadInput').click()" title="Upload images as assets">↑ Upload</button>
+          <input type="file" id="assetUploadInput" multiple accept="image/*" style="display:none" onchange="uploadAssetsFromFile(this.files)">
+        </div>
       </div>
+
+      <!-- Bulk selection bar: primary akce vlevo, destructive (Cancel + Delete) vpravo -->
+      <div id="assetBulk" class="lib-bulk">
+        <span class="lib-bulk-label">✦ Selected: <span id="assetSelCount">0</span> items</span>
+        <button class="ibtn" onclick="addSelectedAssetsToRefs()" style="border-color:#4a5a8a;color:#88aaff;">⊕ Use as refs</button>
+        <button class="ibtn" onclick="moveSelectedAssetsToFolder()">▷ Move</button>
+        <button class="ibtn" onclick="exportSelectedAssets()" style="border-color:#4a8a6a;color:#66cc99;">↓ Download</button>
+        <div class="lib-bulk-spacer"></div>
+        <button class="ibtn" onclick="clearAssetSelection()">Cancel</button>
+        <button class="ibtn danger" onclick="deleteSelectedAssets()">✕ Delete</button>
+      </div>
+
       <!-- Filter panel -->
       <div class="gal-filter-panel" id="assetFilterPanel" style="flex-shrink:0;">
         <div class="gal-filter-group">
@@ -3744,15 +3812,6 @@ select.inpaint-num option { background:#fff; color:#111; }
       <div class="gal-filter-active" id="assetFilterActive" style="flex-shrink:0;">
         <span class="gal-filter-active-label" id="assetFilterActiveLabel">Filter active</span>
         <button class="ibtn" onclick="clearAssetFilters()" style="font-size:11px;border-color:var(--accent);color:var(--accent);">✕ Clear filter</button>
-      </div>
-      <!-- Bulk bar -->
-      <div id="assetBulk" class="gal-bulk" style="flex-shrink:0;">
-        <span class="gal-bulk-label"><span id="assetSelCount">0</span> selected</span>
-        <button class="ibtn" onclick="addSelectedAssetsToRefs()" style="font-size:11px;border-color:#4a5a8a;color:#88aaff;">⊕ Use as refs</button>
-        <button class="ibtn" onclick="moveSelectedAssetsToFolder()" style="font-size:11px;">▷ Move</button>
-        <button class="ibtn" onclick="exportSelectedAssets()" style="font-size:11px;">↓ Download</button>
-        <button class="ibtn danger" onclick="deleteSelectedAssets()" style="font-size:11px;">✕ Delete</button>
-        <button class="ibtn" onclick="clearAssetSelection()" style="font-size:11px;margin-left:auto;">× Cancel</button>
       </div>
       <!-- Asset grid -->
       <div id="assetGrid" style="flex:1;overflow-y:auto;padding:16px;">
@@ -4096,17 +4155,8 @@ select.inpaint-num option { background:#fff; color:#111; }
 
       <!-- Grid -->
       <div id="galleryGrid">
-        <div class="gal-bulk" id="galBulk">
-          <span class="gal-bulk-label">✦ Selected: <span id="selCount">0</span> images</span>
-          <button class="ibtn" onclick="moveSelectedGalleryToFolder()" style="font-size:11px;">▷ Move</button>
-          <button class="ibtn" onclick="batchUpscaleSelected()" style="font-size:11px;border-color:var(--purple);color:var(--purple);">⬆ Upscale</button>
-          <button class="ibtn" onclick="exportSelected()" style="border-color:#4a8a6a;color:#66cc99;">↓ Export</button>
-          <div style="margin-left:auto;display:flex;gap:6px;">
-            <button class="ibtn danger" onclick="deleteSelected()">✕ Delete</button>
-            <button class="ibtn" onclick="clearSelection()">Clear selection</button>
-          </div>
-        </div>
-        <div class="gal-toolbar">
+        <!-- Main toolbar: search / sort / filter / count + right-aligned library actions -->
+        <div class="lib-toolbar">
           <input class="gal-search" id="galSearch" placeholder="Search metadata..." oninput="galSearchDebounced()">
           <select class="gal-sort" id="galSort" onchange="renderGallery()">
             <option value="newest">Newest</option>
@@ -4117,7 +4167,7 @@ select.inpaint-num option { background:#fff; color:#111; }
           </select>
           <button class="ibtn" id="galFilterBtn" onclick="toggleFilterPanel()" title="Advanced filters">⚙ Filter</button>
           <span class="gal-count" id="galCount">0 images</span>
-          <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <div class="lib-right">
             <button class="ibtn" onclick="selectAllVisible()" title="Select all visible images">☑ Select all</button>
             <label class="ibtn" style="cursor:pointer;" title="Upload images directly to gallery">
               ↑ Upload
@@ -4129,6 +4179,17 @@ select.inpaint-num option { background:#fff; color:#111; }
               <input type="file" accept=".json" style="display:none" onchange="importGallery(this)">
             </label>
           </div>
+        </div>
+
+        <!-- Bulk selection bar: primary akce vlevo, destructive (Cancel + Delete) vpravo -->
+        <div class="lib-bulk" id="galBulk">
+          <span class="lib-bulk-label">✦ Selected: <span id="selCount">0</span> items</span>
+          <button class="ibtn" onclick="moveSelectedGalleryToFolder()">▷ Move</button>
+          <button class="ibtn" onclick="batchUpscaleSelected()" style="border-color:var(--purple);color:var(--purple);">⬆ Upscale</button>
+          <button class="ibtn" onclick="exportSelected()" style="border-color:#4a8a6a;color:#66cc99;">↓ Download</button>
+          <div class="lib-bulk-spacer"></div>
+          <button class="ibtn" onclick="clearSelection()">Cancel</button>
+          <button class="ibtn danger" onclick="deleteSelected()">✕ Delete</button>
         </div>
 
         <!-- Rozšířený filtr panel -->
@@ -4181,28 +4242,35 @@ select.inpaint-num option { background:#fff; color:#111; }
       </div>
       <!-- Main grid -->
       <div id="videoGridWrap">
-        <!-- Toolbar -->
-        <div class="gal-toolbar" style="padding:10px 16px;border-bottom:1px solid var(--border);background:var(--s1);flex-shrink:0;">
+        <!-- Main toolbar: search / sort / filter + count + right-aligned library actions -->
+        <div class="lib-toolbar">
           <input type="text" class="gal-search" id="videoSearch" placeholder="Search videos..." oninput="videoSearchDebounced()" style="width:180px;">
           <select id="videoSort" onchange="renderVideoGallery()" class="gal-sort">
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
           </select>
-          <span id="videoCount" class="gal-count">0 videos</span>
           <button class="ibtn" id="videoFilterBtn" onclick="toggleVideoFilterPanel()" title="Filter">⚙ Filter</button>
-          <div style="flex:1;"></div>
-          <button class="ibtn" onclick="videoSelectAll()" style="font-size:11px;">☑ Select all</button>
-          <button class="ibtn" onclick="videoDownloadSelected()" style="font-size:11px;">↓ Download</button>
-          <button class="ibtn danger" onclick="videoDeleteSelected()" style="font-size:11px;">✕ Delete</button>
+          <span id="videoCount" class="gal-count">0 videos</span>
+          <div class="lib-right">
+            <button class="ibtn" onclick="videoSelectAll()" title="Select all visible videos">☑ Select all</button>
+            <button class="ibtn" onclick="exportVideoArchive()" title="Export entire video library as JSON archive">↓ Archive</button>
+            <label class="ibtn" style="cursor:pointer;" title="Load video library from JSON archive">
+              ↑ Load archive
+              <input type="file" accept=".json" style="display:none" onchange="importVideoArchive(this)">
+            </label>
+          </div>
         </div>
-        <!-- Bulk bar -->
-        <div id="videoBulkBar" class="gal-bulk" style="display:none;">
-          <span class="gal-bulk-label"><span id="videoSelCount">0</span> selected</span>
-          <button class="ibtn" onclick="videoMoveSelected()" style="font-size:11px;">▷ Move</button>
-          <button class="ibtn" onclick="videoDownloadSelected()" style="font-size:11px;">↓ Download</button>
-          <button class="ibtn danger" onclick="videoDeleteSelected()" style="font-size:11px;">✕ Delete</button>
-          <button class="ibtn" onclick="videoClearSelection()" style="font-size:11px;margin-left:auto;">× Clear selection</button>
+
+        <!-- Bulk selection bar: primary akce vlevo, destructive (Cancel + Delete) vpravo -->
+        <div id="videoBulkBar" class="lib-bulk">
+          <span class="lib-bulk-label">✦ Selected: <span id="videoSelCount">0</span> items</span>
+          <button class="ibtn" onclick="videoMoveSelected()">▷ Move</button>
+          <button class="ibtn" onclick="videoDownloadSelected()" style="border-color:#4a8a6a;color:#66cc99;">↓ Download</button>
+          <div class="lib-bulk-spacer"></div>
+          <button class="ibtn" onclick="videoClearSelection()">Cancel</button>
+          <button class="ibtn danger" onclick="videoDeleteSelected()">✕ Delete</button>
         </div>
+
         <!-- Filter panel -->
         <div class="gal-filter-panel" id="videoFilterPanel">
           <div class="gal-filter-group">

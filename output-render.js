@@ -24,7 +24,7 @@ function toggleQueueOverlay() {
           const metaEl = el.querySelector('.qo-meta');
           if (metaEl) {
             const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(0) + 's';
-            metaEl.textContent = job.retryAttempt > 0 ? `retry ${job.retryAttempt}/${RETRY_MAX}…` : `generating… ${elapsed}`;
+            metaEl.textContent = job.retryAttempt > 0 ? `retry ${job.retryAttempt}/${job.retryTotal || '?'}…` : `generating… ${elapsed}`;
           }
         });
       }, 1000);
@@ -72,7 +72,7 @@ function renderQueueOverlay() {
     const elapsed = j.startedAt ? ((Date.now() - j.startedAt) / 1000).toFixed(0) + 's' : null;
     const statusTxt =
       j.status === 'pending' ? 'waiting to start' :
-      j.status === 'running' ? (j.retryAttempt > 0 ? `retry ${j.retryAttempt}/${RETRY_MAX}…` : `generating… ${elapsed ? elapsed : ''}`) :
+      j.status === 'running' ? (j.retryAttempt > 0 ? `retry ${j.retryAttempt}/${j.retryTotal || '?'}…` : `generating… ${elapsed ? elapsed : ''}`) :
       j.status === 'done'    ? `✓ done · ${j.elapsed}` :
       `⚠ ${j.errorMsg?.slice(0, 60) || 'error'}`;
 
@@ -84,7 +84,7 @@ function renderQueueOverlay() {
           <div class="qo-prompt">${escHtml(j.prompt)}</div>
           <div class="qo-meta ${j.status === 'running' ? 'qo-elapsed' : ''}">${statusTxt}</div>
         </div>
-        ${j.status === 'pending'
+        ${j.status === 'pending' || j.status === 'running'
           ? `<button class="qo-cancel-btn" onclick="cancelJob('${j.id}')" title="Cancel">✕</button>`
           : ''}
       </div>`;
