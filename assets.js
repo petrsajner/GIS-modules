@@ -81,10 +81,65 @@ function assetFingerprint(imageData) {
 }
 
 // ── Hledá existující asset dle fingerprintu ──
+// PERFORMANCE: Nepouzivame dbGetAll('assets') (stahuje VSECHNY imageData — pro
+// velkou knihovnu = hundreds of MB a sekundy blokovani). Misto toho:
+//   1. Projizdime assets_meta (lightweight, v pameti cache po prvnim nacteni).
+//   2. Kazdy asset ma precomputed `fingerprint` field (zapisuje se pri createAsset).
+//   3. Porovnani = string compare (O(n) velmi rychle).
+// Pro stara data bez fingerprint field: migracni funkce migrateAssetFingerprints
+// bezi na pozadi pri init. Pokud jeste neprobehla, findAssetByFingerprint vrati null
+// pro legacy data (= vznikne duplicita, ale nezablokuje UI na minuty).
 async function findAssetByFingerprint(imageData) {
   const fp = assetFingerprint(imageData);
-  const all = await dbGetAll('assets');
-  return all.find(a => assetFingerprint(a.imageData) === fp) || null;
+  if (!fp) return null;
+
+  const allMeta = await dbGetAllAssetMeta();
+  const metaMatch = allMeta.find(m => m.fingerprint === fp);
+  if (!metaMatch) return null;
+
+  // Vratit plny asset z 'assets' store (potrebujeme imageData pro pouziti ref)
+  return await dbGet('assets', metaMatch.id).catch(() => null);
+}
+
+// ── Migrace fingerprintu pro stara data (pre-v202en) ──
+// Spousti se jednou na pozadi pri init. Pro kazdy asset bez fingerprint:
+//   1. Nacte plnou imageData z 'assets'
+//   2. Spocita fingerprint
+//   3. Zapise do 'assets' i 'assets_meta'
+// Behem migrace muze user pridat duplicitni asset (fingerprint lookup vrati null),
+// ale to je prijatelnejsi nez 5s UI freeze.
+let _fingerprintMigrationPromise = null;
+async function migrateAssetFingerprints() {
+  if (_fingerprintMigrationPromise) return _fingerprintMigrationPromise;
+  _fingerprintMigrationPromise = (async () => {
+    try {
+      const allMeta = await dbGetAllAssetMeta();
+      const needsBackfill = allMeta.filter(m => !m.fingerprint);
+      if (!needsBackfill.length) return;
+      console.log(`[GIS] Backfilling fingerprints for ${needsBackfill.length} legacy assets…`);
+      let done = 0;
+      for (const m of needsBackfill) {
+        try {
+          const full = await dbGet('assets', m.id);
+          if (!full?.imageData) continue;
+          const fp = assetFingerprint(full.imageData);
+          m.fingerprint = fp;
+          full.fingerprint = fp;
+          await dbPut('assets_meta', m);
+          await dbPut('assets', full);
+          done++;
+          // Yield to UI every 10 items so migration nebere celou CPU
+          if (done % 10 === 0) await new Promise(r => setTimeout(r, 0));
+        } catch (e) {
+          console.warn('[GIS] fingerprint backfill failed for asset', m.id, e);
+        }
+      }
+      console.log(`[GIS] Fingerprint backfill complete: ${done} assets`);
+    } catch (e) {
+      console.error('[GIS] Fingerprint migration failed:', e);
+    }
+  })();
+  return _fingerprintMigrationPromise;
 }
 
 // ── Přidání assetu do DB (s duplicate check) ──
@@ -97,11 +152,15 @@ async function createAsset(imageData, mimeType, sourceType, sourceJobId) {
   const id = Date.now() + '_a_' + Math.random().toString(36).substr(2, 5);
   const thumb = await generateThumb(imageData, mimeType);
   const dims = await getImageDimensions(imageData);
+  // Precompute fingerprint — zapise se do assetu i meta, aby findAssetByFingerprint
+  // mohl pristi volani vyresit pres lightweight meta lookup.
+  const fingerprint = assetFingerprint(imageData);
   const asset = {
     id, autoName, userLabel: '', imageData, mimeType: mimeType || 'image/png',
     thumb: thumb || null, ts: Date.now(), folder: 'all',
     sourceType: sourceType || 'upload', sourceJobId: sourceJobId || null, usedInJobs: [],
     dims: dims || null,
+    fingerprint,
   };
   await dbPut('assets', asset);
   await dbPutAssetMeta(asset);

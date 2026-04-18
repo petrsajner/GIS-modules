@@ -3962,11 +3962,15 @@ async function reuseVideoJob(id) {
       }
       // 2. Fallback to stored imageData in snapshot (survives asset deletion)
       if (!imgData) imgData = snap.imageData || snap.data || null;
-      // 3. Last resort: search assets by autoName
+      // 3. Last resort: search assets by autoName — hledame pres meta (bez imageData),
+      // az pri shode nacteme plny asset.
       if (!imgData && snap.autoName) {
-        const all = await dbGetAll('assets').catch(() => []);
-        const found = all.find(a => a.autoName === snap.autoName || (snap.userLabel && a.userLabel === snap.userLabel));
-        if (found?.imageData) { imgData = found.imageData; mimeType = found.mimeType || mimeType; assetId = found.id; }
+        const allMeta = await dbGetAllAssetMeta().catch(() => []);
+        const foundMeta = allMeta.find(a => a.autoName === snap.autoName || (snap.userLabel && a.userLabel === snap.userLabel));
+        if (foundMeta) {
+          const found = await dbGet('assets', foundMeta.id).catch(() => null);
+          if (found?.imageData) { imgData = found.imageData; mimeType = found.mimeType || mimeType; assetId = found.id; }
+        }
       }
 
       if (!imgData) continue;

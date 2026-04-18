@@ -1435,8 +1435,9 @@ async function openInpaintRefPicker() {
   picker.style.display = 'flex';
 
   try {
-    // Load gallery images directly from DB (sorted by newest first)
-    const images = await dbGetAll('images');
+    // PERFORMANCE: pouzijeme meta (bez imageData) — picker potrebuje jen id, ts, model.
+    // Plnou imageData nacteme az kdyz user klikne na thumbnail (handler volajici openInpaintWithGalleryImage)
+    const images = await dbGetAllMeta();
     images.sort((a, b) => b.ts - a.ts);
     grid.innerHTML = '';
     let shown = 0;

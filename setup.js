@@ -77,6 +77,11 @@ window.onload = () => {
     refreshGalleryUI();
     updateTargetFolderSelect();
     renderAssetFolders();
+    // Na pozadi: backfill fingerprintu pro legacy assety (pre-v202en data).
+    // Nespousti v serii se zbytkem init flow — user neni blokovan.
+    if (typeof migrateAssetFingerprints === 'function') {
+      setTimeout(() => migrateAssetFingerprints(), 500);
+    }
   });
   selectModel('nb2');
   // Zajistit platný aspect ratio po init (browser může obnovit neplatnou hodnotu)

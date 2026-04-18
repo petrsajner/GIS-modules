@@ -212,7 +212,7 @@ async function renderGalleryWithItems(allItems) {
       : `<span class="gal-time">${new Date(item.ts).toLocaleDateString('en')} ${new Date(item.ts).toLocaleTimeString('cs', {hour:'2-digit',minute:'2-digit'})}</span><span class="gal-res">${item.dims || '—'}</span>`;
     return `
     <div class="gal-item ${selectedGalItems.has(item.id) ? 'selected' : ''} ${currentFolder === 'all' && item.folder && item.folder !== 'all' ? 'in-folder' : ''} ${item.favorite ? 'favorited' : ''}" data-id="${item.id}" onclick="galItemClick(event, '${item.id}')" oncontextmenu="showCtxMenu(event, '${item.id}')" draggable="true" ondragstart="galDragStart(event, '${item.id}')">
-      <img src="" data-id="${item.id}" alt="" loading="lazy" style="background:var(--s3);min-height:150px;">
+      <img src="" data-id="${item.id}" alt="" loading="lazy" style="background:var(--s3);">
       <div class="gal-model">${item.model}</div>
       <div class="gal-bottom">${bottomContent}</div>
       <div class="gal-sel" onclick="galSelClick(event, '${item.id}')"></div>
@@ -866,10 +866,18 @@ async function showCtxMenu(e, id) {
     closeCtxMenu();
     dbGet('images', ctxTargetId).then(async item => {
       if (!item) return;
-      const alreadyExists = !!(await findAssetByFingerprint(item.imageData));
-      const asset = await createAsset(item.imageData, 'image/png', 'generated', item.id);
-      const msg = alreadyExists ? `Already in Assets as ${asset.autoName}` : `Saved to Assets as ${asset.autoName}`;
-      toast(msg, 'ok');
+      // createAsset sam provadi findAssetByFingerprint + vraci existujici asset pokud
+      // uz je v DB. Nepotrebujeme dvojity check (drive: alreadyExists + createAsset).
+      // Misto toho rozpoznat existing asset podle toho, ze ma aktualni `id` (nikoli nove vygenerovane).
+      const preCheck = await findAssetByFingerprint(item.imageData);
+      let asset;
+      if (preCheck) {
+        asset = preCheck;
+        toast(`Already in Assets as ${asset.autoName}`, 'ok');
+      } else {
+        asset = await createAsset(item.imageData, 'image/png', 'generated', item.id);
+        toast(`Saved to Assets as ${asset.autoName}`, 'ok');
+      }
     });
   };
   document.getElementById('ctxDelete').onclick = async () => {
@@ -1677,8 +1685,9 @@ async function importGallery(input) {
   const workerUrl = URL.createObjectURL(workerBlob);
   const worker = new Worker(workerUrl);
 
-  // Existující IDs a složky pro deduplikaci
-  const existingIds = new Set((await dbGetAll('images')).map(i => i.id));
+  // Existující IDs a složky pro deduplikaci — ctem jen meta (bez imageData),
+  // jinak bychom pri 1000+ images stahovali stovky MB zbytecne.
+  const existingIds = new Set((await dbGetAllMeta()).map(i => i.id));
   const existingFolderIds = new Set((await dbGetAll('folders')).map(f => f.id));
 
   let imported = 0, skipped = 0;

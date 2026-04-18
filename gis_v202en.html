@@ -726,27 +726,32 @@ input[type=file] { display:none; }
 .folder-item:hover .folder-del { opacity:1; }
 .folder-del:hover { color:var(--red); }
 
-/* Gallery grid wrapper — flex column, toolbar + bulk bar fixed, grid scroll */
-#galleryGrid { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+/* Gallery main pane — .gal-main drzi menu (toolbar, bulk, filters) + scroll grid.
+   Viz "UNIFIED LIBRARY TOOLBARS" sekce nize pro spolecne tridy .lib-*.  */
+.gal-main {
+  flex:1; display:flex; flex-direction:column;
+  overflow:hidden; min-height:0; min-width:0;
+}
+
+/* Scroll container — .gal-grid uvnitr je normalni block child s display:grid.
+   Tohle je klic: .gal-grid NENI flex-item, takze grid engine dostane
+   predictable width a neselze pri nested layout. */
+#galleryGrid {
+  flex:1; overflow-y:auto; min-height:0;
+}
 .gal-grid {
-  flex:1; overflow-y:auto; padding:16px;
+  padding:16px;
   display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px;
   align-content:start;
 }
 /* ═══════════════════════════════════════════════════════════
    UNIFIED LIBRARY TOOLBARS (Gallery / Video / Assets)
    ───────────────────────────────────────────────────────────
-   Pattern: grid wrapper = flex column, grid samotny ma overflow-y,
-   toolbar + bulk bar sticky nad nim. Main toolbar ma sticky top:0,
-   bulk bar sticky top:(toolbar height) takze se nelepi pod sebe
-   (resime pres pozicni order — bulk je hned pod v DOM, flex-shrink:0).
-
-   Zakladni layout:
-     <div grid-wrapper style="display:flex; flex-direction:column; overflow:hidden;">
-       <div class="lib-toolbar">...</div>       flex-shrink:0
-       <div class="lib-bulk show">...</div>     flex-shrink:0
-       <div class="lib-grid">...</div>          flex:1; overflow-y:auto
-     </div>
+   Struktura: wrapper (flex column, overflow:hidden) obsahuje:
+     ├ .lib-toolbar          flex-shrink:0  ← horni fixed
+     ├ .lib-bulk.show        flex-shrink:0  ← pod toolbarem kdyz je vyber
+     └ scroll container      flex:1, overflow-y:auto ← grid scrolluje nezavisle
+   V Gallery je wrapper .gal-main, v Video #videoGridWrap, v Assets #assetGridWrap.
    ═══════════════════════════════════════════════════════════ */
 
 /* Main toolbar — stejny styl pro vsechny tri knihovny */
@@ -756,15 +761,12 @@ input[type=file] { display:none; }
   background:var(--s1);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
-  z-index:2;
 }
 .lib-toolbar .lib-right {
   margin-left:auto; display:flex; gap:6px; align-items:center;
 }
 
-/* Bulk selection bar — objevi se kdyz je neco vybrano.
-   Pozice: PO .lib-toolbar, PRED gridem. Sticky = zustava viditelna
-   pri scrollovani gridu (uzivatel nikdy neztrati akce). */
+/* Bulk selection bar — objevi se kdyz je neco vybrano */
 .lib-bulk {
   display:none;
   align-items:center; gap:10px;
@@ -773,15 +775,11 @@ input[type=file] { display:none; }
   border-bottom:2px solid var(--accent);
   font-size:11px;
   flex-shrink:0;
-  z-index:2;
 }
 .lib-bulk.show { display:flex; }
 .lib-bulk-label { font-size:11px; color:var(--accent); font-weight:600; white-space:nowrap; }
 .lib-bulk-spacer { flex:1; }  /* Oddeluje primary akce (vlevo) od destructive (vpravo) */
 
-/* Legacy aliasy — stare tridy .gal-toolbar, .gal-bulk redirectuji
-   na nove styly (ponechavam jen .gal-bulk-label kvuli historicke kompatibilite) */
-.gal-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
 .gal-search {
   flex:1; min-width:160px; background:var(--s2); border:1px solid var(--border); color:var(--text);
   font-family:'IBM Plex Mono',monospace; font-size:11px; padding:6px 10px; outline:none;
@@ -793,7 +791,8 @@ input[type=file] { display:none; }
 /* Filter panel */
 .gal-filter-panel {
   display:none; background:var(--s2); border:1px solid var(--border);
-  padding:14px 16px; margin-bottom:10px; gap:16px; flex-wrap:wrap;
+  padding:14px 16px; margin:0 16px 10px; gap:16px; flex-wrap:wrap;
+  flex-shrink:0;
 }
 .gal-filter-panel.open { display:flex; }
 .gal-filter-group { display:flex; flex-direction:column; gap:6px; min-width:160px; }
@@ -819,7 +818,8 @@ input[type=file] { display:none; }
 .gal-filter-active {
   display:none; align-items:center; gap:10px; padding:7px 12px;
   background:rgba(100,180,255,.08); border:1px solid rgba(100,180,255,.25);
-  margin-bottom:10px; font-size:11px; color:var(--accent);
+  margin:0 16px 10px; font-size:11px; color:var(--accent);
+  flex-shrink:0;
 }
 .gal-filter-active.show { display:flex; }
 .gal-filter-active-label { flex:1; }
@@ -1383,8 +1383,6 @@ select.inpaint-num option { background:#fff; color:#111; }
   width:4px; height:8px; border:2px solid #000;
   border-top:none; border-left:none; transform:rotate(45deg);
 }
-
-/* .gal-bulk nahrazeno .lib-bulk — viz UNIFIED LIBRARY TOOLBARS sekce vyse */
 
 /* ── Srdíčko na thumbnailech ── */
 .gal-heart {
@@ -4153,8 +4151,8 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div id="folderList"></div>
       </div>
 
-      <!-- Grid -->
-      <div id="galleryGrid">
+      <!-- Main pane: menu area (top) + scrollable grid (bottom) -->
+      <div class="gal-main">
         <!-- Main toolbar: search / sort / filter / count + right-aligned library actions -->
         <div class="lib-toolbar">
           <input class="gal-search" id="galSearch" placeholder="Search metadata..." oninput="galSearchDebounced()">
@@ -4224,7 +4222,11 @@ select.inpaint-num option { background:#fff; color:#111; }
           <span class="gal-filter-active-label" id="galFilterActiveLabel"></span>
           <button class="ibtn" onclick="clearFilters()" style="font-size:11px;border-color:var(--accent);color:var(--accent);">✕ Clear filter</button>
         </div>
-        <div class="gal-grid" id="galGrid"></div>
+
+        <!-- Grid (scroll container — menu je MIMO, jako sibling) -->
+        <div id="galleryGrid">
+          <div class="gal-grid" id="galGrid"></div>
+        </div>
       </div>
 
     </div>
@@ -6524,6 +6526,11 @@ window.onload = () => {
     refreshGalleryUI();
     updateTargetFolderSelect();
     renderAssetFolders();
+    // Na pozadi: backfill fingerprintu pro legacy assety (pre-v202en data).
+    // Nespousti v serii se zbytkem init flow — user neni blokovan.
+    if (typeof migrateAssetFingerprints === 'function') {
+      setTimeout(() => migrateAssetFingerprints(), 500);
+    }
   });
   selectModel('nb2');
   // Zajistit platný aspect ratio po init (browser může obnovit neplatnou hodnotu)
@@ -7377,10 +7384,65 @@ function assetFingerprint(imageData) {
 }
 
 // ── Hledá existující asset dle fingerprintu ──
+// PERFORMANCE: Nepouzivame dbGetAll('assets') (stahuje VSECHNY imageData — pro
+// velkou knihovnu = hundreds of MB a sekundy blokovani). Misto toho:
+//   1. Projizdime assets_meta (lightweight, v pameti cache po prvnim nacteni).
+//   2. Kazdy asset ma precomputed `fingerprint` field (zapisuje se pri createAsset).
+//   3. Porovnani = string compare (O(n) velmi rychle).
+// Pro stara data bez fingerprint field: migracni funkce migrateAssetFingerprints
+// bezi na pozadi pri init. Pokud jeste neprobehla, findAssetByFingerprint vrati null
+// pro legacy data (= vznikne duplicita, ale nezablokuje UI na minuty).
 async function findAssetByFingerprint(imageData) {
   const fp = assetFingerprint(imageData);
-  const all = await dbGetAll('assets');
-  return all.find(a => assetFingerprint(a.imageData) === fp) || null;
+  if (!fp) return null;
+
+  const allMeta = await dbGetAllAssetMeta();
+  const metaMatch = allMeta.find(m => m.fingerprint === fp);
+  if (!metaMatch) return null;
+
+  // Vratit plny asset z 'assets' store (potrebujeme imageData pro pouziti ref)
+  return await dbGet('assets', metaMatch.id).catch(() => null);
+}
+
+// ── Migrace fingerprintu pro stara data (pre-v202en) ──
+// Spousti se jednou na pozadi pri init. Pro kazdy asset bez fingerprint:
+//   1. Nacte plnou imageData z 'assets'
+//   2. Spocita fingerprint
+//   3. Zapise do 'assets' i 'assets_meta'
+// Behem migrace muze user pridat duplicitni asset (fingerprint lookup vrati null),
+// ale to je prijatelnejsi nez 5s UI freeze.
+let _fingerprintMigrationPromise = null;
+async function migrateAssetFingerprints() {
+  if (_fingerprintMigrationPromise) return _fingerprintMigrationPromise;
+  _fingerprintMigrationPromise = (async () => {
+    try {
+      const allMeta = await dbGetAllAssetMeta();
+      const needsBackfill = allMeta.filter(m => !m.fingerprint);
+      if (!needsBackfill.length) return;
+      console.log(`[GIS] Backfilling fingerprints for ${needsBackfill.length} legacy assets…`);
+      let done = 0;
+      for (const m of needsBackfill) {
+        try {
+          const full = await dbGet('assets', m.id);
+          if (!full?.imageData) continue;
+          const fp = assetFingerprint(full.imageData);
+          m.fingerprint = fp;
+          full.fingerprint = fp;
+          await dbPut('assets_meta', m);
+          await dbPut('assets', full);
+          done++;
+          // Yield to UI every 10 items so migration nebere celou CPU
+          if (done % 10 === 0) await new Promise(r => setTimeout(r, 0));
+        } catch (e) {
+          console.warn('[GIS] fingerprint backfill failed for asset', m.id, e);
+        }
+      }
+      console.log(`[GIS] Fingerprint backfill complete: ${done} assets`);
+    } catch (e) {
+      console.error('[GIS] Fingerprint migration failed:', e);
+    }
+  })();
+  return _fingerprintMigrationPromise;
 }
 
 // ── Přidání assetu do DB (s duplicate check) ──
@@ -7393,11 +7455,15 @@ async function createAsset(imageData, mimeType, sourceType, sourceJobId) {
   const id = Date.now() + '_a_' + Math.random().toString(36).substr(2, 5);
   const thumb = await generateThumb(imageData, mimeType);
   const dims = await getImageDimensions(imageData);
+  // Precompute fingerprint — zapise se do assetu i meta, aby findAssetByFingerprint
+  // mohl pristi volani vyresit pres lightweight meta lookup.
+  const fingerprint = assetFingerprint(imageData);
   const asset = {
     id, autoName, userLabel: '', imageData, mimeType: mimeType || 'image/png',
     thumb: thumb || null, ts: Date.now(), folder: 'all',
     sourceType: sourceType || 'upload', sourceJobId: sourceJobId || null, usedInJobs: [],
     dims: dims || null,
+    fingerprint,
   };
   await dbPut('assets', asset);
   await dbPutAssetMeta(asset);
@@ -14544,7 +14610,7 @@ async function renderGalleryWithItems(allItems) {
       : `<span class="gal-time">${new Date(item.ts).toLocaleDateString('en')} ${new Date(item.ts).toLocaleTimeString('cs', {hour:'2-digit',minute:'2-digit'})}</span><span class="gal-res">${item.dims || '—'}</span>`;
     return `
     <div class="gal-item ${selectedGalItems.has(item.id) ? 'selected' : ''} ${currentFolder === 'all' && item.folder && item.folder !== 'all' ? 'in-folder' : ''} ${item.favorite ? 'favorited' : ''}" data-id="${item.id}" onclick="galItemClick(event, '${item.id}')" oncontextmenu="showCtxMenu(event, '${item.id}')" draggable="true" ondragstart="galDragStart(event, '${item.id}')">
-      <img src="" data-id="${item.id}" alt="" loading="lazy" style="background:var(--s3);min-height:150px;">
+      <img src="" data-id="${item.id}" alt="" loading="lazy" style="background:var(--s3);">
       <div class="gal-model">${item.model}</div>
       <div class="gal-bottom">${bottomContent}</div>
       <div class="gal-sel" onclick="galSelClick(event, '${item.id}')"></div>
@@ -15198,10 +15264,18 @@ async function showCtxMenu(e, id) {
     closeCtxMenu();
     dbGet('images', ctxTargetId).then(async item => {
       if (!item) return;
-      const alreadyExists = !!(await findAssetByFingerprint(item.imageData));
-      const asset = await createAsset(item.imageData, 'image/png', 'generated', item.id);
-      const msg = alreadyExists ? `Already in Assets as ${asset.autoName}` : `Saved to Assets as ${asset.autoName}`;
-      toast(msg, 'ok');
+      // createAsset sam provadi findAssetByFingerprint + vraci existujici asset pokud
+      // uz je v DB. Nepotrebujeme dvojity check (drive: alreadyExists + createAsset).
+      // Misto toho rozpoznat existing asset podle toho, ze ma aktualni `id` (nikoli nove vygenerovane).
+      const preCheck = await findAssetByFingerprint(item.imageData);
+      let asset;
+      if (preCheck) {
+        asset = preCheck;
+        toast(`Already in Assets as ${asset.autoName}`, 'ok');
+      } else {
+        asset = await createAsset(item.imageData, 'image/png', 'generated', item.id);
+        toast(`Saved to Assets as ${asset.autoName}`, 'ok');
+      }
     });
   };
   document.getElementById('ctxDelete').onclick = async () => {
@@ -16009,8 +16083,9 @@ async function importGallery(input) {
   const workerUrl = URL.createObjectURL(workerBlob);
   const worker = new Worker(workerUrl);
 
-  // Existující IDs a složky pro deduplikaci
-  const existingIds = new Set((await dbGetAll('images')).map(i => i.id));
+  // Existující IDs a složky pro deduplikaci — ctem jen meta (bez imageData),
+  // jinak bychom pri 1000+ images stahovali stovky MB zbytecne.
+  const existingIds = new Set((await dbGetAllMeta()).map(i => i.id));
   const existingFolderIds = new Set((await dbGetAll('folders')).map(f => f.id));
 
   let imported = 0, skipped = 0;
@@ -17835,8 +17910,9 @@ async function openInpaintRefPicker() {
   picker.style.display = 'flex';
 
   try {
-    // Load gallery images directly from DB (sorted by newest first)
-    const images = await dbGetAll('images');
+    // PERFORMANCE: pouzijeme meta (bez imageData) — picker potrebuje jen id, ts, model.
+    // Plnou imageData nacteme az kdyz user klikne na thumbnail (handler volajici openInpaintWithGalleryImage)
+    const images = await dbGetAllMeta();
     images.sort((a, b) => b.ts - a.ts);
     grid.innerHTML = '';
     let shown = 0;
@@ -24634,11 +24710,15 @@ async function reuseVideoJob(id) {
       }
       // 2. Fallback to stored imageData in snapshot (survives asset deletion)
       if (!imgData) imgData = snap.imageData || snap.data || null;
-      // 3. Last resort: search assets by autoName
+      // 3. Last resort: search assets by autoName — hledame pres meta (bez imageData),
+      // az pri shode nacteme plny asset.
       if (!imgData && snap.autoName) {
-        const all = await dbGetAll('assets').catch(() => []);
-        const found = all.find(a => a.autoName === snap.autoName || (snap.userLabel && a.userLabel === snap.userLabel));
-        if (found?.imageData) { imgData = found.imageData; mimeType = found.mimeType || mimeType; assetId = found.id; }
+        const allMeta = await dbGetAllAssetMeta().catch(() => []);
+        const foundMeta = allMeta.find(a => a.autoName === snap.autoName || (snap.userLabel && a.userLabel === snap.userLabel));
+        if (foundMeta) {
+          const found = await dbGet('assets', foundMeta.id).catch(() => null);
+          if (found?.imageData) { imgData = found.imageData; mimeType = found.mimeType || mimeType; assetId = found.id; }
+        }
       }
 
       if (!imgData) continue;
