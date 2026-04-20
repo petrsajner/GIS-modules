@@ -1,6 +1,205 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 16. 4. 2026 · v201en*
+*Aktualizováno 20. 4. 2026 · Session 3 upload dedup + port fix*
+
+---
+
+## Gallery upload — progress + fingerprint dedup (20. 4. 2026, Session 3)
+
+**Problém 1 (progress):** `uploadImagesToGallery` v `db.js` neměla žádný progress overlay. User viděl jen hluchou minutu, pak se obrázky objevily. Main thread byl nonstop-busy (`await FileReader`, `dbPut`, `generateThumb`).
+
+Sjednávalo se to komplikovaně — prvně jsem omylem opravoval `uploadAssetsFromFile` v `assets.js` (tlačítko ve Assets library), až jsem si uvědomil že Petr uploaduje přes jiné tlačítko ve Gallery toolbaru. Tlačítka nesou oba label `↑ Upload` a volají jinou funkci v jiném modulu.
+
+**Rozhodnutí progress:** Identický pattern jako `exportGallery` — custom local progressEl, inline CSS, getElementById update. `dlProgShow`/`dlProgUpdate` helpery z db.js v tomto kontextu z neznámého důvodu nefungovaly (overlay se nezobrazil), proto návrat k ověřenému patternu. Investigace proč `dlProgShow` selhal zvlášť v uploadu se zatím neudělala — nepotřebujeme ji, jelikož custom pattern je prokazatelně funkční.
+
+**Problém 2 (dedup):** Gallery upload nedetekoval duplikáty, ale assets upload a archive import ano. Inkonzistence napříč GIS. User mohl uploadnout stejný obrázek vícekrát.
+
+**Zvažované varianty řešení dedup:**
+
+| Varianta | Plus | Minus |
+|----------|------|-------|
+| A) **Fingerprint system stejný jako assets** | Konzistentní napříč GIS; efficient (string compare v meta cache) | Vyžaduje fingerprint field v images (migrace pro legacy data) |
+| B) Per-upload scan všech images | Žádná schema změna | O(N×M) blow-up paměti pro velké knihovny; `dbGetAll('images')` načte stovky MB |
+| C) Filename + size hash | Levné | Ne-spolehlivé (stejný obsah může mít jiný filename, stejný filename může mít jiný obsah) |
+
+**Rozhodnutí: A.** Assets už má tuhle infrastrukturu léta, stejný pattern přenáší do images. Sdílí se `assetFingerprint()` čistá funkce z `assets.js`.
+
+**Implementace:**
+- `findImageByFingerprint(imageData)` v db.js — mirror of `findAssetByFingerprint`, používá `dbGetAllMeta()` (cachovaná)
+- `migrateImageFingerprints()` — background migrace pro legacy images bez fingerprint field. Batch 10 + yield. Spouští ze setup.js 1500ms po init, staggered po asset migraci.
+- `saveToGallery` přidává fingerprint do nových records — generated images budou mít fingerprint rovnou, žádný retroactive backfill pro ně nebude potřeba
+- `uploadImagesToGallery` dedup flow: `findImageByFingerprint(b64)` před `dbPut`. Match → `duplicates++` + continue. Final toast: `↑ Gallery: 12 new, 3 duplicates skipped`
+
+**Sjednocení architektury:**
+
+| Místo | Dedup metoda |
+|---|---|
+| Assets upload | `findAssetByFingerprint` (assets_meta) |
+| Gallery archive import | `existingIds.has(img.id)` (ID match — logický pro re-import generated records s jejich ID) |
+| Gallery upload | `findImageByFingerprint` (images_meta) |
+
+Dvě různé metody (fingerprint vs ID) jsou **záměrné**: archive import dostává GIS records s ID, takže re-import stejného archivu = stejná ID = skip. Upload z filesystému nemá ID, musí fingerprint.
+
+**Edge case:** upload během běžící migrace — legacy images bez fingerprintu projdou jako new. Jednorázové (vyřeší se po dokončení migrace), zatím zachováno jako acceptable. Pokud se v praxi ukáže jako časté, přidá se `await migrateImageFingerprints()` přímo do uploadu.
+
+---
+
+## Dev server — fixní port 7800 (20. 4. 2026)
+
+**Problém:** Původní `build.js --dev` měl port range 7800–7810. Pokud byl 7800 obsazený, server spustil na 7801 — ale tím se **změnil origin** (`localhost:7801` ≠ `localhost:7800`), a IndexedDB je per-origin. User přišel o přístup ke své knihovně bez jakéhokoliv varování.
+
+**Rozhodnutí:** Port je fixní na 7800. Při obsazenosti server ihned padne s jasnou error message a instrukcemi:
+- Windows: `netstat -ano | findstr :7800`
+- macOS: `lsof -i :7800`
+- Ukončit blokující proces a zkusit znovu
+
+**Proč ne prompt na auto-fix:** user nemá žádný způsob jak migrovat data mezi origins (localhost:7800 → localhost:7801) v rámci dev serveru. Jediná cesta by byla full export+import přes archive, což je hodně práce. Lepší blokovat start než tiše "ztratit" knihovnu.
+
+---
+
+## Video thumbnail fix — Session 2.1 (20. 4. 2026)
+
+**Problém reportovaný po Session 2:** po importu video archivu se videa zobrazila s clapperboard placeholdery. Videa se přehrávala (videoData byl importovaný korektně), ale `video_thumbs` store byl prázdný.
+
+**Příčina:** Video thumbnails jsou v GIS samostatný IndexedDB store (`video_thumbs`, ne součást `videos` recordu), generované z binárního videa při vzniku přes `generateVideoThumb(blob)`. **Export i import v Session 1+2 je nikdy nezahrnoval** — archivovaly se jen `videos` + `video_meta` stores.
+
+**Zvažované varianty:**
+
+| Varianta | Plus | Minus |
+|----------|------|-------|
+| A) **Include thumbs v archivu + fallback regeneration** | Future archives = okamžité thumby; backward compat pro staré | Archiv ~1% větší (10-30 KB × videos) |
+| B) Vždy regenerovat thumby po importu | Archivy menší | Pomalé při 50+ videech (~2 sec per video); thumbnail quality nemusí být stejná jako originální |
+| C) Zcela oddělit thumby od archivace | Jednoduché | User by musel regenerovat ručně u každého importu |
+
+**Rozhodnutí: A.** Marginální overhead za robustní import. Nová archivace bude rychlejší (thumb z archive, ne regeneration), stará archivace funguje s grace degradation (background regeneration).
+
+**Implementace:**
+- **Export (všechny 3 cesty — streaming, chunked, legacy):** per-video `dbGet('video_thumbs', id)` → include do archive entry jako pole `thumbData`
+- **Import:** detekce:
+  - `v.thumbData` v archive → `dbPut('video_thumbs', {id, data: thumbData})` přímo
+  - Chybí → zařadit do `thumbRegenQueue`, po dokončení importu spustit `_regenerateThumbsInBackground(queue)`
+- **`_regenerateThumbsInBackground`:** non-modal mini-indikátor v pravém dolním rohu, neblokuje UI. In-place DOM update karet (replace `<div>🎬</div>` placeholder s `<img src>`). Plus final `renderVideoGallery()` jako safety-net.
+- **`regenerateMissingVideoThumbs()`:** globálně exposed utility pro F12 konzoli. Pro retroaktivní opravu existujícího importu (Petrových 52 videí naimportovaných před fixem).
+
+**Důsledky:**
+- Nové archivy (export z verze s fixem) — import bude okamžitý, thumby rovnou z archive
+- Staré archivy (export z v202en nebo Session 2 před fixem) — import funguje, background regeneration (~2 sec per video) běží po dokončení
+- Pro immediate retroactive fix: user spustí `regenerateMissingVideoThumbs()` z F12 konzole
+
+---
+
+## Progress counter pro bulk delete (20. 4. 2026)
+
+**Problém:** `deleteSelected` (gallery), `videoDeleteSelected`, `deleteSelectedAssets` neměly žádný visible progress. Při 50+ itemech operace zdánlivě "visela" — UI neukazovalo že se něco děje.
+
+**Řešení:** Přidán centered modal overlay konzistentní s export/import dialogy:
+- Červený nadpis `✕ Deleting {images|videos|assets}` — vizuální signál destruktivní operace
+- Large counter `N / TOTAL` v Syne fontu (vypadá a chová se jako export progress)
+- Update každých 3-5 itemů + `setTimeout(0)` yield
+- Trigger threshold: 10+ obrázků, 5+ videí (videa jsou dražší), 10+ assetů. Pod threshold se overlay neukáže (operace je rychlá, bliknutí by bylo rušivější než žádný progress).
+
+Move operace (`moveSelectedGalleryToFolder`, `videoMoveSelected`, `moveSelectedAssetsToFolder`) progress nepotřebují — `Promise.all` dokončí typickou operaci pod 100 ms.
+
+---
+
+## Streaming + chunked archive export (20. 4. 2026 — Session 1+2)
+
+**Problém:** `exportGallery()` padal při >320 obrázcích (OOM crash tabu), `exportVideoArchive()` u velkých video knihoven tiše produkoval syntakticky nevalidní JSON (archivace "proběhla" bez erroru, ale soubor nešel naimportovat). Oba exporty držely celou knihovnu v RAM najednou (~640 MB pole JSON stringů × 320 obrázků, plus ~640 MB při konstrukci Blobu). V8 má softlimit ~512 MB na jeden string, Chrome na Windows někdy tiše truncatuje Blob write >500 MB.
+
+**Zvažované varianty:**
+
+| Varianta | Plus | Minus |
+|----------|------|-------|
+| A) **Streaming write** přes `FileSystemWritableFileStream`, per-item | Memory peak ~1 item; minimální změna kódu; reusable v Tauri | Vyžaduje FS API (localhost/https), na file:// nefunguje |
+| B) **Chunked archive** (auto-split do multi-file) | Funguje všude i na file://; resilience (corrupt part neruší zbytek) | Víc souborů pro uživatele; komplexnější import |
+| C) ZIP formát s binary daty | 30% menší archiv, standardní formát | Custom JS ZIP reader ~150 řádků; v Tauri nahrazen Rust crate → throw-away kód |
+
+**Rozhodnutí: A+B kombinovaně, implementováno v jedné session.**
+
+Session 1 = cesta A (streaming JSON, jeden soubor). Session 2 = cesta B (chunked multi-file pro file:// fallback). **Kritická pro distribuci single-file HTML buildu** — Petr provozuje `gis_vNNNen.html` na `file://`, kde FS API není dostupné. Bez chunked cesty by archivace velkých knihoven z file:// nefungovala vůbec.
+
+**ZIP (varianta C) zamítnut** po analýze Tauri migrace:
+- JS ZIP reader = throw-away (Rust `zip` crate je lepší ve všem po přechodu)
+- Streaming JSON serialization logika je naopak reusable (v Tauri se jen změní target writer z `WritableStream` na `writeBinaryFile`)
+- Celá archive feature v Tauri bude pravděpodobně přepsaná na folder-based backup (manifest.json + originální `images/*.png`, `videos/*.mp4` přímo) — žádný archive wrapper potřeba
+
+**Formát:**
+- **Streaming cesta (FS API):** původní JSON schema beze změny (single-file `gis-archive-2026-04-20-248img.json`)
+- **Chunked cesta (file:// fallback):** rozšířené schema s `archiveId`, `partNumber`, `totalParts`, `imageCountTotal`. Filename pattern `gis-archive-2026-04-20-part1of3-100img.json`
+
+**Auto-split thresholdy:**
+- Gallery: > 100 obrázků (100 × 2 MB ≈ 200 MB per part, bezpečně pod V8 limit)
+- Video: > 5 videí (5 × 30 MB ≈ 150 MB per part)
+
+**Chrome multi-download UX:**
+- User uvidí jednou dialog "Allow multiple downloads from this site" a potvrdí
+- Mezi `a.click()` pauza 500ms (gallery) / 700ms (video) aby Chrome throttling nepřeskakoval
+- Všech N parts stáhne postupně do Downloads
+
+**Implementace:**
+- `gallery.js` — `exportGallery()` (3 cesty: streaming / chunked / legacy), `importGallery()` přepsán na multi-file awareness
+- `video.js` — `exportVideoArchive()` (3 cesty), `importVideoArchive()` multi-file
+- `template.html` — přidán `multiple` atribut na oba `<input type="file">` pro archive import
+
+**Multi-file import architektura:**
+- Files sorted podle `part{N}of{M}` v názvu (alphabetic fallback)
+- Pre-scan: první 64 KB každého souboru se zparsuje jako header, validuje se `archiveId` konzistence a `totalParts` pokrytí
+- Varování pokud chunked archive má chybějící parts (`missing N of M parts, proceed?`)
+- Single confirm dialog pro celý archiv (ne per-file)
+- Agregovaný progress napříč soubory (`file 2 / 3 — 145 / 248 images`)
+
+**Resilience:**
+- Pokud `dbGet()` vrátí null pro některý item při exportu (corrupt record), exportér ho skipne + pokračuje + toast zobrazí `(N skipped)`
+- Folders jsou v každém chunked partu (duplicitně) — pokud jeden part chybí, folder struktura se neztratí
+- Multi-file import dokáže sjet i neúplnou chunked sadu (user potvrdí warning)
+
+**Důsledky:**
+- 320-obrázkový crash vyřešen na localhost (streaming) i file:// (chunked)
+- Corrupt video JSON vyřešen — streaming write je deterministic, chunked parts jsou každý pod V8 string limitem
+- Archivace single-file distribuce (file://) funguje pro libovolně velké knihovny
+
+---
+
+## Dev server — lokální HTTP mode pro vývoj (20. 4. 2026)
+
+**Problém:** Single-file HTML build dosáhl 26 354 řádků (v202en). Dev ergonomie se zhoršila na třech úrovních:
+1. Context window pro Claude při edit tasks neúnosně velký — slepená `<script>` značka v browseru nejde rozumně inspectovat
+2. Globální scope napříč 19 moduly (`window.*` implicitně) znamená, že změna v jednom modulu snadno rozbije jiný bez compile-time signálu
+3. Chrome DevTools Sources panel je na 26k řádků `<script>` blok prakticky nepoužitelný (breakpointy, stack traces, scrolling)
+
+**Zvažované varianty:**
+
+| Varianta | Plus | Minus |
+|----------|------|-------|
+| A) Satelitní HTML (2–3 files) na `file://` | Žádná změna distribuce, zůstáváme na `file://` | IndexedDB origin isolation — rozdělená galerie mezi Core/Video/Paint, export/import overhead jako permanent pain |
+| B) **Lokální HTTP server + moduly jako samostatné JS soubory** | Pravá modularita, sdílená IndexedDB, plné DevTools, Ctrl+R hot reload | Vyžaduje spuštěný server (Node), jiný origin než prod file:// |
+| C) Tauri migrace nyní | Vyřeší vše najednou (modularita + distribuce + no CORS + user install) | 3–4 sessions Rust setup, blokuje current feature work, předčasné bez hard-limit triggeru |
+
+**Rozhodnutí: B.**
+
+**Implementace (bez refaktorizace modulů):**
+- `build.js` rozšířen o `--dev` flag (104 → 280 řádků). Prod režim (concat do single-file HTML) zachován identicky.
+- Dev režim generuje `dev/index.html` nahrazením `<script>// __GIS_JS__</script>` bloku v `template.html` za 19 `<script src="./src/NAME.js"></script>` tagů (přesně v `MODULES` order).
+- Mini HTTP server na Node built-ins (zero dependencies): `http`, `net`, `fs`, `path`, `child_process`
+- Port auto-detect 7800–7810 (vyhýbáme se dev portům 3000/5000/8000/8080)
+- `Cache-Control: no-store` → Ctrl+R vždy re-fetch; edit-refresh cyklus bez restart serveru
+- Path traversal guard (`safeResolve`) na `/src/*` endpointu
+- `start_dev.bat` pro Windows dvojklik-spuštění
+
+**Důsledky:**
+- `localhost:7800` je jiný origin než `file://gis_v202en.html` → nová IndexedDB instance. **Dev/prod separation záměrný** — Petrova reálná data žijí dál v prod verzi na file://, dev localhost má prázdnou DB pro testy.
+- Proxy Worker (`gis-proxy.petr-gis.workers.dev`) zůstává — localhost ≠ Tauri, CORS stále platí pro xAI/Luma/Magnific/Topaz/Replicate
+- Žádné změny v modulech, žádná ES6 `import`/`export` migrace. Moduly zůstávají globální scope jako dnes.
+- Tauri migrace zůstává v TODO jako budoucí krok; tento dev server nezavírá ani neotevírá žádné dveře k Tauri.
+
+**Co tento krok ZÁMĚRNĚ NEŘEŠÍ:**
+- ES6 modularizace (`import`/`export`)
+- Rozdělení monstr `video.js` (5211) a `paint.js` (2110) na submoduly
+- Watch mode / auto-reload (Ctrl+R je záměrně manuální — spolehlivější při chybách)
+- Distribuce pro non-tech uživatele (Tauri)
+- Sdílení dat mezi `file://` prod a `localhost` dev instancemi
+
+**Dilema řešené předem:** IndexedDB separation mezi file:// a localhost = jednorázová bolest, že testovací data dev instance nemá přístup k produkčním. Petr vědomě zvolil dev/prod separation místo jednorázové export/import migrace. Pokud se to v budoucnu ukáže jako překážka, přidáme export/import UI (samostatný krok).
 
 ---
 

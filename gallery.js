@@ -323,12 +323,40 @@ async function deleteSelected() {
   if (!selectedGalItems.size) return;
   const count = selectedGalItems.size;
   if (!confirm(`Delete ${count} images?`)) return;
+
+  // Progress overlay (jen při větším počtu — pod 10 je rychlé, overlay by blikal)
+  const showProgress = count >= 10;
+  let progressEl = null;
+  function setProgress(done) {
+    if (!showProgress) return;
+    if (!progressEl) {
+      progressEl = document.createElement('div');
+      progressEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      progressEl.innerHTML = `<div style="background:var(--s1);border:1px solid var(--border);padding:32px 48px;text-align:center;min-width:320px;">
+        <div style="font-family:Syne,sans-serif;font-size:22px;font-weight:700;color:#ff6b6b;margin-bottom:12px;">✕ Deleting images</div>
+        <div id="_delL2" style="font-size:28px;font-weight:700;font-family:Syne,sans-serif;color:var(--text);"></div>
+      </div>`;
+      document.body.appendChild(progressEl);
+    }
+    const el = document.getElementById('_delL2');
+    if (el) el.textContent = `${done} / ${count}`;
+  }
+  function hideProgress() { if (progressEl) { document.body.removeChild(progressEl); progressEl = null; } }
+
+  setProgress(0);
+  let done = 0;
   for (const id of selectedGalItems) {
     await dbDelete('images', id);
     await dbDeleteMeta(id);
     await dbDelete('thumbs', id);
     thumbMemCache.delete(id);
+    done++;
+    if (done % 5 === 0 || done === count) {
+      setProgress(done);
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
+  hideProgress();
   selectedGalItems.clear();
   document.getElementById('galBulk').classList.remove('show');
   refreshGalleryUI();
@@ -1469,30 +1497,169 @@ async function exportGallery() {
   if (window.showSaveFilePicker) {
     try {
       fileHandle = await window.showSaveFilePicker({
+        id: 'gis-gallery-archive',
         suggestedName: `gis-archive-${ts}.json`,
         types: [{ description: 'GIS Archive', accept: { 'application/json': ['.json'] } }]
       });
     } catch(e) {
       if (e.name === 'AbortError') return; // uživatel zrušil — nic nedělat
-      fileHandle = null; // jiná chyba → fallback na download
+      fileHandle = null; // jiná chyba → fallback na legacy download
     }
   }
 
-  // ── Krok 2: načíst data (teď může await bez problémů) ──
-  showProgress('Loading gallery...');
+  // ── Krok 2: získat seznam IDs přes meta (rychlé, bez imageData) ──
+  showProgress('Loading gallery index...');
+  await new Promise(r => setTimeout(r, 0));
+
+  const metas = await dbGetAllMeta();
+  const folders = await dbGetAll('folders');
+  const imageIds = metas.map(m => m.id);
+
+  if (!imageIds.length) { hideProgress(); toast('Gallery is empty', 'err'); return; }
+
+  const filename = `gis-archive-${ts}-${imageIds.length}img.json`;
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STREAMING PATH — File System Access API s per-item zápisem
+  // Memory peak: ~1 obrázek na iteraci (nikoli celá knihovna).
+  // Řeší historický crash na ~320 obrázcích (memory blow-up 1+ GB).
+  // ═══════════════════════════════════════════════════════════════════
+  if (fileHandle) {
+    let writable = null;
+    try {
+      writable = await fileHandle.createWritable();
+
+      // Header bez uzavírací `}` + otevření `images` pole
+      const header = JSON.stringify({
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        imageCount: imageIds.length,
+        folders
+      });
+      await writable.write(header.slice(0, -1) + ', "images": [');
+
+      // Stream každý obrázek zvlášť. Po awaitu se `img` dostane mimo scope
+      // na další iteraci → GC ho sebere. Nikdy nedržíme víc než 1-2 obrázky v paměti.
+      let skipped = 0;
+      for (let i = 0; i < imageIds.length; i++) {
+        const img = await dbGet('images', imageIds[i]);
+        if (!img) { skipped++; continue; }
+        // Pokud tohle je první úspěšný zápis, žádná čárka. Čárka se dává před každým dalším.
+        const prefix = (i - skipped > 0) ? ',' : '';
+        await writable.write(prefix + JSON.stringify(img));
+
+        if (i % 10 === 9 || i === imageIds.length - 1) {
+          showProgress(`Streaming images… ${i + 1} / ${imageIds.length}`);
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      await writable.write(']}');
+      await writable.close();
+
+      hideProgress();
+      const msg = skipped
+        ? `Archived — ${imageIds.length - skipped} images ✓ (${skipped} skipped)`
+        : `Archived — ${imageIds.length} images ✓`;
+      toast(msg, 'ok');
+      return;
+    } catch(e) {
+      // Streaming selhal v půlce — soubor může být partial. Pokus o abort.
+      try { if (writable) await writable.abort(); } catch {}
+      hideProgress();
+      console.error('[GIS] Gallery streaming export failed:', e);
+      toast('Archive failed: ' + (e.message || e), 'err');
+      return;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // FALLBACK PATH — file:// bez FS API (chunked nebo legacy)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Chunked threshold: nad 100 obrázků rozdělit do více souborů.
+  // Důvod: Blob + JSON.stringify u >100 obrázků začne narážet na V8 string
+  // limit (~512 MB) a Chrome může silent-truncate velké Blob writes na file://.
+  // Chunked path = bezpečné pro libovolně velké knihovny.
+  const CHUNK_SIZE = 100;
+
+  if (imageIds.length > CHUNK_SIZE) {
+    // MULTI-FILE CHUNKED EXPORT
+    const archiveId = `arch-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const totalParts = Math.ceil(imageIds.length / CHUNK_SIZE);
+    let totalImported = 0, totalSkipped = 0;
+
+    // Browser prompt při multi-download: Chrome/Firefox se ptá
+    // "Allow multiple downloads from this site?" — user musí povolit jednou.
+    showProgress(`Preparing chunked archive (${totalParts} parts)…`);
+    await new Promise(r => setTimeout(r, 0));
+
+    for (let p = 0; p < totalParts; p++) {
+      const partStart = p * CHUNK_SIZE;
+      const partEnd = Math.min(partStart + CHUNK_SIZE, imageIds.length);
+      const partIds = imageIds.slice(partStart, partEnd);
+
+      showProgress(`Part ${p + 1} / ${totalParts} — loading ${partIds.length} images…`);
+      await new Promise(r => setTimeout(r, 0));
+
+      const partImages = [];
+      for (let i = 0; i < partIds.length; i++) {
+        const img = await dbGet('images', partIds[i]);
+        if (!img) { totalSkipped++; continue; }
+        partImages.push(img);
+        totalImported++;
+        if (i % 20 === 19) {
+          showProgress(`Part ${p + 1} / ${totalParts} — loading ${i + 1} / ${partIds.length}…`);
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      showProgress(`Part ${p + 1} / ${totalParts} — writing file…`);
+      await new Promise(r => setTimeout(r, 0));
+
+      const partJson = JSON.stringify({
+        version: 1,
+        archiveId,
+        partNumber: p + 1,
+        totalParts,
+        exportedAt: new Date().toISOString(),
+        imageCount: partImages.length,
+        imageCountTotal: imageIds.length,
+        folders, // V každém partu — resilience pokud chybí konkrétní část
+        images: partImages,
+      });
+
+      const blob = new Blob([partJson], { type: 'application/json' });
+      const partFilename = `gis-archive-${ts}-part${p + 1}of${totalParts}-${partImages.length}img.json`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = partFilename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      // Chrome throttling mezi downloady — 500ms pauza aby se první dokončil
+      // a dialog "allow multiple downloads" se nezacyklil
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    hideProgress();
+    const msg = totalSkipped
+      ? `Archived — ${totalImported} images v ${totalParts} souborech (${totalSkipped} skipped)`
+      : `Archived — ${totalImported} images v ${totalParts} souborech ✓`;
+    toast(msg, 'ok');
+    return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // LEGACY single-file fallback pro malé knihovny (<= CHUNK_SIZE)
+  // ═══════════════════════════════════════════════════════════════════
+  showProgress(`Loading all ${imageIds.length} images…`);
   await new Promise(r => setTimeout(r, 0));
 
   const images = await dbGetAll('images');
-  const folders = await dbGetAll('folders');
 
-  if (!images.length) { hideProgress(); toast('Gallery is empty', 'err'); return; }
-
-  const filename = `gis-archive-${ts}-${images.length}img.json`;
-
-  // ── Krok 3: stavět JSON po kouscích (vyhne se blokování threadu) ──
   const header = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), imageCount: images.length, folders });
   const parts = [header.slice(0, -1) + ', "images": ['];
-
   for (let i = 0; i < images.length; i++) {
     if (i > 0) parts.push(',');
     parts.push(JSON.stringify(images[i]));
@@ -1503,25 +1670,10 @@ async function exportGallery() {
   }
   parts.push(']}');
 
-  showProgress('Zapisuji soubor…');
+  showProgress('Writing file…');
   await new Promise(r => setTimeout(r, 0));
   const blob = new Blob(parts, { type: 'application/json' });
 
-  // ── Krok 4: uložit ──
-  if (fileHandle) {
-    try {
-      const ws = await fileHandle.createWritable();
-      await ws.write(blob);
-      await ws.close();
-      hideProgress();
-      toast(`Archived — ${images.length} images ✓`, 'ok');
-      return;
-    } catch(e) {
-      // zápis selhal → fallback
-    }
-  }
-
-  // Fallback: přímé stažení do Downloads
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
@@ -1531,18 +1683,29 @@ async function exportGallery() {
 }
 
 async function importGallery(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
   input.value = '';
+
+  // Sort files: pokud jsou to chunked parts, seřaď podle partNumber v názvu
+  // (gis-archive-...-part1of3-..., part2of3-..., part3of3-...)
+  // Fallback: alphabetic sort (který stejně dává správné pořadí pro partNoOfM formát)
+  files.sort((a, b) => {
+    const ma = a.name.match(/part(\d+)of\d+/i);
+    const mb = b.name.match(/part(\d+)of\d+/i);
+    if (ma && mb) return parseInt(ma[1]) - parseInt(mb[1]);
+    return a.name.localeCompare(b.name);
+  });
 
   // ── Progress overlay — velký centered modal, stejný styl jako export ──
   let progressEl = null;
-  let _totalCount = 0;
+  let _totalCount = 0;   // celkem images napříč všemi soubory (pokud známo)
+  let _fileLabel = '';   // např. "part 2 of 3" nebo ""
   function showProg(imported, skipped) {
     const done = imported + skipped;
     const total = _totalCount || '?';
     const pct = _totalCount ? Math.round(done / _totalCount * 100) : '';
-    const line1 = `Importing images…`;
+    const line1 = _fileLabel ? `Importing images… (${_fileLabel})` : 'Importing images…';
     const line2 = `${done} / ${total}${pct !== '' ? '  (' + pct + '%)' : ''}`;
     const line3 = skipped > 0 ? `(${skipped} skipped — duplicity)` : '';
     if (!progressEl) {
@@ -1575,11 +1738,80 @@ async function importGallery(input) {
   }
   function hideProg() { if (progressEl) { document.body.removeChild(progressEl); progressEl = null; } }
 
-  showProgMsg('Loading archive…');
+  showProgMsg(files.length > 1
+    ? `Loading ${files.length} archive parts…`
+    : 'Loading archive…');
   await new Promise(r => setTimeout(r, 0));
 
-  // ── Worker: streaming JSON parser — NIKDY nenačítá celý archiv najednou ──
-  // Klíčová oprava: MARKER hledá "images" + libovolné mezery + "[" (regex místo indexOf)
+  // ── Multi-file pre-scan: přečíst header každého souboru, sečíst imageCount ──
+  // Pokud je soubor chunked, ma pole imageCount, imageCountTotal, partNumber, totalParts.
+  // Taky zkontrolovat že všechny chunked parts patří ke stejnému archiveId a že máme všechny.
+  let archiveId = null;
+  let expectedTotalParts = null;
+  let sumImageCount = 0;
+  const partInfos = [];
+
+  async function readHeader(file) {
+    // Přečti jen prvních 64 KB — header s folders tam musí být kompletní
+    const slice = file.slice(0, 65536);
+    const text = await slice.text();
+    const m = text.match(/"images"\s*:\s*\[/);
+    if (!m) return null;
+    try {
+      const hRaw = text.slice(0, m.index).replace(/,\s*$/, '') + '}';
+      return JSON.parse(hRaw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  for (const file of files) {
+    const h = await readHeader(file);
+    if (!h) {
+      partInfos.push({ file, header: null, valid: false });
+      continue;
+    }
+    partInfos.push({ file, header: h, valid: true });
+    sumImageCount += (h.imageCount || 0);
+    if (h.archiveId) {
+      if (archiveId === null) archiveId = h.archiveId;
+      else if (archiveId !== h.archiveId) {
+        hideProg();
+        toast(`Error: different archive parts selected (${file.name} má jiný archiveId)`, 'err');
+        return;
+      }
+      if (expectedTotalParts === null) expectedTotalParts = h.totalParts;
+    }
+  }
+
+  const validParts = partInfos.filter(p => p.valid);
+  if (!validParts.length) {
+    hideProg();
+    toast('No valid archive files found', 'err');
+    return;
+  }
+
+  // Varování pokud chunked archive má chybějící parts
+  if (archiveId && expectedTotalParts && validParts.length < expectedTotalParts) {
+    const missing = expectedTotalParts - validParts.length;
+    const proceed = confirm(`Warning: missing ${missing} of ${expectedTotalParts} chunked archive parts.\n\nProceed anyway? (Only available parts will be imported.)`);
+    if (!proceed) { hideProg(); return; }
+  }
+
+  _totalCount = sumImageCount;
+
+  // ── Načíst existující IDs a folders pro deduplikaci — JEDNOU pro všechny soubory ──
+  const existingIds = new Set((await dbGetAllMeta()).map(i => i.id));
+  const existingFolderIds = new Set((await dbGetAll('folders')).map(f => f.id));
+
+  // ── Potvrzení od uživatele — jednou pro celý archiv (ne per-file) ──
+  hideProg();
+  const confirmMsg = files.length > 1
+    ? `Import ${sumImageCount} images from ${validParts.length} archive parts into gallery?`
+    : `Import ${sumImageCount || 'archive'} into gallery?`;
+  if (!confirm(confirmMsg)) return;
+
+  // ── Worker source — reusable across všech souborů ──
   const workerSrc = `
     let _resolve = null;
     self.onmessage = function(e) {
@@ -1595,7 +1827,6 @@ async function importGallery(input) {
       var depth = 0, inStr = false, esc = false;
       var parts = [], segStart = 0;
 
-      // Najde "images"\\s*[ v bufferu — robustní vůči mezerám v JSON
       function findImagesMarker(buf) {
         var re = /"images"\\s*:\\s*\\[/;
         var m = re.exec(buf);
@@ -1607,7 +1838,6 @@ async function importGallery(input) {
           headerBuf += str;
           var m = findImagesMarker(headerBuf);
           if (!m) {
-            // Ořez buffer ale zachovej dost pro marker
             if (headerBuf.length > 65536) headerBuf = headerBuf.slice(-200);
             return;
           }
@@ -1655,19 +1885,17 @@ async function importGallery(input) {
       };
 
       try {
-        // Fáze 1: načti header (pošli meta, čekej na continue/abort)
         while (!found) {
           var chunk1 = await reader.read();
           if (chunk1.done) break;
           await processStr(dec.decode(chunk1.value, {stream: true}));
         }
         if (!found) { self.postMessage({type:'error', message:'Archiv neobsahuje pole images'}); return; }
-
-        // Čekej na potvrzení od uživatele
+        // Auto-continue v multi-file režimu (confirm byl jednou předtím)
+        self.postMessage({type:'meta-done'});
         var cmd2 = await waitMsg();
         if (cmd2 && cmd2.type === 'abort') { reader.cancel(); return; }
 
-        // Fáze 2: stream zbytku souboru
         while (true) {
           var chunk2 = await reader.read();
           if (chunk2.done) break;
@@ -1683,78 +1911,86 @@ async function importGallery(input) {
 
   const workerBlob = new Blob([workerSrc], {type: 'application/javascript'});
   const workerUrl = URL.createObjectURL(workerBlob);
-  const worker = new Worker(workerUrl);
-
-  // Existující IDs a složky pro deduplikaci — ctem jen meta (bez imageData),
-  // jinak bychom pri 1000+ images stahovali stovky MB zbytecne.
-  const existingIds = new Set((await dbGetAllMeta()).map(i => i.id));
-  const existingFolderIds = new Set((await dbGetAll('folders')).map(f => f.id));
 
   let imported = 0, skipped = 0;
+  showProg(0, 0);
 
+  // ── Loop přes všechny soubory ──
   try {
-    await new Promise((resolve, reject) => {
-      worker.onerror = e => reject(new Error(e.message || 'Worker error'));
-      worker.onmessage = async ({data: msg}) => {
-        try {
-          if (msg.type === 'meta') {
-            _totalCount = msg.imageCount || 0;
-            hideProg(); // skryj "načítám" overlay před confirm dialogem
-            const ok = confirm(`Import ${_totalCount ? _totalCount + ' images' : 'archive'} into gallery?`);
-            if (!ok) {
-              worker.postMessage({type:'abort'});
-              resolve();
-              return;
-            }
-            // Importuj složky
-            for (const f of (msg.folders || [])) {
-              if (!existingFolderIds.has(f.id)) await dbPut('folders', f);
-            }
-            showProg(0, 0);
-            worker.postMessage({type:'continue'});
+    for (let fi = 0; fi < validParts.length; fi++) {
+      const pinfo = validParts[fi];
+      _fileLabel = validParts.length > 1
+        ? `file ${fi + 1} / ${validParts.length}`
+        : '';
 
-          } else if (msg.type === 'image') {
-            const img = msg.image;
-            if (existingIds.has(img.id)) {
-              skipped++;
-            } else {
-              await dbPut('images', img);
-              await dbPutMeta(img);
-              if (img.imageData) {
-                generateThumb(img.imageData, img.mimeType || 'image/png').then(t => {
-                  if (t) {
-                    const tx = db.transaction('thumbs', 'readwrite');
-                    tx.objectStore('thumbs').put({id: img.id, data: t});
-                    thumbMemCache.set(img.id, t);
+      const worker = new Worker(workerUrl);
+      try {
+        await new Promise((resolve, reject) => {
+          worker.onerror = e => reject(new Error(e.message || 'Worker error'));
+          worker.onmessage = async ({data: msg}) => {
+            try {
+              if (msg.type === 'meta') {
+                // Import folders z headeru (dedup)
+                for (const f of (msg.folders || [])) {
+                  if (!existingFolderIds.has(f.id)) {
+                    await dbPut('folders', f);
+                    existingFolderIds.add(f.id);
                   }
-                });
-              }
-              imported++;
-            }
-            showProg(imported, skipped);
-            worker.postMessage({type:'ack'});
+                }
+                // Žádný confirm — už byl udělán jednou pro celý archiv
+              } else if (msg.type === 'meta-done') {
+                // Signál že header je zparsovaný; pokračuj
+                worker.postMessage({type:'continue'});
 
-          } else if (msg.type === 'done') {
-            resolve();
-          } else if (msg.type === 'error') {
-            reject(new Error(msg.message));
-          }
-        } catch(e) { reject(e); }
-      };
-      worker.postMessage(file);
-    });
+              } else if (msg.type === 'image') {
+                const img = msg.image;
+                if (existingIds.has(img.id)) {
+                  skipped++;
+                } else {
+                  await dbPut('images', img);
+                  await dbPutMeta(img);
+                  existingIds.add(img.id);
+                  if (img.imageData) {
+                    generateThumb(img.imageData, img.mimeType || 'image/png').then(t => {
+                      if (t) {
+                        const tx = db.transaction('thumbs', 'readwrite');
+                        tx.objectStore('thumbs').put({id: img.id, data: t});
+                        thumbMemCache.set(img.id, t);
+                      }
+                    });
+                  }
+                  imported++;
+                }
+                showProg(imported, skipped);
+                worker.postMessage({type:'ack'});
+
+              } else if (msg.type === 'done') {
+                resolve();
+              } else if (msg.type === 'error') {
+                reject(new Error(msg.message));
+              }
+            } catch(e) { reject(e); }
+          };
+          worker.postMessage(pinfo.file);
+        });
+      } finally {
+        worker.terminate();
+      }
+    }
   } catch(e) {
     hideProg();
-    toast('Import error: ' + (e.message || e), 'err');
-  } finally {
-    worker.terminate();
     URL.revokeObjectURL(workerUrl);
+    toast('Import error: ' + (e.message || e), 'err');
+    return;
   }
 
+  URL.revokeObjectURL(workerUrl);
   invalidateMetaCache();
   hideProg();
+
   const note = skipped > 0 ? ` (${skipped} skipped)` : '';
-  toast(`Imported ${imported} images ✓${note}`, imported > 0 ? 'ok' : 'err');
+  const filePart = validParts.length > 1 ? ` from ${validParts.length} parts` : '';
+  toast(`Imported ${imported} images${filePart} ✓${note}`, imported > 0 ? 'ok' : 'err');
   if (imported > 0) refreshGalleryUI();
 }
 

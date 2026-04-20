@@ -171,9 +171,34 @@ async function createAsset(imageData, mimeType, sourceType, sourceJobId) {
 async function uploadAssetsFromFile(files) {
   const arr = Array.from(files);
   if (!arr.length) return;
-  toast(`Uploading ${arr.length} ${arr.length === 1 ? 'file' : 'files'}…`, 'ok');
+
+  const total = arr.length;
+
+  // ── Local progress overlay — EXAKTNĚ stejný pattern jako exportGallery,
+  //    který prokazatelně funguje. dlProgShow v tomto kontextu nefungoval
+  //    (neznámá příčina — možná CSS konflikt v assets tabu). ──
+  let progressEl = null;
+  function showProgress(text) {
+    if (!progressEl) {
+      progressEl = document.createElement('div');
+      progressEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      progressEl.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);padding:32px 48px;text-align:center;min-width:320px;"><div style="font-family:Syne,sans-serif;font-size:22px;font-weight:700;color:var(--accent);margin-bottom:8px;">↑ Uploading assets</div><div id="_uplProgTxt" style="font-size:16px;color:var(--text);"></div></div>';
+      document.body.appendChild(progressEl);
+    }
+    document.getElementById('_uplProgTxt').textContent = text;
+  }
+  function hideProgress() {
+    if (progressEl) { document.body.removeChild(progressEl); progressEl = null; }
+  }
+
+  showProgress(`Preparing ${total} ${total === 1 ? 'file' : 'files'}…`);
+  await new Promise(r => setTimeout(r, 0));
+
   let newCount = 0, dupCount = 0, errCount = 0;
-  for (const file of arr) {
+  const errorNames = [];
+
+  for (let i = 0; i < arr.length; i++) {
+    const file = arr[i];
     try {
       const dataUrl = await new Promise((res, rej) => {
         const r = new FileReader();
@@ -183,27 +208,55 @@ async function uploadAssetsFromFile(files) {
       });
       const b64 = dataUrl.split(',')[1];
       const mimeType = file.type || 'image/png';
-      if (!b64 || b64.length < 100) { errCount++; toast(`Error: ${file.name} — empty data`, 'err'); continue; }
-      const isNew = !(await findAssetByFingerprint(b64));
-      const asset = await createAsset(b64, mimeType, 'upload');
-      // Ověř že se skutečně uložilo do DB
-      const verify = await dbGet('assets', asset.id);
-      if (!verify) { errCount++; toast(`DB error: ${file.name}`, 'err'); continue; }
-      if (isNew) newCount++; else dupCount++;
+      if (!b64 || b64.length < 100) {
+        errCount++;
+        errorNames.push(file.name);
+      } else {
+        const isNew = !(await findAssetByFingerprint(b64));
+        const asset = await createAsset(b64, mimeType, 'upload');
+        const verify = await dbGet('assets', asset.id);
+        if (!verify) {
+          errCount++;
+          errorNames.push(file.name);
+        } else {
+          if (isNew) newCount++; else dupCount++;
+        }
+      }
     } catch(e) {
       errCount++;
-      console.error('Asset upload error:', e);
-      toast(`Chyba: ${e.message}`, 'err');
+      errorNames.push(file.name);
+      console.error('Asset upload error:', file.name, e);
+    }
+
+    // Progress update + yield každé 3 soubory
+    if (i % 3 === 2 || i === arr.length - 1) {
+      const parts = [];
+      if (newCount) parts.push(`${newCount} new`);
+      if (dupCount) parts.push(`${dupCount} dup`);
+      if (errCount) parts.push(`${errCount} err`);
+      const status = parts.length ? ` · ${parts.join(' · ')}` : '';
+      showProgress(`Uploading… ${i + 1} / ${total}${status}`);
+      await new Promise(r => setTimeout(r, 0));
     }
   }
-  document.getElementById('assetUploadInput').value = '';
+
+  const uploadInput = document.getElementById('assetUploadInput');
+  if (uploadInput) uploadInput.value = '';
+
+  hideProgress();
   await renderAssets();
   await renderAssetFolders();
+
   const parts = [];
   if (newCount) parts.push(`${newCount} new`);
   if (dupCount) parts.push(`${dupCount} duplicate${dupCount > 1 ? 's' : ''} skipped`);
   if (errCount) parts.push(`${errCount} error${errCount > 1 ? 's' : ''}`);
-  toast(`Assets: ${parts.join(', ') || 'done'}`, errCount ? 'err' : 'ok');
+  const summary = parts.join(', ') || 'done';
+  toast(`Assets: ${summary}`, errCount ? 'err' : 'ok');
+
+  if (errCount && errorNames.length) {
+    console.warn('[GIS] Asset upload errors on files:', errorNames);
+  }
 }
 
 // ── Přidat vygenerovaný obrázek jako asset ──
@@ -545,17 +598,46 @@ async function deleteAsset(id) {
 
 async function deleteSelectedAssets() {
   if (!selectedAssets.size) return;
-  if (!confirm(`Delete ${selectedAssets.size} assets?`)) return;
+  const count = selectedAssets.size;
+  if (!confirm(`Delete ${count} assets?`)) return;
+
+  // Progress overlay (spouštíme od 10)
+  const showProgress = count >= 10;
+  let progressEl = null;
+  function setProgress(done) {
+    if (!showProgress) return;
+    if (!progressEl) {
+      progressEl = document.createElement('div');
+      progressEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      progressEl.innerHTML = `<div style="background:var(--s1);border:1px solid var(--border);padding:32px 48px;text-align:center;min-width:320px;">
+        <div style="font-family:Syne,sans-serif;font-size:22px;font-weight:700;color:#ff6b6b;margin-bottom:12px;">✕ Deleting assets</div>
+        <div id="_adelL2" style="font-size:28px;font-weight:700;font-family:Syne,sans-serif;color:var(--text);"></div>
+      </div>`;
+      document.body.appendChild(progressEl);
+    }
+    const el = document.getElementById('_adelL2');
+    if (el) el.textContent = `${done} / ${count}`;
+  }
+  function hideProgress() { if (progressEl) { document.body.removeChild(progressEl); progressEl = null; } }
+
+  setProgress(0);
+  let done = 0;
   for (const id of selectedAssets) {
     await dbDelete('assets', id);
     await dbDeleteAssetMeta(id);
     const idx = refs.findIndex(r => r.assetId === id);
     if (idx !== -1) refs.splice(idx, 1);
+    done++;
+    if (done % 5 === 0 || done === count) {
+      setProgress(done);
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
+  hideProgress();
   clearAssetSelection();
   renderRefThumbs();
   renderAssets(); renderAssetFolders();
-  toast('Assets deleted', 'ok');
+  toast(`${count} assets deleted`, 'ok');
 }
 
 // ── Asset favorite ──

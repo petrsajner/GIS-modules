@@ -82,6 +82,11 @@ window.onload = () => {
     if (typeof migrateAssetFingerprints === 'function') {
       setTimeout(() => migrateAssetFingerprints(), 500);
     }
+    // Stejná migrace pro gallery images — přidáno v Session 3 (upload dedup).
+    // Staggered 1500ms aby neběželo současně s asset migrací (ta může být dlouhá).
+    if (typeof migrateImageFingerprints === 'function') {
+      setTimeout(() => migrateImageFingerprints(), 1500);
+    }
   });
   selectModel('nb2');
   // Zajistit platný aspect ratio po init (browser může obnovit neplatnou hodnotu)

@@ -4174,7 +4174,7 @@ select.inpaint-num option { background:#fff; color:#111; }
             <button class="ibtn" onclick="exportGallery()" title="Export entire gallery as JSON archive">↓ Archive</button>
             <label class="ibtn" style="cursor:pointer;" title="Load gallery from JSON archive">
               ↑ Load archive
-              <input type="file" accept=".json" style="display:none" onchange="importGallery(this)">
+              <input type="file" accept=".json" multiple style="display:none" onchange="importGallery(this)">
             </label>
           </div>
         </div>
@@ -4258,7 +4258,7 @@ select.inpaint-num option { background:#fff; color:#111; }
             <button class="ibtn" onclick="exportVideoArchive()" title="Export entire video library as JSON archive">↓ Archive</button>
             <label class="ibtn" style="cursor:pointer;" title="Load video library from JSON archive">
               ↑ Load archive
-              <input type="file" accept=".json" style="display:none" onchange="importVideoArchive(this)">
+              <input type="file" accept=".json" multiple style="display:none" onchange="importVideoArchive(this)">
             </label>
           </div>
         </div>

@@ -482,6 +482,69 @@ const _HAS_FS_API = !_IS_FILE_PROTOCOL
 
 
 
+// ═══════════════════════════════════════════════════════
+// IMAGE FINGERPRINT — duplicate detection pro gallery
+// ═══════════════════════════════════════════════════════
+// Mirror of findAssetByFingerprint z assets.js (používá sdílenou assetFingerprint()
+// čistou funkci). Rozdíl je jen ve store: images_meta místo assets_meta.
+// Pro stará data bez fingerprint field: migrateImageFingerprints běží na pozadí
+// při init (spouštěné ze setup.js). Během migrace vrátí findImageByFingerprint null
+// pro legacy data → duplicita se uploadne (nevadí, jednorázové, vyřeší se s migraci).
+
+async function findImageByFingerprint(imageData) {
+  if (typeof assetFingerprint !== 'function') return null; // safety: assets.js must load first
+  const fp = assetFingerprint(imageData);
+  if (!fp) return null;
+
+  const allMeta = await dbGetAllMeta();
+  const match = allMeta.find(m => m.fingerprint === fp);
+  if (!match) return null;
+  return match; // meta stačí pro dedup check, neloudame imageData
+}
+
+// Background migrace: pro každou image bez fingerprint field
+//   1) load plnou image z 'images' store (má imageData)
+//   2) spočítej fingerprint
+//   3) ulož do images_meta i images
+// Spouští se jednou na pozadí při init (ze setup.js). Batch 10 items, yield mezi batch.
+
+let _imageFingerprintMigrationPromise = null;
+async function migrateImageFingerprints() {
+  if (_imageFingerprintMigrationPromise) return _imageFingerprintMigrationPromise;
+  _imageFingerprintMigrationPromise = (async () => {
+    try {
+      if (typeof assetFingerprint !== 'function') return;
+      const allMeta = await dbGetAllMeta();
+      const needsBackfill = allMeta.filter(m => !m.fingerprint);
+      if (!needsBackfill.length) return;
+      console.log(`[GIS] Backfilling fingerprints for ${needsBackfill.length} legacy gallery images…`);
+
+      for (let i = 0; i < needsBackfill.length; i++) {
+        const m = needsBackfill[i];
+        try {
+          const full = await dbGet('images', m.id);
+          if (!full || !full.imageData) continue;
+          const fp = assetFingerprint(full.imageData);
+          if (!fp) continue;
+          m.fingerprint = fp;
+          full.fingerprint = fp;
+          await dbPut('images', full);
+          await dbPutMeta(full);
+        } catch (e) {
+          console.warn('[GIS] fingerprint backfill failed for image', m.id, e);
+        }
+        // Yield every 10 items to keep UI responsive
+        if (i % 10 === 9) await new Promise(r => setTimeout(r, 0));
+      }
+      console.log(`[GIS] Image fingerprint migration complete`);
+    } catch (e) {
+      console.warn('[GIS] migrateImageFingerprints failed:', e);
+    }
+  })();
+  return _imageFingerprintMigrationPromise;
+}
+
+
 // Save generated images to DB — vrací galleryId
 async function saveToGallery(result, prompt, targetFolder, refsCopy, rawPrompt, batchMeta) {
   if (typeof _GIS_SIG === 'undefined' || typeof GIS_COPYRIGHT === 'undefined' ||
@@ -633,6 +696,11 @@ async function saveToGallery(result, prompt, targetFolder, refsCopy, rawPrompt, 
   if (result.thoughtText && result.thoughtText.trim()) {
     record.thoughtText = result.thoughtText.trim();
   }
+  // Fingerprint pro duplicate detection (shared helper z assets.js).
+  // Persists v images_meta taky (metaFromRecord propaguje všechny fields).
+  if (typeof assetFingerprint === 'function' && record.imageData) {
+    record.fingerprint = assetFingerprint(record.imageData);
+  }
   await dbPut('images', record);
   await dbPutMeta(record);
   // Aktualizuj galerii na pozadí — i když je skrytá, aby byla ready při přepnutí
@@ -651,8 +719,30 @@ async function saveToGallery(result, prompt, targetFolder, refsCopy, rawPrompt, 
 async function uploadImagesToGallery(files, inputEl) {
   const arr = Array.from(files);
   if (!arr.length) return;
-  let added = 0, errors = 0;
-  for (const file of arr) {
+  const total = arr.length;
+
+  // ── Progress overlay — EXAKTNĚ stejný pattern jako exportGallery ──
+  let progressEl = null;
+  function showProgress(text) {
+    if (!progressEl) {
+      progressEl = document.createElement('div');
+      progressEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      progressEl.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);padding:32px 48px;text-align:center;min-width:320px;"><div style="font-family:Syne,sans-serif;font-size:22px;font-weight:700;color:var(--accent);margin-bottom:8px;">↑ Uploading to gallery</div><div id="_galUpTxt" style="font-size:16px;color:var(--text);"></div></div>';
+      document.body.appendChild(progressEl);
+    }
+    document.getElementById('_galUpTxt').textContent = text;
+  }
+  function hideProgress() {
+    if (progressEl) { document.body.removeChild(progressEl); progressEl = null; }
+  }
+
+  showProgress(`Preparing ${total} ${total === 1 ? 'file' : 'files'}…`);
+  await new Promise(r => setTimeout(r, 0));
+
+  let added = 0, errors = 0, duplicates = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const file = arr[i];
+    let handled = false; // true = item processed (new/dup/err), nepokračovat v try path
     try {
       const dataUrl = await new Promise((res, rej) => {
         const r = new FileReader();
@@ -662,42 +752,102 @@ async function uploadImagesToGallery(files, inputEl) {
       });
       const mimeType = file.type || 'image/png';
       const b64 = dataUrl.split(',')[1];
-      if (!b64 || b64.length < 100) { errors++; continue; }
-      const dims = await getImageDimensions(b64);
-      const id = Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-      const record = {
-        id,
-        ts: Date.now(),
-        model: 'Upload',
-        modelKey: 'upload',
-        prompt: `[Upload] ${file.name}`,
-        rawPrompt: file.name,
-        params: { filename: file.name, size: file.size },
-        imageData: b64,
-        mimeType,
-        folder: currentFolder !== 'all' ? currentFolder : 'all',
-        dims: fmtDims(dims),
-        usedRefs: [],
-      };
-      await dbPut('images', record);
-      await dbPutMeta(record);
-      generateThumb(b64, mimeType).then(thumb => {
-        if (thumb) {
-          const tx = db.transaction('thumbs', 'readwrite');
-          tx.objectStore('thumbs').put({ id, data: thumb });
-          thumbMemCache.set(id, thumb);
+      if (!b64 || b64.length < 100) {
+        errors++;
+        handled = true;
+      } else {
+        // ── Duplicate check (stejný mechanismus jako assets a archive import) ──
+        const existing = await findImageByFingerprint(b64);
+        if (existing) {
+          duplicates++;
+          handled = true;
+        } else {
+          const dims = await getImageDimensions(b64);
+          const id = Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          const record = {
+            id,
+            ts: Date.now(),
+            model: 'Upload',
+            modelKey: 'upload',
+            prompt: `[Upload] ${file.name}`,
+            rawPrompt: file.name,
+            params: { filename: file.name, size: file.size },
+            imageData: b64,
+            mimeType,
+            folder: currentFolder !== 'all' ? currentFolder : 'all',
+            dims: fmtDims(dims),
+            usedRefs: [],
+            fingerprint: assetFingerprint(b64),
+          };
+          await dbPut('images', record);
+          await dbPutMeta(record);
+          generateThumb(b64, mimeType).then(thumb => {
+            if (thumb) {
+              const tx = db.transaction('thumbs', 'readwrite');
+              tx.objectStore('thumbs').put({ id, data: thumb });
+              thumbMemCache.set(id, thumb);
+            }
+          });
+          added++;
+          handled = true;
         }
-      });
-      added++;
+      }
     } catch(e) {
       errors++;
       console.error('Gallery upload error:', e);
+      handled = true;
     }
+
+    // Progress update — JMENUJE SE VŽDY (i při duplicitě/errors). Předchozí verze
+    // používala `continue` po duplicate check, což skipnulo tento modulo check →
+    // user viděl jen "Preparing…" a pak close. Teď bez continue, s `handled` flag
+    // pro budoucí refactor safety.
+    if (i % 3 === 2 || i === arr.length - 1) {
+      const statusParts = [];
+      if (added) statusParts.push(`${added} new`);
+      if (duplicates) statusParts.push(`${duplicates} dup`);
+      if (errors) statusParts.push(`${errors} err`);
+      const status = statusParts.length ? ` · ${statusParts.join(' · ')}` : '';
+      showProgress(`Uploading… ${i + 1} / ${total}${status}`);
+      await new Promise(r => setTimeout(r, 0));
+    }
+    void handled; // avoid "unused" lint warning — flag je dokumentační
   }
   if (inputEl) inputEl.value = '';
   renderGallery();
-  const errNote = errors > 0 ? `, ${errors} selhalo` : '';
-  toast(`↑ ${added} images uploaded to gallery${errNote}`, added > 0 ? 'ok' : 'err');
+
+  // Finální summary
+  const parts = [];
+  if (added) parts.push(`${added} new`);
+  if (duplicates) parts.push(`${duplicates} duplicate${duplicates > 1 ? 's' : ''} skipped`);
+  if (errors) parts.push(`${errors} error${errors > 1 ? 's' : ''}`);
+  const summary = parts.join(', ') || 'nothing to upload';
+  const toastType = added > 0 ? 'ok' : (errors > 0 ? 'err' : 'ok');
+
+  // Pokud všechno nové, tichý close + toast
+  // Pokud něco bylo skipnuto (duplicity / errors), ZŮSTAT v modalu s tlačítkem OK,
+  // aby user to informaci nemohl přehlédnout. Toast by se ztratil.
+  const hasSomethingToShow = duplicates > 0 || errors > 0;
+  if (hasSomethingToShow && progressEl) {
+    // Přepíšeme content modalu na finální summary + OK tlačítko
+    progressEl.innerHTML = `<div style="background:var(--s1);border:1px solid var(--border);padding:32px 48px;text-align:center;min-width:340px;max-width:480px;">
+      <div style="font-family:Syne,sans-serif;font-size:22px;font-weight:700;color:var(--accent);margin-bottom:16px;">↑ Upload complete</div>
+      ${added > 0 ? `<div style="font-size:16px;color:var(--text);margin-bottom:6px;"><b>${added}</b> new image${added > 1 ? 's' : ''} added</div>` : ''}
+      ${duplicates > 0 ? `<div style="font-size:14px;color:var(--dim);margin-bottom:6px;"><b>${duplicates}</b> duplicate${duplicates > 1 ? 's' : ''} skipped (already in gallery)</div>` : ''}
+      ${errors > 0 ? `<div style="font-size:14px;color:#ff6b6b;margin-bottom:6px;"><b>${errors}</b> error${errors > 1 ? 's' : ''} (see console)</div>` : ''}
+      <button id="_galUpOk" class="ibtn" style="margin-top:18px;padding:8px 32px;">OK</button>
+    </div>`;
+    const okBtn = document.getElementById('_galUpOk');
+    if (okBtn) {
+      okBtn.onclick = () => { hideProgress(); };
+      okBtn.focus(); // Enter zavře modal
+    }
+    // Fallback: pokud user 30 sec neklikne, zavři automaticky
+    setTimeout(() => { if (progressEl) hideProgress(); }, 30000);
+  } else {
+    hideProgress();
+    toast(`↑ Gallery: ${summary}`, toastType);
+  }
 }
 
 let currentFolder = 'all';
