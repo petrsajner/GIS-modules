@@ -135,10 +135,23 @@ const SPEND_PRICES = {
   // C1 pricing: 720p no audio = 10 credits/s, $1 = 200 credits → $0.05/s
   '_pixverse_video': 0.050, // PixVerse C1 720p (default estimate)
 
-  // ── Seedance 2.0 — video (per SECOND of 720p) ─────────
-  '_seedance2_std':       0.303,  // Standard T2V/I2V/R2V $0.3034/s
-  '_seedance2_fast':      0.242,  // Fast T2V/I2V $0.2419/s
-  '_seedance2_r2v_fast':  0.181,  // Fast R2V with video inputs $0.1814/s
+  // ── Seedance 2.0 — video (per SECOND) ────────────────────
+  // Pricing derived from fal token formula: (h × w × 24) / 1024 × rate/1000
+  //   Standard rate $0.014/1k tokens · Fast rate $0.0112/1k
+  //   720p exact match with published: std=$0.3034/s, fast=$0.2419/s ✓
+  //   1080p: only STANDARD endpoints (Fast tier has no 1080p on fal, added 21.4.2026)
+  //   R2V with video refs: × 0.6 multiplier (fal docs)
+  '_seedance2_std_480p':     0.1405,
+  '_seedance2_std_720p':     0.3034,
+  '_seedance2_std_1080p':    0.6804,
+  '_seedance2_fast_480p':    0.1124,
+  '_seedance2_fast_720p':    0.2419,
+  // R2V with video refs (0.6× multiplier — cheaper because model receives pre-made content)
+  '_seedance2_r2v_std_480p':  0.0843,
+  '_seedance2_r2v_std_720p':  0.1820,
+  '_seedance2_r2v_std_1080p': 0.4082,
+  '_seedance2_r2v_fast_480p': 0.0674,
+  '_seedance2_r2v_fast_720p': 0.1452,   // was 0.181 (bug — published fal value is $0.14515/s)
 };
 
 const SPEND_PROVIDERS = ['google', 'fal', 'xai', 'luma', 'freepik', 'topaz', 'openrouter', 'pixverse', 'replicate'];

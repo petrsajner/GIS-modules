@@ -3252,7 +3252,7 @@ select.inpaint-num option { background:#fff; color:#111; }
         <!-- Resolution radio -->
         <div class="ctrl">
           <div class="ctrl-label">Resolution</div>
-          <div style="display:flex;gap:12px;">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
               <input type="radio" name="sd2Res" value="720p" checked style="accent-color:var(--acc);">
               <span style="font-size:11px;color:var(--dim);">720p</span>
@@ -3261,7 +3261,17 @@ select.inpaint-num option { background:#fff; color:#111; }
               <input type="radio" name="sd2Res" value="480p" style="accent-color:var(--acc);">
               <span style="font-size:11px;color:var(--dim);">480p (faster)</span>
             </label>
+            <label id="sd2Res1080Wrap" style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="radio" name="sd2Res" value="1080p" style="accent-color:var(--acc);">
+              <span style="font-size:11px;color:var(--dim);">1080p (HD)</span>
+            </label>
           </div>
+        </div>
+
+        <!-- Prompt hint: dialogue + multi-shot syntax -->
+        <div style="font-size:10px;color:var(--dim2);line-height:1.5;padding:6px 9px;background:var(--s2);border:1px solid var(--border);margin-bottom:8px;">
+          💡 Dialogue: wrap spoken lines in <code style="color:var(--dim);">"double&nbsp;quotes"</code> for lip-synced audio<br>
+          💡 Multi-shot: <code style="color:var(--dim);">Shot 1: … Shot 2: …</code> for camera cuts in one clip
         </div>
 
         <!-- Seed -->

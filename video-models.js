@@ -288,42 +288,47 @@ const VIDEO_MODELS = {
   // Multi-shot via prompt: [lens switch], timeline [0-3s]..., or "Shot 1: ... Shot 2: ..."
   // R2V refs in prompt: [Image1], [Video1], [Audio1]
   // generate_audio: always explicit (default ON = unexpected cost)
-  // duration: STRING ("4"–"15" or "auto"), resolution: "480p"|"720p"
+  // duration: STRING ("4"–"15" or "auto"), resolution: "480p"|"720p"|"1080p"
+  // 1080p: only STANDARD endpoints (not Fast). Added on fal 21.4.2026.
+  // Pricing per token formula: tokens = (w × h × 24) / 1024, std $0.014/1k, fast $0.0112/1k
+  //   Standard 1080p ≈ $0.6804/s, 720p = $0.3034/s, 480p ≈ $0.1405/s
+  //   Fast 720p = $0.2419/s, 480p ≈ $0.1124/s (no 1080p)
+  //   R2V with video refs: × 0.6 multiplier (fal docs)
   seedance2_t2v: {
     name: 'Seedance 2.0', type: 'seedance2_video',
     endpoint: 'bytedance/seedance-2.0/text-to-video',
     refMode: 'none', maxRefs: 0, maxDur: 15, minDur: 4, hasAudio: true,
-    resolution: '720p', imageField: 'image_url',
-    desc: 'T2V · Multi-shot · Native audio · Up to 15s · $0.30/s · ByteDance',
+    resolutions: ['480p', '720p', '1080p'], imageField: 'image_url',
+    desc: 'T2V · Multi-shot · Native audio · Up to 15s · 1080p · ByteDance',
   },
   seedance2_i2v: {
     name: 'Seedance 2.0', type: 'seedance2_video',
     endpoint: 'bytedance/seedance-2.0/image-to-video',
     refMode: 'single_end', maxRefs: 2, maxDur: 15, minDur: 4, hasAudio: true,
-    resolution: '720p', imageField: 'image_url',
+    resolutions: ['480p', '720p', '1080p'], imageField: 'image_url',
     refLabel: 'Keyframes',
-    desc: 'I2V · Start + End frame · Native audio · Up to 15s · $0.30/s',
+    desc: 'I2V · Start + End frame · Native audio · Up to 15s · 1080p',
   },
   seedance2_r2v: {
     name: 'Seedance 2.0', type: 'seedance2_video',
     endpoint: 'bytedance/seedance-2.0/reference-to-video',
     refMode: 'seedance2_r2v', maxRefs: 9, maxDur: 15, minDur: 4, hasAudio: true,
-    resolution: '720p', imageField: 'image_url',
+    resolutions: ['480p', '720p', '1080p'], imageField: 'image_url',
     refLabel: 'Image refs (up to 9)',
-    desc: 'R2V · 9 imgs + 3 videos + 3 audio · Multi-modal · $0.30/s',
+    desc: 'R2V · 9 imgs + 3 videos + 3 audio · 1080p · Video edit/extend (video refs 0.6×)',
   },
   seedance2f_t2v: {
     name: 'Seedance 2.0 Fast', type: 'seedance2_video',
     endpoint: 'bytedance/seedance-2.0/fast/text-to-video',
     refMode: 'none', maxRefs: 0, maxDur: 15, minDur: 4, hasAudio: true,
-    resolution: '720p', imageField: 'image_url',
+    resolutions: ['480p', '720p'], imageField: 'image_url',
     desc: 'T2V Fast · Multi-shot · Lower latency · $0.24/s',
   },
   seedance2f_i2v: {
     name: 'Seedance 2.0 Fast', type: 'seedance2_video',
     endpoint: 'bytedance/seedance-2.0/fast/image-to-video',
     refMode: 'single_end', maxRefs: 2, maxDur: 15, minDur: 4, hasAudio: true,
-    resolution: '720p', imageField: 'image_url',
+    resolutions: ['480p', '720p'], imageField: 'image_url',
     refLabel: 'Keyframes',
     desc: 'I2V Fast · Start + End frame · $0.24/s',
   },
@@ -331,9 +336,9 @@ const VIDEO_MODELS = {
     name: 'Seedance 2.0 Fast', type: 'seedance2_video',
     endpoint: 'bytedance/seedance-2.0/fast/reference-to-video',
     refMode: 'seedance2_r2v', maxRefs: 9, maxDur: 15, minDur: 4, hasAudio: true,
-    resolution: '720p', imageField: 'image_url',
+    resolutions: ['480p', '720p'], imageField: 'image_url',
     refLabel: 'Image refs (up to 9)',
-    desc: 'R2V Fast · 9 imgs + 3 videos + 3 audio · $0.18/s',
+    desc: 'R2V Fast · 9 imgs + 3 videos + 3 audio · Video refs 0.6× · $0.18/s',
   },
 
   // ── Vidu Q3 — Shengshu via fal.ai ───────────────────────
@@ -1226,6 +1231,16 @@ function _applyVideoModel(key) {
     const isR2V = m.refMode === 'seedance2_r2v';
     const sd2R2VSection = document.getElementById('sd2R2VSection');
     if (sd2R2VSection) sd2R2VSection.style.display = isR2V ? '' : 'none';
+    // 1080p resolution: only STANDARD endpoints (Fast tier has no 1080p on fal)
+    const has1080p = (m.resolutions || []).includes('1080p');
+    const sd2Res1080Wrap = document.getElementById('sd2Res1080Wrap');
+    if (sd2Res1080Wrap) sd2Res1080Wrap.style.display = has1080p ? '' : 'none';
+    // Fallback: when switching to Fast while 1080p was selected, snap to 720p
+    const curRes = document.querySelector('input[name="sd2Res"]:checked');
+    if (curRes?.value === '1080p' && !has1080p) {
+      const r720 = document.querySelector('input[name="sd2Res"][value="720p"]');
+      if (r720) r720.checked = true;
+    }
   }
 
   updateVideoResInfo();
@@ -2046,11 +2061,16 @@ async function callSeedance2Video(job) {
     falKey, endpoint, payload, job, { label: model.name, timeoutMin: 25 }
   );
 
-  // Price key: standard vs fast, R2V fast is cheaper
+  // Price key: tier × resolution, with R2V video-refs 0.6× multiplier
+  // Formula source: fal token pricing (h × w × 24) / 1024 × rate/1000
+  //   Standard rate: $0.014/1k tokens → 480p ≈ $0.140/s, 720p = $0.303/s, 1080p ≈ $0.680/s
+  //   Fast rate:     $0.0112/1k       → 480p ≈ $0.112/s, 720p = $0.242/s (no 1080p)
+  //   R2V with video refs → × 0.6 (fal docs)
   const isFast = endpoint.includes('/fast/');
-  const priceKey = isR2V && isFast ? '_seedance2_r2v_fast'
-                 : isFast          ? '_seedance2_fast'
-                 :                   '_seedance2_std';
+  const hasVidRefs = isR2V && (sd2Snap?.vidSrcIds || []).some(Boolean);
+  const tier = isFast ? 'fast' : 'std';
+  const prefix = hasVidRefs ? '_seedance2_r2v_' : '_seedance2_';
+  const priceKey = `${prefix}${tier}_${resolution}`;
   const durNum = parseInt(durVal) || 5;
 
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
