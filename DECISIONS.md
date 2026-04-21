@@ -1,6 +1,116 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
-*Aktualizováno 20. 4. 2026 · Session 3 upload dedup + port fix*
+*Aktualizováno 21. 4. 2026 · v203en video.js split*
+
+---
+
+## Video.js split — Session 1 ze 2 (21. 4. 2026)
+
+**Kontext:** Po v202en byl `video.js` 5907 řádků v jednom souboru. Kombinace (1) rostoucí komplexity, (2) Session 2 plánu na unified video panel (analogicky k image v v200en), (3) dev ergonomie pro Petra + Claude context window → rozdělit na logické submoduly.
+
+**Rozhodnutí:** Split na 6 submodulů podle ownership/concern. Čistě mechanický, bez funkční změny.
+
+### Split methodology
+
+**Zvažované varianty:**
+
+| Varianta | Plus | Minus |
+|---|---|---|
+| A) **Split na 6 moduly s line-range mapping + verifikační skript** | Přesné, auditovatelné, verifikovatelné (multiset compare); žádná funkční změna | Jednorázová práce na mapping table + verifikace |
+| B) Inline re-work při Session 2 (split = part of unified panel) | Jedna session místo dvou | Velký risk — miss některé cross-module dependencies; těžko reviewable; "big bang" |
+| C) ES6 `import`/`export` migrace při splitu | Čistější module boundaries | Mimo Petrovo pracovní pattern (globals), risk při dev server / file:// differences, throw-away před Tauri |
+
+**Rozhodnutí: A.** Primárně pro bezpečnost — každý řádek originálu verifikován proti cílovému modulu přes multiset compare. Kompletní regression-free záruka nad rámec "should work".
+
+### Module boundaries — decision points
+
+Některá funkcionalita mohla jít do víc modulů. Zde logika:
+
+**1. Model-switch UI handlery (`onVideoModelChange`, `_applyVideoModel`, `_setRow`, `onVeoRefModeChange`, `updateVideoResInfo`, ...) → `video-models.js`**
+
+Varianty:
+- (a) `video-gallery.js` — jako UI nad DOM
+- (b) `video-models.js` — protože logika závisí na `VIDEO_MODELS`/`TOPAZ_MODELS`/`MAGNIFIC_VIDEO_MODELS`/`KLING_GROUPS`
+
+Zvoleno **(b)**. Důvod: při změně modelu změny se explicitně týkají `model.type` switche a `m.refMode` + `m.hasAudio` + `m.durOptions` dispatch. Model-specific UI smoothly souvisí s model-specific defs. Patří ke stejnému concernu.
+
+**2. `_saveVideoResult` + `_falVideoSubmitPollDownload` → `video-queue.js`**
+
+Varianty:
+- (a) `video-queue.js` — patří k job runners
+- (b) `video-models.js` — infrastruktura pro handlery
+
+Zvoleno **(a)**. Důvod: `_saveVideoResult` updatuje `videoJobs` state, volá `renderVideoQueue`, `refreshVideoGalleryUI`. To je queue concern. Handlery v `video-models.js` volají do queue přes shared helper — čistý upstream/downstream.
+
+**3. Magnific Video upscale → `video-topaz.js`**
+
+Varianty:
+- (a) Samostatný `video-magnific.js`
+- (b) `video-topaz.js` (sdílí `topazSrcVideoId`, stejný background-job pattern)
+
+Zvoleno **(b)**. Důvod: Magnific a Topaz používají stejný source slot (`topazSrcVideoId`), stejný výpis v UI (✦ tlačítko v gallery), stejný non-blocking queue pattern. Samostatný modul by byl přes-fragmentace pro ~40 řádků logiky. Komentář v headeru topaz modulu vysvětluje, že obsahuje "Topaz + Magnific".
+
+**4. `useVideoFromGallery(videoId)` → `video-gallery.js`**
+
+Dispatch entry — volá se z gallery grid karta `▷ Use`, rozhoduje který slot dostane video (Topaz/Magnific, Grok, Seedance R2V, V2V, WAN27). Je to UI entry bod z gallery view. Cross-calls do topaz module je OK (globální scope). Gallery "dispatch" je lepší než topaz "entry" — entity je gallery.
+
+**5. `topazSrcVideoId` state → `video-topaz.js`**
+
+State pro Topaz ownership. Gallery volá `topazSetSource(id)` z `useVideoFromGallery` — žádný přímý read/write proměnné cross-module.
+
+### Cross-module call patterns (expected, OK)
+
+Všechno běží v globálním scope (žádné `import`/`export`), takže cross-calls jsou legitimní. Dokumentuji vzorce pro budoucí reference:
+
+```
+video-queue   calls video-models   (via runVideoJob dispatch → callVeoVideo, callLumaVideo, ...)
+video-queue   calls video-utils    (_extractFalVideoUrl, _topazGetDims in _saveVideoResult)
+video-queue   calls video-gallery  (refreshVideoGalleryUI after _saveVideoResult)
+video-gallery calls video-models   (getActiveVideoModelKey, VIDEO_MODELS entries, onVideoModelChange)
+video-gallery calls video-queue    (generateVideo on submit)
+video-gallery calls video-topaz    (topazSetSource from useVideoFromGallery)
+video-topaz   calls video-queue    (_saveVideoResult, updateVideoPlaceholderStatus, videoJobError, renderVideoQueue)
+video-topaz   calls video-gallery  (refreshVideoGalleryUI)
+video-topaz   calls video-utils    (_topazGetDims, _parseMp4Fps)
+video-archive calls video-utils    (generateVideoThumb)
+video-archive calls video-gallery  (renderVideoGallery, renderVideoFolders)
+```
+
+**Build order je z tohoto odvozený:**
+```
+utils → models → queue → gallery → topaz → archive
+```
+
+### Verification
+
+1. **Line coverage:** 5907/5907 řádků přiřazeno právě jednomu modulu (Python skript s explicit ranges, conflict detection)
+2. **Multiset compare:** `joined(modules) == original video.js` jako multiset — PASS
+3. **Per-module content:** pro každý modul `module_lines == [orig[i] for i in assigned_ranges]` — PASS (všech 6 modulů)
+4. **Syntax:** `node --check` každý modul + concatenated v build order — PASS
+5. **Mock prod build:** `node build.js 203en` s 18 placeholder modules + 6 reálných video-*.js — SUCCESS (vyprodukuje validní HTML)
+6. **Expected prod size:** baseline 27 200 + delta 26 (z 6 hlavičkových komentářů) = ~27 226 ± small — v toleranci ±50
+
+### Co tato session NEřeší (čeká na další kroky)
+
+- Unified video panel (Session 2) — viz `CLEANUP_ANALYSIS.md` body #5, #6, #10
+- Cleanup oblastí identifikovaných během analýzy — viz `CLEANUP_ANALYSIS.md`
+- ES6 module migrace — mimo scope, čeká na Tauri
+- Optimalizace handler logiky — mimo scope mechanického splitu
+
+### Důsledky
+
+- **Build system:** 19 → 24 modulů v `MODULES` array. Dev server injectuje 24 `<script>` tagů místo 19.
+- **GitHub repo:** `src/video.js` odstraněn, `src/video-*.js` (6 souborů) přidán. Commit message: `v203en: split video.js into 6 submodules — utils/models/queue/gallery/topaz/archive`
+- **Dokumentace:** Každý modul má 3-line hlavičkový komentář popisující scope. Žádné další komentáře se nezměnily (jsou to řádky z originálu, 1:1).
+- **Context window:** Claude může nyní pracovat s 400–2400 řádkovými moduly místo 5900 řádkové monolitu. Při Session 2 bude práce rychlejší.
+
+### Souvislost se Session 2 (pro kontext budoucí práce)
+
+Session 2 = **unified video generation panel**. Cíl: místo N HTML panelů per model-family použít jeden template s UI flags v `VIDEO_MODELS` entries. Analogicky k image v v200en (`isUnifiedModel()`, `upParams` element IDs).
+
+Session 2 bude těžit z tohoto splitu: refactor `_applyVideoModel` (364 ř switch) a `generateVideo` (223 ř) bude izolovaný v `video-models.js` / `video-queue.js`, bez dotčení gallery/archive/topaz modulů.
+
+**Poznámka pro Session 2:** přidat `ui: { ... flags }` do každé `VIDEO_MODELS` entry. Viz `CLEANUP_ANALYSIS.md` #5 pro plnou specifikaci.
 
 ---
 
@@ -10,14 +120,14 @@
 
 Sjednávalo se to komplikovaně — prvně jsem omylem opravoval `uploadAssetsFromFile` v `assets.js` (tlačítko ve Assets library), až jsem si uvědomil že Petr uploaduje přes jiné tlačítko ve Gallery toolbaru. Tlačítka nesou oba label `↑ Upload` a volají jinou funkci v jiném modulu.
 
-**Rozhodnutí progress:** Identický pattern jako `exportGallery` — custom local progressEl, inline CSS, getElementById update. `dlProgShow`/`dlProgUpdate` helpery z db.js v tomto kontextu z neznámého důvodu nefungovaly (overlay se nezobrazil), proto návrat k ověřenému patternu. Investigace proč `dlProgShow` selhal zvlášť v uploadu se zatím neudělala — nepotřebujeme ji, jelikož custom pattern je prokazatelně funkční.
+**Rozhodnutí progress:** Identický pattern jako `exportGallery` — custom local progressEl, inline CSS, getElementById update. `dlProgShow`/`dlProgUpdate` helpery z db.js v tomto kontextu z neznámého důvodu nefungovaly (overlay se nezobrazil), proto návrat k ověřenému patternu.
 
 **Problém 2 (dedup):** Gallery upload nedetekoval duplikáty, ale assets upload a archive import ano. Inkonzistence napříč GIS. User mohl uploadnout stejný obrázek vícekrát.
 
 **Zvažované varianty řešení dedup:**
 
 | Varianta | Plus | Minus |
-|----------|------|-------|
+|---|---|---|
 | A) **Fingerprint system stejný jako assets** | Konzistentní napříč GIS; efficient (string compare v meta cache) | Vyžaduje fingerprint field v images (migrace pro legacy data) |
 | B) Per-upload scan všech images | Žádná schema změna | O(N×M) blow-up paměti pro velké knihovny; `dbGetAll('images')` načte stovky MB |
 | C) Filename + size hash | Levné | Ne-spolehlivé (stejný obsah může mít jiný filename, stejný filename může mít jiný obsah) |
@@ -66,8 +176,8 @@ Dvě různé metody (fingerprint vs ID) jsou **záměrné**: archive import dost
 **Zvažované varianty:**
 
 | Varianta | Plus | Minus |
-|----------|------|-------|
-| A) **Include thumbs v archivu + fallback regeneration** | Future archives = okamžité thumby; backward compat pro staré | Archiv ~1% větší (10-30 KB × videos) |
+|---|---|---|
+| A) **Include thumbs v archivu + fallback regeneration** | Future archives = okamžité thumby; backward compat pro staré | Archiv ~1% větší (10–30 KB × videos) |
 | B) Vždy regenerovat thumby po importu | Archivy menší | Pomalé při 50+ videech (~2 sec per video); thumbnail quality nemusí být stejná jako originální |
 | C) Zcela oddělit thumby od archivace | Jednoduché | User by musel regenerovat ručně u každého importu |
 
@@ -95,7 +205,7 @@ Dvě různé metody (fingerprint vs ID) jsou **záměrné**: archive import dost
 **Řešení:** Přidán centered modal overlay konzistentní s export/import dialogy:
 - Červený nadpis `✕ Deleting {images|videos|assets}` — vizuální signál destruktivní operace
 - Large counter `N / TOTAL` v Syne fontu (vypadá a chová se jako export progress)
-- Update každých 3-5 itemů + `setTimeout(0)` yield
+- Update každých 3–5 itemů + `setTimeout(0)` yield
 - Trigger threshold: 10+ obrázků, 5+ videí (videa jsou dražší), 10+ assetů. Pod threshold se overlay neukáže (operace je rychlá, bliknutí by bylo rušivější než žádný progress).
 
 Move operace (`moveSelectedGalleryToFolder`, `videoMoveSelected`, `moveSelectedAssetsToFolder`) progress nepotřebují — `Promise.all` dokončí typickou operaci pod 100 ms.
@@ -104,42 +214,32 @@ Move operace (`moveSelectedGalleryToFolder`, `videoMoveSelected`, `moveSelectedA
 
 ## Streaming + chunked archive export (20. 4. 2026 — Session 1+2)
 
-**Problém:** `exportGallery()` padal při >320 obrázcích (OOM crash tabu), `exportVideoArchive()` u velkých video knihoven tiše produkoval syntakticky nevalidní JSON (archivace "proběhla" bez erroru, ale soubor nešel naimportovat). Oba exporty držely celou knihovnu v RAM najednou (~640 MB pole JSON stringů × 320 obrázků, plus ~640 MB při konstrukci Blobu). V8 má softlimit ~512 MB na jeden string, Chrome na Windows někdy tiše truncatuje Blob write >500 MB.
+**Problém:** `exportGallery()` padal při >320 obrázcích (OOM crash tabu), `exportVideoArchive()` u velkých video knihoven tiše produkoval syntakticky nevalidní JSON (archivace "proběhla" bez erroru, ale soubor nešel naimportovat). Oba exporty držely celou knihovnu v RAM najednou (~640 MB pole JSON stringů × 320 obrázků, plus ~640 MB při konstrukci Blobu). V8 má softlimit ~512 MB na jeden string, Chrome na Windows někdy tiše truncatuje Blob write >500 MB. U videí selhávalo dřív kvůli větším itemům (5–50 MB base64 per video).
 
 **Zvažované varianty:**
 
 | Varianta | Plus | Minus |
-|----------|------|-------|
+|---|---|---|
 | A) **Streaming write** přes `FileSystemWritableFileStream`, per-item | Memory peak ~1 item; minimální změna kódu; reusable v Tauri | Vyžaduje FS API (localhost/https), na file:// nefunguje |
 | B) **Chunked archive** (auto-split do multi-file) | Funguje všude i na file://; resilience (corrupt part neruší zbytek) | Víc souborů pro uživatele; komplexnější import |
-| C) ZIP formát s binary daty | 30% menší archiv, standardní formát | Custom JS ZIP reader ~150 řádků; v Tauri nahrazen Rust crate → throw-away kód |
+| C) ZIP formát s binary daty | 30 % menší archiv, standardní formát | Custom JS ZIP reader ~150 řádků; v Tauri nahrazen Rust crate → throw-away kód |
 
-**Rozhodnutí: A+B kombinovaně, implementováno v jedné session.**
+**Rozhodnutí: A+B kombinovaně, implementováno ve dvou session.**
 
 Session 1 = cesta A (streaming JSON, jeden soubor). Session 2 = cesta B (chunked multi-file pro file:// fallback). **Kritická pro distribuci single-file HTML buildu** — Petr provozuje `gis_vNNNen.html` na `file://`, kde FS API není dostupné. Bez chunked cesty by archivace velkých knihoven z file:// nefungovala vůbec.
 
-**ZIP (varianta C) zamítnut** po analýze Tauri migrace:
-- JS ZIP reader = throw-away (Rust `zip` crate je lepší ve všem po přechodu)
-- Streaming JSON serialization logika je naopak reusable (v Tauri se jen změní target writer z `WritableStream` na `writeBinaryFile`)
-- Celá archive feature v Tauri bude pravděpodobně přepsaná na folder-based backup (manifest.json + originální `images/*.png`, `videos/*.mp4` přímo) — žádný archive wrapper potřeba
-
-**Formát:**
-- **Streaming cesta (FS API):** původní JSON schema beze změny (single-file `gis-archive-2026-04-20-248img.json`)
-- **Chunked cesta (file:// fallback):** rozšířené schema s `archiveId`, `partNumber`, `totalParts`, `imageCountTotal`. Filename pattern `gis-archive-2026-04-20-part1of3-100img.json`
+ZIP (varianta C) zamítnut — custom JS ZIP reader by byl throw-away kód po přechodu na Tauri (Rust `zip` crate je lepší ve všem). Streaming JSON serialization logika je naopak reusable v Tauri.
 
 **Auto-split thresholdy:**
 - Gallery: > 100 obrázků (100 × 2 MB ≈ 200 MB per part, bezpečně pod V8 limit)
-- Video: > 5 videí (5 × 30 MB ≈ 150 MB per part)
+- Video: > 5 videí (5 × 30 MB ≈ 150 MB per part — videa jsou větší než obrázky)
+
+**Filename convention:** `gis-archive-2026-04-20-part1of3-100img.json` (+ suffix s počtem itemů)
 
 **Chrome multi-download UX:**
 - User uvidí jednou dialog "Allow multiple downloads from this site" a potvrdí
-- Mezi `a.click()` pauza 500ms (gallery) / 700ms (video) aby Chrome throttling nepřeskakoval
+- Mezi `a.click()` pauza 500 ms (gallery) / 700 ms (video) aby Chrome throttling nepřeskakoval
 - Všech N parts stáhne postupně do Downloads
-
-**Implementace:**
-- `gallery.js` — `exportGallery()` (3 cesty: streaming / chunked / legacy), `importGallery()` přepsán na multi-file awareness
-- `video.js` — `exportVideoArchive()` (3 cesty), `importVideoArchive()` multi-file
-- `template.html` — přidán `multiple` atribut na oba `<input type="file">` pro archive import
 
 **Multi-file import architektura:**
 - Files sorted podle `part{N}of{M}` v názvu (alphabetic fallback)
@@ -148,15 +248,24 @@ Session 1 = cesta A (streaming JSON, jeden soubor). Session 2 = cesta B (chunked
 - Single confirm dialog pro celý archiv (ne per-file)
 - Agregovaný progress napříč soubory (`file 2 / 3 — 145 / 248 images`)
 
+**Memory profile:**
+| Scenario | Pre-Session 1 | Post-Session 1+2 |
+|---|---|---|
+| 320 obrázků × 2 MB, localhost | ~640 MB peak → OOM | ~2 MB peak (streaming) |
+| 500 obrázků × 2 MB, file:// | OOM | ~200 MB peak per part (chunked, 5 parts × 100) |
+| 100 videí × 30 MB, file:// | ~3 GB → corrupt JSON | ~150 MB per part (20 parts × 5) |
+
+**Cesty rozhodování v exportu:**
+```
+if (FS API dostupné) → streaming (1 soubor, unlimited)
+else if (items > threshold) → chunked multi-file
+else → legacy single-file (small libraries OK)
+```
+
 **Resilience:**
 - Pokud `dbGet()` vrátí null pro některý item při exportu (corrupt record), exportér ho skipne + pokračuje + toast zobrazí `(N skipped)`
 - Folders jsou v každém chunked partu (duplicitně) — pokud jeden part chybí, folder struktura se neztratí
 - Multi-file import dokáže sjet i neúplnou chunked sadu (user potvrdí warning)
-
-**Důsledky:**
-- 320-obrázkový crash vyřešen na localhost (streaming) i file:// (chunked)
-- Corrupt video JSON vyřešen — streaming write je deterministic, chunked parts jsou každý pod V8 string limitem
-- Archivace single-file distribuce (file://) funguje pro libovolně velké knihovny
 
 ---
 
@@ -170,7 +279,7 @@ Session 1 = cesta A (streaming JSON, jeden soubor). Session 2 = cesta B (chunked
 **Zvažované varianty:**
 
 | Varianta | Plus | Minus |
-|----------|------|-------|
+|---|---|---|
 | A) Satelitní HTML (2–3 files) na `file://` | Žádná změna distribuce, zůstáváme na `file://` | IndexedDB origin isolation — rozdělená galerie mezi Core/Video/Paint, export/import overhead jako permanent pain |
 | B) **Lokální HTTP server + moduly jako samostatné JS soubory** | Pravá modularita, sdílená IndexedDB, plné DevTools, Ctrl+R hot reload | Vyžaduje spuštěný server (Node), jiný origin než prod file:// |
 | C) Tauri migrace nyní | Vyřeší vše najednou (modularita + distribuce + no CORS + user install) | 3–4 sessions Rust setup, blokuje current feature work, předčasné bez hard-limit triggeru |
@@ -179,383 +288,34 @@ Session 1 = cesta A (streaming JSON, jeden soubor). Session 2 = cesta B (chunked
 
 **Implementace (bez refaktorizace modulů):**
 - `build.js` rozšířen o `--dev` flag (104 → 280 řádků). Prod režim (concat do single-file HTML) zachován identicky.
-- Dev režim generuje `dev/index.html` nahrazením `<script>// __GIS_JS__</script>` bloku v `template.html` za 19 `<script src="./src/NAME.js"></script>` tagů (přesně v `MODULES` order).
+- Dev režim generuje `dev/index.html` nahrazením `<script>// __GIS_JS__</script>` bloku v `template.html` za `<script src="./src/NAME.js"></script>` tagů (přesně v `MODULES` order).
 - Mini HTTP server na Node built-ins (zero dependencies): `http`, `net`, `fs`, `path`, `child_process`
-- Port auto-detect 7800–7810 (vyhýbáme se dev portům 3000/5000/8000/8080)
+- Fixní port 7800 (viz samostatný záznam o port fix)
 - `Cache-Control: no-store` → Ctrl+R vždy re-fetch; edit-refresh cyklus bez restart serveru
 - Path traversal guard (`safeResolve`) na `/src/*` endpointu
 - `start_dev.bat` pro Windows dvojklik-spuštění
 
 **Důsledky:**
-- `localhost:7800` je jiný origin než `file://gis_v202en.html` → nová IndexedDB instance. **Dev/prod separation záměrný** — Petrova reálná data žijí dál v prod verzi na file://, dev localhost má prázdnou DB pro testy.
+- `localhost:7800` je jiný origin než `file://gis_vNNNen.html` → nová IndexedDB instance. **Dev/prod separation záměrný** — Petrova reálná data žijí dál v prod verzi na file://, dev localhost má prázdnou DB pro testy.
 - Proxy Worker (`gis-proxy.petr-gis.workers.dev`) zůstává — localhost ≠ Tauri, CORS stále platí pro xAI/Luma/Magnific/Topaz/Replicate
 - Žádné změny v modulech, žádná ES6 `import`/`export` migrace. Moduly zůstávají globální scope jako dnes.
 - Tauri migrace zůstává v TODO jako budoucí krok; tento dev server nezavírá ani neotevírá žádné dveře k Tauri.
 
-**Co tento krok ZÁMĚRNĚ NEŘEŠÍ:**
-- ES6 modularizace (`import`/`export`)
-- Rozdělení monstr `video.js` (5211) a `paint.js` (2110) na submoduly
-- Watch mode / auto-reload (Ctrl+R je záměrně manuální — spolehlivější při chybách)
-- Distribuce pro non-tech uživatele (Tauri)
-- Sdílení dat mezi `file://` prod a `localhost` dev instancemi
-
-**Dilema řešené předem:** IndexedDB separation mezi file:// a localhost = jednorázová bolest, že testovací data dev instance nemá přístup k produkčním. Petr vědomě zvolil dev/prod separation místo jednorázové export/import migrace. Pokud se to v budoucnu ukáže jako překážka, přidáme export/import UI (samostatný krok).
-
 ---
 
-## Paint Engine — Parallel Annotation Layer (16. 4. 2026)
-
-**Problém:** Method B (Layers) save v annotate modálu používal **diff rekonstrukci** místo skutečného layer systému. Logika: `history[0]` = čistý originál (snapshot ctx po `openAnnotateModal`), aktuální `ctx` = obrázek + tahy. Diff pixel-by-pixel rekonstruoval tahy.
-
-**3 bugy odkryté postupně v jedné testovací session:**
-
-1. **Anotuj → crop → save B → bílý Layer 2:**
-   `pCropApply` přepisoval `history[0]` aktuálním ctx (cropnutá verze obrázku + anotace). Diff(current, history[0]) = 0 → všechno bílé pozadí → Layer 2 je bílá plocha.
-
-2. **Anotuj → crop → save B → špinavý Layer 1:**
-   Stejná příčina — `history[0]` obsahoval anotace. Layer 1 by měl být čistý orig, ale byl = obrázek + anotace.
-
-3. **Anotuj → crop → inpaint → source je levý horní roh:**
-   `_annotateBaseB64` (global, používaný inpaint crop preview) se nastavuje v `openAnnotateModal` a `pCropApply` ho neaktualizoval. Inpaint `drawImage(bi, cropX, cropY, ...)` kreslil z nových souřadnic na pre-crop obrázek.
-
-**Diskuse variant:**
-- **Varianta A: Opravit diff flow** (~30 řádků) — zachovat diff rekonstrukci, fix v pCropApply aby history[0] zůstal čistý originál.
-- **Varianta B: Refactor na skutečný separate annotation canvas** (~250 řádků) — diff pryč, Method B čte ze samostatného canvasu.
-
-Petr zvolil **variantu B** s odůvodněním "žádný diff — anotace má být samostatný layer".
-
-**Rozhodnutí: Paralelní annotation canvas (minimálně invazivní verze variant B):**
-Místo full render pipeline refactoru (display canvas by flatnoval base + annot při každém draw) přidán **paralelní `_annotateAnnotCanvas`** vedle existujícího `_annotateMaskCanvas`. Tahy se kreslí do 3 ctx zároveň:
-1. `state.ctx` (display) — user vidí okamžitě
-2. `state.maskCtx` — bílé tahy pro inpaint (legacy)
-3. `state.annotCtx` — **barevné tahy na transparentním pozadí (nové)**
-
-`history[0]` zůstává autoritativní "clean original" invariant. Po cropu se rekonstruuje cropováním pristinního `history[0]` přes drawImage s clip (ne přepsáním aktuálního ctx). `_annotateBaseB64` se aktualizuje ze stejného cropnutého canvasu.
-
-Method B export:
-- Layer 1 = `history[0]` PNG (čistý orig, automatically cropped when canvas was cropped)
-- Layer 2 = white fillRect + drawImage(annotCanvas) PNG (čisté tahy na bílém pozadí)
-
-**Rozsah:** ~80 řádků v paint.js (vs. odhad 250). Důvod: místo full render pipeline refactoru paralelní mirror. Žádné riziko regrese paint tabu, undo, inpaint integrace.
-
-**Soft-blend composite bonus fix:**
-V `_compositeAndSaveQueueJob` soft-blend path (`maskBlur > 0`) byly `rc.drawImage(ri, 0, 0)` a `rc.drawImage(mi, 0, 0)` 3-param → kreslí v přirozené velikosti. Pokud model vrátil výsledek v menším rozlišení než `cropW×cropH`, content byl v levém horním rohu resultCrop a composite back vložil posun. Fix: 5-param s cílovými rozměry `cropW × cropH`. Hard-blend už OK měl.
-
----
-
-## Z-Image Turbo — Split T2I / I2I (16. 4. 2026)
-
-**Kontext:** `zimage_turbo` byl **hybrid model** — jeden dropdown option s dynamickým přepínáním endpointu:
-- bez refu → `fal-ai/z-image/turbo` (T2I)
-- s refem → `fal-ai/z-image/turbo/image-to-image` (I2I)
-
-UI flags: `refs: true, maxRefs: 1, i2iModel: true, strength: true`.
-
-**Problém:** Strength slider se zobrazil vždy (model má `strength: true`), i v T2I módu kdy je irelevantní. Navíc byl řízený dvěma nezávislými body:
-- `model-select.js` — `(m.strength && refs.length > 0)` při select modelu
-- `refs.js` — stejná podmínka při ref-change (zastaralé z hybrid éry)
-
-Při přepínání modelů nebo ref-change se slider objevoval/mizel nekonzistentně.
-
-**Rozhodnutí: Rozdělit na dva samostatné modely.**
-- `zimage_turbo` — čistě T2I, endpoint `fal-ai/z-image/turbo`, bez refs/strength/i2iModel
-- `zimage_turbo_i2i` — čistě I2I, endpoint `fal-ai/z-image/turbo/image-to-image`, `refs: true, maxRefs: 1, strength: true, i2iModel: true`, ref required
-
-Kombinovaný s čistším řízením strength slideru (jen v `model-select.js` podle `m.strength` flag, bez vazby na refs.length).
-
-**Alternativy zvážené a zamítnuté:**
-- Dynamicky skrývat strength podle stavu refs v jednom hybrid modelu — složitější logika, stále UX nejasné
-- Zachovat hybrid s upozorněním "strength works only with ref" — neřeší UX nekonzistenci
-
-**Ref upload label aktualizace:** "No image = T2I" (legacy z hybrid éry) → "Input image required". Odpovídá dedicated I2I sémantice.
-
-**Dropdown separator:** Z-Image a WAN byly ve stejné "skupině" (mezi dvěma `<option disabled>` separatory, bez mezi). Přidán separator → vizuálně oddělené sekce.
-
----
-
-## Z-Image Edit — TODO odepsán (16. 4. 2026)
-
-**Kontext:** TODO položka "Z-Image Edit (`fal-ai/z-image/edit`)" byla v seznamu od paměťového snapshotu.
-
-**Research:** Z-Image rodina na fal.ai obsahuje:
-- `fal-ai/z-image/base` — T2I standard (6B params, 28 steps, CFG)
-- `fal-ai/z-image/turbo` — T2I ultra-fast (8 steps, acceleration)
-- `fal-ai/z-image/base/lora` — T2I base + LoRA array
-- `fal-ai/z-image/turbo/lora` — T2I turbo + LoRA array
-- `fal-ai/z-image/turbo/image-to-image` — strength-based I2I
-- `fal-ai/z-image-trainer` — LoRA training (ZIP dataset)
-
-**Žádný instruction-based edit endpoint** existuje (typu Qwen Edit / WAN Edit / FLUX Kontext). TODO položka založena na mylném předpokladu.
-
-**Rozhodnutí:** Odepsat z TODO. Místo toho:
-- Nahrazeno Z-Image Turbo T2I/I2I split (bod výše)
-- Přidáno nové TODO: **Z-Image LoRA generation** (fal-ai/z-image/{base,turbo}/lora) + **Z-Image LoRA trainer**
-
----
-
-## Segmind — Odstraněn z klientu (16. 4. 2026)
-
-**Kontext:** Segmind API klíč byl v setup UI pro WAN 2.7 image generation & editing. V v196en WAN 2.7 přešel na Replicate (full aspect ratio whitelist vs. Segmind square-only). Segmind se nikde nepoužívá, klíč v setupu zůstal orphan.
-
-**Akutní motivace:** Přidáním PixVerse klíče do setupu bylo porušené střídání světlých/tmavých pruhů mezi Topaz/PixVerse/Segmind/Replicate/OpenRouter. Nejrychlejší oprava = odstranit nepoužívaný Segmind.
-
-**Rozhodnutí:** Odstranit z klientu:
-- `template.html` — celý SEGMIND API KEY block (11 řádků)
-- `setup.js` — localStorage load, `onSetupSegmindKey` handler, `API_KEY_FIELDS` entry
-- `spending.js` — `'segmind'` ze `SPEND_PROVIDERS`
-
-**Ponecháno (do příštího cleanupu):**
-- Worker `handlers/segmind.js` — mrtvý kód ve Workeru, neovlivňuje klient
-- `gis_segmind_apikey` klíč v localStorage uživatelů — orphan, ale neškodný
-
-**Výsledek:** Sekvence pruhů obnovena (TOPAZ → A, PIXVERSE → B, REPLICATE → A, OPENROUTER → B).
-
----
-
-## MaxRefs enforcement — třívrstvá kontrola (14. 4. 2026)
-
-**Problém:** Přepnutí modelu (např. NB2 s 14 refy → Qwen Edit s max 3) neomezovalo reference. Tři nezávislé kontroly chyběly: UI, AI agent, API dispatch. Job se poslal se všemi refy → 422 error.
-
-**Scénář:** Uživatel nahraje 4 refs pro NB2 → generuje → Reuse → přepne na Qwen Edit → API vrátí "Maximum 3 reference images allowed". Navíc Edit Tool agent generuje prompt odkazující na image 4 i když model ji nepřijme.
-
-**Rozhodnutí: 3 nezávislé vrstvy:**
-1. **UI** — `renderRefThumbs()` dimuje refs nad limitem (`.ref-dimmed` class). Counter ukazuje active/max. Refs nejsou SMAZÁNY (zachovány pro přepnutí zpět).
-2. **AI agent** — Edit Tool system prompt, ref preview, `_etmSend()`, `_etmAppendVariants()` — vše capped na model maxRefs. `_etmReadaptPrompt()` přidá CRITICAL instrukci pro ořezání referencí v promptu.
-3. **API dispatch** — `refsCopy = getActiveRefs().map(...)` v generate.js — definitivní hard limit.
-
-**Alternativy zvážené a zamítnuté:**
-- Smazat přebytečné refs při přepnutí modelu → destruktivní, uživatel by je musel znovu nahrát
-- Blokovat přepnutí modelu pokud má moc refs → přílišné omezení workflow
-
----
-
-## Edit Tool model switch — ref-aware readapt (14. 4. 2026)
-
-**Problém:** `etmSwitchModel()` nevolal `_etmRefreshRefPreviews()` a `_etmReadaptPrompt()` nezohledňoval změnu ref limitu.
-
-**Rozhodnutí:**
-- `etmSwitchModel()` nově volá `_etmRefreshRefPreviews()` → okamžitý dimming update
-- `_etmReadaptPrompt()` přidá `refTrimNote` když `refs.length > newMax`:
-  "CRITICAL: The target model only accepts N reference images. Remove ALL references to images beyond image N."
-
----
-
-## Grok Imagine Video — přímé xAI API přes proxy (14. 4. 2026)
-
-**Kontext:** xAI nabízí `grok-imagine-video` s 5 módy: T2V, I2V, Reference-to-Video (max 7 obrázků), V2V Edit, Extend. Dostupné přes přímé xAI API i fal.ai.
-
-**Rozhodnutí: Přímé xAI API (ne fal.ai):**
-- ✅ Plný přístup ke všem 5 módům (fal.ai nemá Extend a Reference-to-Video jako jeden)
-- ✅ Levnější: $0.05/s vs fal.ai ~$0.06/s
-- ✅ Jeden model string pro vše
-- ⚠ Vyžaduje Worker handler (xai-video.js)
-
-**Rozhodnutí architektura:**
-- Worker jen submituje a vrací `request_id`. GIS polluje client-side (Worker 30s limit).
-- xAI video URL je dočasná a nemá CORS → download proxy route (`/xai/video/download`)
-- Reference images: base64 data URIs přímo v payloadu (xAI akceptuje, žádný upload potřeba)
-- V2V Edit / Extend: source video z galerie → R2 upload → HTTPS URL → xAI (xAI potřebuje URL, ne base64)
-
-**Rozhodnutí UI:**
-- Jeden model `grok_video` s mode selectorem (T2V/I2V/Ref2V/Edit/Extend) — odpovídá tomu jak xAI sám model prezentuje
-- Duration/resolution/aspect se skrývají pro Edit (output = input)
-
-**xAI Video Edit payload gotcha:**
-- xAI chce `video: {url: "..."}` (objekt), NE `video_url: "..."` (flat string)
-- Extend: `video: {url}` + `duration` (délka přidané části, ne celkového výstupu)
-- Zjištěno z 422 deserializační chyby
-
-**Extend nestabilita:**
-- xAI Extend mód přijme job ale často vrátí "internal error"
-- Potvrzeno komunitou (březen 2026) + xAI acknowledged bugy v audio extensions
-- T2V, I2V, V2V Edit fungují spolehlivě
-
----
-
-## Grok Imagine — kompletní integrace (13. 4. 2026)
-
-**Kontext:** xAI Grok Imagine API nabízí řadu features které GIS neměl implementované: multi-image editing (5 refs), Grok Pro model, count až 10, `response_format: b64_json`.
-
-**Rozhodnutí Worker:**
-- T2I → `/v1/images/generations`, Edit → `/v1/images/edits` — dva různé endpointy
-- `response_format: b64_json` eliminuje Worker-side URL fetch. API vrátí base64 přímo.
-- Multi-image: `images: [{type: "image_url", url: "data:..."}]` array
-
-**Rozhodnutí Pro vs Standard:**
-- Pro (`grok-imagine-image-pro`): maxRefs 1 (API limit potvrzený errorem), default 2K, $0.07/img
-- Standard (`grok-imagine-image`): maxRefs 5, default 1K, $0.02/img
-
-**Rozhodnutí aspect ratio:**
-- Grok podporuje 13 poměrů. `_grokFilterAspects()` filtruje.
-- Nepodporované (21:9, 4:5, 1:4, 4:1) se skryjí.
-
-**Rozhodnutí concurrency:**
-- xAI limit snížen na 2 concurrent requesty (z globálních 4). 503 při batchi.
-
----
-
-## Edit Tool — 7 modelových typů (13. 4. 2026)
-
-**Rozhodnutí:**
-- Rozšířit type systém na 7 typů: gemini, flux, seedream, kling, qwen2, grok, wan
-- Každý typ má vlastní ETM_ELEMENT_* template
-- Badge má unikátní barvu per typ
-- `_etmReadaptPrompt` automaticky konvertuje prompt při přepnutí modelu
-
----
-
-## Edit Tool — TYPE A/B klasifikace (13. 4. 2026)
-
-**Rozhodnutí:**
-1. TYPE B = POUZE změna pohledu, ŽÁDNÁ změna obsahu
-2. Multi-ref TYPE A: prompt MUSÍ explicitně referencovat KAŽDÝ obrázek by number
-3. Keep section VŽDY obsahuje "camera angle, framing"
-4. Zákaz invence mood/grading z jiných referencí
-
----
-
-## Ref prefix — čistý prompt bez labelů (13. 4. 2026)
-
-**Rozhodnutí:**
-- Prompt posílaný modelu: `[Reference images: image 1, image 2, image 3]` — jen čísla
-- User labels viditelné v UI ale NE v API promptu
-
----
-
-## Qwen 2 Edit — maxRefs opraveno (13. 4. 2026)
-
-**Rozhodnutí:** maxRefs 4 → 3. API limit je 3.
-
----
-
-## Error karty — Dismiss button (13. 4. 2026)
-
-**Rozhodnutí:** ✕ Dismiss button. Smaže error kartu a reflow grid.
-
----
-
-## Recraft Crisp upscale — PNG→JPEG + 4 MP pre-flight (12. 4. 2026)
-
-**Rozhodnutí file size:** PNG→JPEG konverze (q92→q85→q75)
-**Rozhodnutí pixel resolution:** Pre-flight check `w * h > 4194304` → modální dialog
-**Rozhodnutí error visibility:** `job.pendingCards = [cardEl]` fix + console.error
-
----
-
-## Qwen Image 2 — negative_prompt + multi-ref edit (12. 4. 2026)
-
-**Rozhodnutí:** `negative_prompt` + `maxRefs: 4 → 3` (API limit) + area-based 4 MP cap
-
----
-
-## Dead code cleanup — callWan27 (12. 4. 2026)
-
-**Rozhodnutí:** Odstranit dead code. `callWan27eVideo` ve video.js ZŮSTÁVÁ.
-
----
-
-## Clarity upscale — empirický limit 25 MP output (12. 4. 2026)
-
-**Rozhodnutí:** Pre-flight check na output > 25 MP.
-
----
-
-## Runway Gen-4 — výzkum proveden, čeká na rozhodnutí (12. 4. 2026)
-
-**Stav:** Kompletní API výzkum. Implementační odhad ~2-3 sessions.
-**Rozhodnutí:** Odloženo.
-
----
-
-## WAN 2.7 Image: Segmind → Replicate (12. 4. 2026)
-
-**Rozhodnutí:** Replicate s 5 aspect ratios, ověřený whitelist. Standard max 2K, Pro max 4K.
-
----
-
-## Dynamický params systém — odloženo
-
-**Rozhodnutí:** Neimplementovat — příliš velké riziko regresí. Hybridní přístup pro nové modely.
-
----
-
-## Tauri distribuce — odloženo
-
-**Spustit kdy:** GIS je stabilní a feature-complete.
-
----
-
-## Proxy architektura — verze history
-
-| Verze | Datum | Změny |
-|-------|-------|-------|
-| 2026-16 | 14. 4. 2026 | xAI Video: 6 routes (submit/edit/extend/status/download) |
-| 2026-15 | 13. 4. 2026 | xAI image: b64_json, multi-image edit |
-| 2026-12 | 11. 4. 2026 | PixVerse C1: 6 routes |
-| 2026-09 | 6. 4. 2026 | R2 generic upload/serve, Kling V2V fix |
-
----
-
-## Code cleanup & deduplication (9. 4. 2026)
-
-**Rozhodnutí:** Systematický refaktor v jedné verzi (v190en).
-**Výsledek:** 17533 → 16897 JS řádků (−636, −3.6%).
-
----
-
-## Edit Tool — Unified Agent Architecture (10. 4. 2026)
-
-**Rozhodnutí:** Jeden unified AI agent s automatickou klasifikací (TYPE A/B).
-
----
-
-## Camera Reframe — Strategie (10. 4. 2026)
-
-**Rozhodnutí: Variant approach.** Agent generuje 4 varianty, uživatel zkouší postupně.
-
----
-
-## Druhá reference jako interní kontext (10. 4. 2026)
-
-**Rozhodnutí:** REFS tagging systém `[REFS:1]` / `[REFS:1,2]`.
-
----
-
-## PixVerse C1 integration via proxy (11. 4. 2026)
-
-**Rozhodnutí:** Passthrough Worker architektura. 4 režimy: T2V, I2V, Transition, Fusion.
-
----
-
-## Setup UI redesign — střídavé pozadí + Get Key linky (11. 4. 2026)
-
-**Rozhodnutí:** Střídavé pozadí, accent labels, Get key → linky.
-
----
-
-## Unified Image Panel — jedna dynamická šablona (14. 4. 2026)
-
-**Problém:** 9 separátních HTML panelů (nbParams, imagenParams, fluxParams, seedreamParams, klingParams, zimageParams, wan27Params, qwen2Params, grokParams) — každý nový model = nový HTML blok + nový JS wiring. Duplikované prvky (count, resolution, seed) v každém panelu. model-select.js: 300+ řádků show/hide logiky.
-
-**Rozhodnutí: Jeden generický panel (`upParams`) s 14 prvky:**
-- Každý model v models.js deklaruje UI flags (resolutions, maxCount, steps, guidance, seed, safetyTolerance, safetyChecker, grounding, etc.)
-- `selectModel()` zobrazuje/skrývá prvky podle flagů
-- `generate()` čte z jedné sady elementů, mapuje na per-type snap formáty
-- Resolution: 3 tlačítka, labely z `model.resolutions[]`, pixel info dynamicky per type
-- Count: 4-button (většina) nebo 10-button (Grok) varianta
-- Safety: slider (FLUX) nebo checkbox (SeeDream/Z-Image/Qwen2) varianta
-- Thinking: radio Min/High (NB2) nebo checkbox (WAN 2.7) varianta
-
-**Scope:** Gemini, Imagen, FLUX, SeeDream, Kling, Z-Image, WAN 2.7, Qwen 2, Grok
-**Stranou:** Luma Photon, Mystic, Freepik Edit (unikátní parametry, zůstávají jako legacy panely)
-
-**Doplňková rozhodnutí:**
-- Resolution 512 odstraněna (NB2, FLUX) — generuje 1K i s 512 nastavením
-- Prompt upsampling/expansion/enhance zakázáno v UI, posíláno jako false
-- Neg prompt: jeden sdílený prvek, prefilled s `_DEFAULT_NEG_PROMPT`
-- Checkbox `.chk-box` border: 1px→1.5px s `var(--dim2)` pro viditelnost
-
-**Výsledek:** template.html −330 řádků, model-select.js −85 řádků. Přidání nového image modelu = jen přidat objekt do MODELS s UI flags.
+## HTML Build Validation (14. 4. 2026)
+
+**Problém:** Při refactoru byl omylem ponechán orphan `</div>` tag (po odstranění `wan27CountRow`). Layout se rozbil — Save To, Generate, Queue vypadly z levého panelu. Bez chyby. Stejný typ chyby se už v historii projektu opakoval.
+
+**Rozhodnutí:** Automatická HTML div balance validace v `build.js`:
+```js
+const divOpens = (htmlOnly.match(/<div[\s>]/g) || []).length;
+const divCloses = (htmlOnly.match(/<\/div>/g) || []).length;
+if (divOpens !== divCloses) console.error(`⚠ WARNING: HTML div balance = ${divOpens - divCloses}`);
+else console.log(`✓ HTML div balance: OK (${divOpens} pairs)`);
+```
+
+Při každém buildu zobrazí balanci. Pokud nesedí, build projde ale zobrazí warning.
 
 ---
 
@@ -586,82 +346,112 @@ if (!model.id.includes('fast') && imageSize !== '1K')
 
 ---
 
-## Unified Image Panel (14. 4. 2026)
+## Unified Image Panel — jedna dynamická šablona (14. 4. 2026)
 
-**Problém:** 9 separátních HTML panelů (nbParams, imagenParams, fluxParams, seedreamParams, klingParams, zimageParams, wan27Params, qwen2Params, grokParams) — každý nový model = nový HTML blok + nový JS wiring. Duplikované prvky.
+**Problém:** 9 separátních HTML panelů (nbParams, imagenParams, fluxParams, seedreamParams, klingParams, zimageParams, wan27Params, qwen2Params, grokParams) — každý nový model = nový HTML blok + nový JS wiring. Duplikované prvky (count, resolution, seed) v každém panelu. model-select.js: 300+ řádků show/hide logiky.
 
-**Rozhodnutí: Jeden generický panel `upParams` s 14 prvky:**
+**Rozhodnutí: Jeden generický panel (`upParams`) s 14 prvky:**
 - Každý model v models.js deklaruje UI flags (resolutions, maxCount, steps, guidance, seed, safetyTolerance, safetyChecker, grounding, etc.)
 - `selectModel()` zobrazuje/skrývá prvky podle flagů
 - `generate()` čte z jedné sady elementů, mapuje na per-type snap formáty
-- Handlers nedotčené — stejné snap formáty
+- Resolution: 3 tlačítka, labely z `model.resolutions[]`, pixel info dynamicky per type
+- Count: 4-button (většina) nebo 10-button (Grok) varianta
+- Safety: slider (FLUX) nebo checkbox (SeeDream/Z-Image/Qwen2) varianta
+- Thinking: radio Min/High (NB2) nebo checkbox (WAN 2.7) varianta
 
 **Scope:** Gemini, Imagen, FLUX, SeeDream, Kling, Z-Image, WAN 2.7, Qwen 2, Grok
-**Stranou:** Luma Photon, Mystic, Freepik Edit (unikátní parametry, zůstávají legacy)
+**Stranou:** Luma Photon, Mystic, Freepik Edit (unikátní parametry, zůstávají jako legacy panely)
+
+**Doplňková rozhodnutí:**
+- Resolution 512 odstraněna (NB2, FLUX) — generuje 1K i s 512 nastavením
+- Prompt upsampling/expansion/enhance zakázáno v UI, posíláno jako false
+- Neg prompt: jeden sdílený prvek, prefilled s `_DEFAULT_NEG_PROMPT`
+- Checkbox `.chk-box` border: 1px→1.5px s `var(--dim2)` pro viditelnost
 
 **Výsledek:** template.html −330 řádků, model-select.js −85 řádků. Přidání nového image modelu = jen přidat objekt do MODELS s UI flags.
 
 ---
 
-## HTML Build Validation (14. 4. 2026)
+## Setup UI redesign — střídavé pozadí + Get Key linky (11. 4. 2026)
 
-**Problém:** Při refactoru byl omylem ponechán orphan `</div>` tag (po odstranění `wan27CountRow`). Layout se rozbil — Save To, Generate, Queue vypadly z levého panelu. Bez chyby. Stejný typ chyby se už v historii projektu opakoval.
-
-**Rozhodnutí:** Automatická HTML div balance validace v `build.js`:
-```js
-const divOpens = (htmlOnly.match(/<div[\s>]/g) || []).length;
-const divCloses = (htmlOnly.match(/<\/div>/g) || []).length;
-if (divOpens !== divCloses) console.error(`⚠ WARNING: HTML div balance = ${divOpens - divCloses}`);
-else console.log(`✓ HTML div balance: OK (${divOpens} pairs)`);
-```
-
-Při každém buildu zobrazí balanci. Pokud nesedí, build projde ale zobrazí warning.
+**Rozhodnutí:** Střídavé pozadí, accent labels, Get key → linky.
 
 ---
 
-## Reference prefix `[Reference images: ...]` — odstraněn (14. 4. 2026)
+## PixVerse C1 integration via proxy (11. 4. 2026)
 
-**Problém:** Prefix `[Reference images: image 1, image 2]` se přidával do textarea při přepnutí modelu na Gemini/xAI. Funkčně neškodil (neduplikoval se), ale byl redundantní — Gemini vidí obrázky v `parts` array. Petrovi to vadilo vizuálně.
-
-**Rozhodnutí:** Úplně odstraněno. `preprocessPromptForModel` pro Gemini/xAI už prefix nepřidává. Legacy prefix se stripuje vždy (i bez refs). `rewritePromptForModel` cleanup při každém přepnutí modelu.
-
-**Co zůstává:** Styles a camera prefix pro Gemini — ty jsou na začátku promptu ve formátu "Visual style instructions: ... . Camera: ... .\n\n[prompt]" a jsou zachovány.
+**Rozhodnutí:** Passthrough Worker architektura. 4 režimy: T2V, I2V, Transition, Fusion.
 
 ---
 
-## Edit Tool Agent — chat memory fix (14. 4. 2026)
+## Druhá reference jako interní kontext (10. 4. 2026)
 
-**Problém:** V Edit Tool si agent nepamatoval předchozí konverzaci. Modal se otevřel, chat byl viditelný, ale agent reagoval jako by neviděl nic než analyzované refs.
-
-**Root cause:** `callGeminiTextMultiTurn()` při OpenRouter path (primární agent) posílala jen poslední user message, ne celou historii:
-```js
-const lastUserMsg = [...history].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
-const result = await _callOpenRouterText(systemPrompt, lastUserMsg, 0.85, 2048);
-```
-
-**Fix:** Nová funkce `_callOpenRouterMultiTurn()` která:
-1. Konvertuje Gemini history `[{role,parts:[{text}]}]` na OpenAI `[{role,content}]`
-2. Mapuje role 'model' → 'assistant'
-3. Posílá celé messages array na OpenRouter
-
-**Agent si teď pamatuje celou konverzaci** — persistent dokud uživatel nedá reset nebo nezavře modal.
+**Rozhodnutí:** REFS tagging systém `[REFS:1]` / `[REFS:1,2]`.
 
 ---
 
-## Crop Tool (15. 4. 2026)
+## Camera Reframe — Strategie (10. 4. 2026)
 
-**Problém:** Petr potřebuje oříznout obrázek. Dělá to mimo GIS (export → crop → import zpět). V paint tabu je to k ničemu (start s prázdným canvasem), ale v annotate modálu už obrázek je.
+**Rozhodnutí: Variant approach.** Agent generuje 4 varianty, uživatel zkouší postupně.
 
-**Rozhodnutí:** Crop tool v annotate modálu.
-- 8 handlů (4 rohy + 4 strany)
-- Lock ratio checkbox
-- Apply/Cancel tlačítka + Enter/Esc shortcuts
-- DOM overlay (ne canvas drawing) — čistší, snadnější UI
-- Architektura podporuje oba prefixy ('p' + 'a'), v UI je jen 'a' (annotate)
+---
 
-**Implementace:**
-- `_pCropState` holding prefix + geometry + drag state
-- Apply: `ctx.getImageData(x,y,w,h)` → resize canvas → `putImageData`
-- Mask canvas se resize spolu (pokud existuje)
-- History se resetuje (no undo across crop boundary)
+## Edit Tool — Unified Agent Architecture (10. 4. 2026)
 
+**Rozhodnutí:** Jeden unified AI agent s automatickou klasifikací (TYPE A/B).
+
+---
+
+## Code cleanup & deduplication (9. 4. 2026)
+
+**Rozhodnutí:** Systematický refaktor v jedné verzi (v190en).
+**Výsledek:** 17 533 → 16 897 JS řádků (−636, −3.6 %).
+
+---
+
+## Worker release tag history
+
+| Tag | Datum | Změna |
+|---|---|---|
+| 2026-16 | 18. 4. 2026 | Session 3 / Session 2.1 — no Worker change |
+| 2026-15 | 13. 4. 2026 | xAI image: b64_json, multi-image edit |
+| 2026-14 | … | xAI Video: 6 routes (submit/edit/extend/status/download) |
+| 2026-12 | 11. 4. 2026 | PixVerse C1: 6 routes |
+| 2026-09 | 6. 4. 2026 | R2 generic upload/serve, Kling V2V fix |
+
+---
+
+## Dlouhodobé principy (kodifikovaná pravidla)
+
+### Ne-dotknutelnost existujících modelů a endpointů
+NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele. Pokud je něco "zastaralé" nebo "podle dokumentace deprecated" — vždy nejdřív potvrdit s Petrem, ne tiše odstranit.
+
+### Výzkum před integrací
+Před přidáním nového modelu/API: web_search, probe endpoints, check regionální dostupnost. WAN 2.7 Video Edit selhal kvůli Singapore vs čínský endpoint — step 1 check.
+
+### REST vs SDK naming
+Google API: REST používá Vertex AI naming (`sampleImageSize`, `sampleCount`), SDK používá SDK naming (`imageSize`, `numberOfImages`). Při REST volání vždy hledat Vertex AI doc.
+
+### Worker free tier limit
+Cloudflare Workers free tier: 30 s wall-clock limit. **Nikdy nepollovat uvnitř Workeru** (timeout = failed request). Vždy return hned s request_id, polling ze strany klienta.
+
+### Snap count v addToQueue
+Každý model má svůj count field v snap objektu (geminiCount, fluxCount, sdCount, klingCount, zimageCount, qwen2Count, xaiSnap.grokCount, imagenSnap.sampleCount, wan27Snap.count, mysticSnap.count). Rerun force=1 pro všechny (od v202en).
+
+### Ref prefix (od v200en)
+Prefix `[Reference images:]` ODSTRANĚN. Styles/camera prefix pro Gemini nedotčený. @mentions převáděné na model-specific format (`image N` pro Gemini/xAI, `@ImageN` pro Flux/Kling, `Figure N` pro SeeDream).
+
+### Listing operations = meta only
+Pro listing/thumbnail/lookup operace VŽDY použít meta store (`dbGetAllMeta`, `dbGetAllAssetMeta`). Plná data (s imageData/videoData) načítat jen při single-item akci (open, edit, download).
+
+### Grid/Flex nesting gotcha (v202en lesson)
+`.gal-grid` s `display:grid` MUSÍ být normal block child, ne flex item. Flex-item s display:grid v nested flex-column selhává na width calculation → karty kolabují. Pattern: wrapper (flex column) → `.lib-toolbar` (flex-shrink:0) → scroll container (flex:1 + overflow-y:auto + min-height:0) → `.gal-grid` uvnitř.
+
+### Paint engine invariant
+`history[0]` = čistý originál, nikdy přepsán aktuálním ctx. `annotCanvas` = klon anotací, nezávislý na base.
+
+### `/mnt/project/` je VŽDY stale
+Infrastructure problém Anthropicu, ne Petrovy zodpovědnost. Session start: (1) STAV.md z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) build → dist.
+
+### Video subsystem (od v203en)
+6 submodulů s jasným ownership. Cross-module calls povolené (globální scope). Build order kritický: utils → models → queue → gallery → topaz → archive. Pokud nová funkce potřebuje cross-call opačným směrem, je to signál že je ve špatném modulu.

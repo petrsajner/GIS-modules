@@ -1,0 +1,2423 @@
+// ═══════════════════════════════════════════════════════
+// VIDEO — model definitions, per-model API handlers, model UI switching
+// ═══════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════
+// VIDEO — Kling video generation, gallery, lightbox
+// ═══════════════════════════════════════════════════════
+
+// ── Video model definitions ──────────────────────────────
+const VIDEO_MODELS = {
+  // refMode: 'none' | 'single' | 'single_end' | 'keyframe' | 'multi'
+  // 'single'    = 1 start frame (start_image_url)
+  // 'single_end'= start frame + optional end frame (start_image_url + end_image_url)
+  // 'keyframe'  = start + end, both required (start_frame_image_url + end_frame_image_url)
+  // 'multi'     = up to maxRefs element refs (elements[] array)
+
+  // ── Google Veo — Gemini API (same key as NB2/Imagen, no proxy needed) ──
+  // Pattern: POST :predictLongRunning → poll operations → download MP4 from URI
+  // generateAudio: NOT sent — Gemini API Veo generates audio automatically, field unsupported
+  // refModes: 'none' (T2V), 'single' (start frame I2V), 'single_end' (first+last frame), 'veo_ingredients' (up to 3 ref images)
+  veo_31: {
+    name: 'Veo 3.1', type: 'veo',
+    modelId: 'veo-3.1-generate-preview',
+    desc: 'T2V · I2V · Ingredients (3 refs) · First+Last frame · Audio · 8s · 720p/1080p/4K · Google',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: false, maxDur: 8, durOptions: [8], defaultDur: 8,
+    resolutions: ['720p', '1080p', '4k'],
+    aspectRatios: ['16:9', '9:16'],
+    veoRefModes: ['t2v', 'i2v', 'frames', 'ingredients'],
+  },
+  veo_31_fast: {
+    name: 'Veo 3.1 Fast', type: 'veo',
+    modelId: 'veo-3.1-fast-generate-preview',
+    desc: 'T2V · I2V · Ingredients (3 refs) · First+Last frame · Audio · 4–8s · 720p/1080p/4K · Faster · Google',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: false, maxDur: 8, durOptions: [4, 6, 8], defaultDur: 4,
+    resolutions: ['720p', '1080p', '4k'],
+    aspectRatios: ['16:9', '9:16'],
+    veoRefModes: ['t2v', 'i2v', 'frames', 'ingredients'],
+  },
+  luma_ray2: {
+    name: 'Ray2', type: 'luma_video',
+    modelId: 'ray-2',
+    desc: 'T2V · I2V · Keyframes · 720p–4K · $0.71/5s · Luma',
+    refMode: 'single_end', maxRefs: 2,
+    hasAudio: false, durOptions: [5, 9], defaultDur: 5,
+    resolutions: ['540p', '720p', '1080p', '4k'],
+    aspectRatios: ['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'],
+    supportsHdr: false, supportsLoop: true, supportsCharRef: false, lumaKey: true,
+  },
+  luma_ray2_flash: {
+    name: 'Ray2 Flash', type: 'luma_video',
+    modelId: 'ray-flash-2',
+    desc: 'T2V · I2V · Keyframes · 720p–4K · $0.24/5s · Fast · Luma',
+    refMode: 'single_end', maxRefs: 2,
+    hasAudio: false, durOptions: [5, 9], defaultDur: 5,
+    resolutions: ['540p', '720p', '1080p', '4k'],
+    aspectRatios: ['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'],
+    supportsHdr: false, supportsLoop: true, supportsCharRef: false, lumaKey: true,
+  },
+  luma_ray314: {
+    name: 'Ray3.14', type: 'luma_video',
+    modelId: 'ray-3-14',
+    desc: 'T2V · I2V · Keyframes · Native 1080p · 4× faster · 3× cheaper · No audio · Luma',
+    supportsHdr: false,
+    refMode: 'single_end', maxRefs: 2,
+    hasAudio: false, durOptions: [5, 10], defaultDur: 5,
+    resolutions: ['540p', '720p', '1080p', '4k'],
+    aspectRatios: ['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'],
+    supportsHdr: false,
+    supportsLoop: true,
+    supportsCharRef: false,
+    lumaKey: true,
+  },
+  luma_ray3: {
+    name: 'Ray3', type: 'luma_video',
+    modelId: 'ray-3',
+    desc: 'T2V · I2V · Keyframes · Character ref · No audio · Luma',
+    refMode: 'single_end', maxRefs: 2,
+    hasAudio: false, durOptions: [5, 10], defaultDur: 5,
+    resolutions: ['540p', '720p', '1080p', '4k'],
+    aspectRatios: ['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'],
+    supportsHdr: false,
+    supportsLoop: true,
+    supportsCharRef: true,
+    lumaKey: true,
+  },
+  luma_ray3_hdr: {
+    name: 'Ray3 HDR', type: 'luma_video',
+    modelId: 'ray-hdr-3',
+    desc: 'T2V · I2V · Native 16-bit HDR · EXR export · Character ref · No audio · Luma',
+    refMode: 'single_end', maxRefs: 2,
+    hasAudio: false, durOptions: [5, 10], defaultDur: 5,
+    resolutions: ['540p', '720p', '1080p'],
+    aspectRatios: ['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'],
+    supportsHdr: true, supportsLoop: true, supportsCharRef: true, lumaKey: true,
+  },
+  luma_ray314_hdr: {
+    name: 'Ray3.14 HDR', type: 'luma_video',
+    modelId: 'ray-hdr-3-14',
+    desc: 'T2V · I2V · Native 16-bit HDR · EXR export · 4× faster · No audio · Luma',
+    refMode: 'single_end', maxRefs: 2,
+    hasAudio: false, durOptions: [5, 10], defaultDur: 5,
+    resolutions: ['540p', '720p'],
+    aspectRatios: ['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'],
+    supportsHdr: true, supportsLoop: true, supportsCharRef: false, lumaKey: true,
+  },
+  kling_v3_t2v_std: {
+    name: 'Kling V3 Standard T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v3/standard/text-to-video',
+    desc: 'T2V · Native audio · Up to 15s · Fast iteration',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15,
+  },
+  kling_v3_t2v_pro: {
+    name: 'Kling V3 Pro T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v3/pro/text-to-video',
+    desc: 'T2V · Native audio · Up to 15s · Highest quality',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15,
+  },
+  kling_v3_i2v_std: {
+    name: 'Kling V3 Standard I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v3/standard/image-to-video',
+    desc: 'I2V · Start frame + optional end frame · Native audio · Up to 15s',
+    refMode: 'single_end', maxRefs: 2,
+    refLabel: 'Start frame (drag 2nd = end frame)',
+    hasAudio: true, maxDur: 15,
+  },
+  kling_v3_i2v_pro: {
+    name: 'Kling V3 Pro I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v3/pro/image-to-video',
+    desc: 'I2V · Start frame + optional end frame · Native audio · Up to 15s',
+    refMode: 'single_end', maxRefs: 2,
+    refLabel: 'Start frame (add 2nd = end frame)',
+    hasAudio: true, maxDur: 15,
+  },
+  kling_o3_t2v_std: {
+    name: 'Kling O3 Standard T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/o3/standard/text-to-video',
+    desc: 'T2V · Native audio · Voice control · Up to 15s',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15,
+  },
+  kling_o3_t2v_pro: {
+    name: 'Kling O3 Pro T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/o3/pro/text-to-video',
+    desc: 'T2V · Native audio · Voice control · Up to 15s · Highest quality',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15,
+  },
+  kling_o3_i2v_std: {
+    name: 'Kling O3 Standard I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/o3/standard/image-to-video',
+    desc: 'I2V · Up to 7 element refs · Voice clone · Native audio · Up to 15s',
+    refMode: 'multi', maxRefs: 7,
+    refLabel: 'Element refs (up to 7) · use @Element1 in prompt',
+    imageField: 'image_url',
+    hasAudio: true, maxDur: 15,
+  },
+  kling_o3_i2v_pro: {
+    name: 'Kling O3 Pro I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/o3/pro/image-to-video',
+    desc: 'I2V · Up to 7 element refs · Voice clone · Native audio · Up to 15s',
+    refMode: 'multi', maxRefs: 7,
+    refLabel: 'Element refs (up to 7) · use @Element1 in prompt',
+    imageField: 'image_url',
+    hasAudio: true, maxDur: 15,
+  },
+  kling_o1_kf: {
+    name: 'Kling O1 Dual Keyframe', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/o1/image-to-video',
+    desc: 'Start + End frame interpolation · 5s or 10s',
+    refMode: 'keyframe', maxRefs: 2,
+    refLabel: 'Start frame + End frame (both required)',
+    hasAudio: false, maxDur: 10,
+  },
+  kling_26_i2v_pro: {
+    name: 'Kling 2.6 Pro I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v2.6/pro/image-to-video',
+    desc: 'I2V · Start frame · Native audio · Economy · $0.070/s',
+    refMode: 'single', maxRefs: 1,
+    refLabel: 'Start frame',
+    hasAudio: true, maxDur: 10, durOptions: [5, 10],
+  },
+
+  // ── V2V / Motion Control (V3 + V2.6) ─────────────────────
+  // refMode: 'video_ref' — requires video file upload as motion reference
+  // Optional: character image ref (1st image ref)
+  kling_v3_v2v_std: {
+    name: 'Kling V3 Std · Motion Control', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v3/standard/motion-control',
+    desc: 'V2V · Upload action video for motion + character image (both required)',
+    refMode: 'video_ref', maxRefs: 1,
+    refLabel: 'Character image (required)',
+    hasAudio: false, maxDur: 10,
+  },
+  kling_v3_v2v_pro: {
+    name: 'Kling V3 Pro · Motion Control', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v3/pro/motion-control',
+    desc: 'V2V · Upload action video for motion + character image (both required) · Pro quality',
+    refMode: 'video_ref', maxRefs: 1,
+    refLabel: 'Character image (required)',
+    hasAudio: false, maxDur: 10,
+  },
+  kling_26_v2v_pro: {
+    name: 'Kling 2.6 Pro · Motion Control', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v2.6/pro/motion-control',
+    desc: 'V2V · Upload action video for motion + character image (both required)',
+    refMode: 'video_ref', maxRefs: 1,
+    refLabel: 'Character image (required)',
+    hasAudio: false, maxDur: 10,
+  },
+
+  // ── Older models — economy options ───────────────────────
+  kling_25t_t2v: {
+    name: 'Kling 2.1 Master T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v2.1/master/text-to-video',
+    desc: 'T2V · Top-tier 2.1 · Cinematic visuals · 5s or 10s',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 10, durOptions: [5, 10],
+  },
+  kling_25t_i2v: {
+    name: 'Kling 2.1 Master I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v2.1/master/image-to-video',
+    desc: 'I2V · Start frame · Top-tier 2.1 · Cinematic visuals · 5s or 10s',
+    refMode: 'single', maxRefs: 1,
+    refLabel: 'Start frame',
+    hasAudio: true, maxDur: 10, durOptions: [5, 10],
+    imageField: 'image_url',
+  },
+  kling_21_t2v: {
+    name: 'Kling 2.1 Standard T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v2.1/standard/text-to-video',
+    desc: 'T2V · Exceptional Value & Efficiency · 5s or 10s',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 10, durOptions: [5, 10],
+  },
+  kling_21_i2v: {
+    name: 'Kling 2.1 Standard I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v2.1/standard/image-to-video',
+    desc: 'I2V · Start frame · Exceptional Value & Efficiency · 5s or 10s',
+    refMode: 'single', maxRefs: 1,
+    refLabel: 'Start frame',
+    hasAudio: true, maxDur: 10, durOptions: [5, 10],
+    imageField: 'image_url',
+  },
+  kling_16_t2v: {
+    name: 'Kling 1.6 T2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v1.6/standard/text-to-video',
+    desc: 'T2V · Economy · 5s or 10s',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: false, maxDur: 10, durOptions: [5, 10],
+  },
+  kling_16_i2v: {
+    name: 'Kling 1.6 I2V', type: 'kling_video',
+    endpoint: 'fal-ai/kling-video/v1.6/pro/image-to-video',
+    desc: 'I2V · Start frame · Economy · 5s or 10s',
+    refMode: 'single', maxRefs: 1,
+    refLabel: 'Start frame',
+    hasAudio: false, maxDur: 10, durOptions: [5, 10],
+    imageField: 'image_url',
+  },
+
+  // ── Seedance 1.5 Pro — ByteDance via fal.ai ──────────────
+  // Native audio+video joint generation · max 720p · max 12s
+  // I2V uses image_url (start) + end_image_url (optional end)
+  seedance15_t2v: {
+    name: 'Seedance 1.5 Pro', type: 'seedance_video',
+    endpoint: 'fal-ai/bytedance/seedance/v1.5/pro/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 12, minDur: 4, hasAudio: true,
+    resolution: '720p',
+    desc: 'T2V · Native audio · Up to 12s · $0.26/5s · ByteDance',
+  },
+  seedance15_i2v: {
+    name: 'Seedance 1.5 Pro', type: 'seedance_video',
+    endpoint: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 12, minDur: 4, hasAudio: true,
+    resolution: '720p',
+    imageField: 'image_url',        // Seedance: image_url (not start_image_url)
+    audioField: 'generate_audio',
+    refLabel: 'Keyframes',
+    desc: 'I2V · Start + End frame · Native audio · Up to 12s · $0.26/5s · ByteDance',
+  },
+
+  // ── Seedance 2.0 — ByteDance via fal.ai ─────────────────
+  // Unified multimodal architecture: text + image + video + audio inputs
+  // Multi-shot via prompt: [lens switch], timeline [0-3s]..., or "Shot 1: ... Shot 2: ..."
+  // R2V refs in prompt: [Image1], [Video1], [Audio1]
+  // generate_audio: always explicit (default ON = unexpected cost)
+  // duration: STRING ("4"–"15" or "auto"), resolution: "480p"|"720p"
+  seedance2_t2v: {
+    name: 'Seedance 2.0', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    desc: 'T2V · Multi-shot · Native audio · Up to 15s · $0.30/s · ByteDance',
+  },
+  seedance2_i2v: {
+    name: 'Seedance 2.0', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Keyframes',
+    desc: 'I2V · Start + End frame · Native audio · Up to 15s · $0.30/s',
+  },
+  seedance2_r2v: {
+    name: 'Seedance 2.0', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/reference-to-video',
+    refMode: 'seedance2_r2v', maxRefs: 9, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Image refs (up to 9)',
+    desc: 'R2V · 9 imgs + 3 videos + 3 audio · Multi-modal · $0.30/s',
+  },
+  seedance2f_t2v: {
+    name: 'Seedance 2.0 Fast', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/fast/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    desc: 'T2V Fast · Multi-shot · Lower latency · $0.24/s',
+  },
+  seedance2f_i2v: {
+    name: 'Seedance 2.0 Fast', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/fast/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Keyframes',
+    desc: 'I2V Fast · Start + End frame · $0.24/s',
+  },
+  seedance2f_r2v: {
+    name: 'Seedance 2.0 Fast', type: 'seedance2_video',
+    endpoint: 'bytedance/seedance-2.0/fast/reference-to-video',
+    refMode: 'seedance2_r2v', maxRefs: 9, maxDur: 15, minDur: 4, hasAudio: true,
+    resolution: '720p', imageField: 'image_url',
+    refLabel: 'Image refs (up to 9)',
+    desc: 'R2V Fast · 9 imgs + 3 videos + 3 audio · $0.18/s',
+  },
+
+  // ── Vidu Q3 — Shengshu via fal.ai ───────────────────────
+  // duration: INTEGER (not string!) · audio field: 'audio' (not generate_audio)
+  // I2V: image_url (start) + optional end_image_url → same endpoint
+  vidu_q3_t2v: {
+    name: 'Vidu Q3', type: 'vidu_video',
+    endpoint: 'fal-ai/vidu/q3/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 16, hasAudio: true,
+    resolution: '720p',
+    audioField: 'audio',
+    durationInt: true,
+    desc: 'T2V · Native audio · Up to 16s · $0.154/s (720p) · Shengshu',
+  },
+  vidu_q3_i2v: {
+    name: 'Vidu Q3', type: 'vidu_video',
+    endpoint: 'fal-ai/vidu/q3/image-to-video',
+    refMode: 'single', maxRefs: 1, maxDur: 16, hasAudio: true,
+    resolution: '720p',
+    imageField: 'image_url',
+    audioField: 'audio',
+    durationInt: true,
+    refLabel: 'Start frame',
+    desc: 'I2V · Start frame · Native audio · Up to 16s · $0.154/s (720p) · Shengshu',
+  },
+  vidu_q3_frames: {
+    name: 'Vidu Q3', type: 'vidu_video',
+    endpoint: 'fal-ai/vidu/q3/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 16, hasAudio: true,
+    resolution: '720p',
+    imageField: 'image_url',
+    audioField: 'audio',
+    durationInt: true,
+    refLabel: 'Keyframes',
+    desc: 'Start + End frame · Native audio · Up to 16s · $0.154/s (720p) · Shengshu',
+  },
+
+  // ── Wan 2.6 — Alibaba via fal.ai ────────────────────────
+  // duration: string "5"/"10"/"15" · fixed options · audio field: 'audio'
+  // multi_shots: boolean — false = single continuous shot (default true = multi-shot)
+  // ── Wan 2.7 I2V — přes Replicate API (CORS-blocked → proxy) ─────────────────
+  // Replicate model: wan-video/wan-2.7-i2v
+  // first_frame = start (required), last_frame = end (optional, FLF2V mode)
+  // Output: single URL string (not array)
+  // Audio: auto-generated if no audio URI provided
+  // ── WAN 2.7 — fal.ai (direct queue, no proxy) ────────────
+  wan27_t2v: {
+    name: 'Wan 2.7', type: 'wan27_video',
+    falEndpoint: 'fal-ai/wan/v2.7/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, hasAudio: false,
+    desc: 'T2V · Enhanced motion + coherence · Up to 15s · Audio URL · Alibaba via fal.ai',
+  },
+  wan27_i2v: {
+    name: 'Wan 2.7', type: 'wan27_video',
+    falEndpoint: 'fal-ai/wan/v2.7/image-to-video',
+    refMode: 'single_end', maxRefs: 2, maxDur: 15, hasAudio: false,
+    refLabel: 'Start frame',
+    refLabelEnd: 'End frame (optional · FLF2V)',
+    desc: 'I2V · Start + optional end frame (FLF2V) · Extend video · Up to 15s · Alibaba via fal.ai',
+  },
+  wan27_r2v: {
+    name: 'Wan 2.7 R2V', type: 'wan27_video',
+    falEndpoint: 'fal-ai/wan/v2.7/reference-to-video',
+    refMode: 'wan_r2v', maxRefs: 5, maxDur: 10, hasAudio: false,
+    refLabel: 'Character refs (image or video)',
+    desc: 'R2V · Character consistency · Image/video refs · Up to 10s · Alibaba via fal.ai',
+  },
+  wan27e_v2v: {
+    name: 'Wan 2.7 Video Edit', type: 'wan27e_video',
+    falEndpoint: 'fal-ai/wan/v2.7/edit-video',
+    refMode: 'single', maxRefs: 1, maxDur: 10, hasAudio: false,
+    refLabel: 'Reference image (optional)',
+    desc: 'V2V · Instruction edit · Style transfer · Any source video · Optional ref image · Up to 10s · fal.ai',
+  },
+
+  wan26_t2v: {
+    name: 'Wan 2.6', type: 'wan_video',
+    endpoint: 'wan/v2.6/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, hasAudio: false,
+    durOptions: [5, 10, 15],
+    desc: 'T2V · Multi-shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
+  },
+  wan26_t2v_single: {
+    name: 'Wan 2.6', type: 'wan_video',
+    endpoint: 'wan/v2.6/text-to-video',
+    refMode: 'none', maxRefs: 0, maxDur: 15, hasAudio: false,
+    multiShots: false,
+    durOptions: [5, 10, 15],
+    desc: 'T2V · Single shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
+  },
+  wan26_i2v: {
+    name: 'Wan 2.6', type: 'wan_video',
+    endpoint: 'wan/v2.6/image-to-video',
+    refMode: 'single', maxRefs: 1, maxDur: 15, hasAudio: false,
+    imageField: 'image_url',
+    durOptions: [5, 10, 15],
+    refLabel: 'Start frame',
+    desc: 'I2V · Start frame · Multi-shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
+  },
+
+  // ── Wan 2.6 R2V Flash — character consistency via image refs ─
+  // Flash accepts image_urls[] (0-5 images) + video_urls[] (0-3 videos), total ≤ 5
+  // References: Character1, Character2... in prompt (NOT @Video1)
+  // audio field: enable_audio (all Wan 2.6 models use enable_audio)
+  // Duration: max 10s (no 15s support)
+  wan26_r2v_flash: {
+    name: 'Wan 2.6 R2V Flash', type: 'wan_video',
+    endpoint: 'wan/v2.6/reference-to-video/flash',
+    refMode: 'wan_r2v', maxRefs: 5, maxDur: 10, hasAudio: true,
+    audioField: 'enable_audio',
+    durOptions: [5, 10],
+    refLabel: 'Character refs (image or video)',
+    desc: 'R2V Flash · Character consistency · 1-5 refs · Up to 10s · $0.05/s · Alibaba',
+  },
+  // ── PixVerse C1 — via proxy (async submit → poll → download) ──
+  // Camera movements: disabled for C1 (v4/v4.5 only)
+  // Duration: 1–15s continuous (1080p max 5s)
+  // generate_multi_clip_switch: NOT supported for C1 T2V/I2V (400017), inverted for Transition
+  // generate_audio_switch: must be explicit
+  // off_peak_mode: slower, ~50% cheaper
+  pixverse_c1_t2v: {
+    name: 'PixVerse C1 T2V', type: 'pixverse_video', modelId: 'c1',
+    desc: 'T2V · Audio · 1–15s · 1080p · Action &amp; combat · PixVerse',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15, minDur: 1,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_c1_i2v: {
+    name: 'PixVerse C1 I2V', type: 'pixverse_video', modelId: 'c1',
+    desc: 'I2V · Audio · 1–15s · 1080p · Start frame → video · PixVerse',
+    refMode: 'single', maxRefs: 1,
+    hasAudio: true, maxDur: 15, minDur: 1,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_c1_transition: {
+    name: 'PixVerse C1 Transition', type: 'pixverse_video', modelId: 'c1', pixverseMode: 'transition',
+    desc: 'First + Last frame · Audio · 1–15s · Smooth morph · PixVerse',
+    refMode: 'keyframe', maxRefs: 2,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_c1_fusion: {
+    name: 'PixVerse C1 Fusion', type: 'pixverse_video', modelId: 'c1', pixverseMode: 'fusion',
+    desc: 'Reference images (1–7) → Video · Use @name in prompt · PixVerse',
+    refMode: 'multi', maxRefs: 7,
+    hasAudio: true, maxDur: 15, minDur: 1,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '2:3', '3:2', '21:9'],
+    pixverseKey: true,
+  },
+  // ── PixVerse V6 — multi-clip supported ──
+  pixverse_v6_t2v: {
+    name: 'PixVerse V6 T2V', type: 'pixverse_video', modelId: 'v6',
+    desc: 'T2V · Audio · Multi-clip · 1–15s · 1080p · PixVerse',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_v6_i2v: {
+    name: 'PixVerse V6 I2V', type: 'pixverse_video', modelId: 'v6',
+    desc: 'I2V · Audio · Multi-clip · 1–15s · 1080p · PixVerse',
+    refMode: 'single', maxRefs: 1,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+  pixverse_v6_transition: {
+    name: 'PixVerse V6 Transition', type: 'pixverse_video', modelId: 'v6', pixverseMode: 'transition',
+    desc: 'First + Last frame · Audio · Multi-clip · 1–15s · PixVerse',
+    refMode: 'keyframe', maxRefs: 2,
+    hasAudio: true, maxDur: 15, minDur: 1, supportsMultiClip: true,
+    qualityOptions: ['360p', '540p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    pixverseKey: true,
+  },
+
+  // ── xAI Grok Imagine Video ─────────────────────────────
+  // One model, 5 modes via grokVideoMode selector:
+  //   t2v     = Text-to-Video (prompt only)
+  //   i2v     = Image-to-Video (1 start frame)
+  //   ref2v   = Reference-to-Video (1–7 ref images, NOT start frame)
+  //   edit    = V2V Edit (video_url, max 8.7s input)
+  //   extend  = Video Extend (video_url, adds 2–10s)
+  // Async: submit → poll request_id → download temporary URL
+  // Native audio generation (automatic, no toggle)
+  grok_video: {
+    name: 'Grok Imagine Video', type: 'grok_video',
+    modelId: 'grok-imagine-video',
+    desc: 'T2V · I2V · 7-Ref · V2V Edit · Extend · Audio · 1–15s · 720p · xAI · $0.05/s',
+    refMode: 'none', maxRefs: 0,
+    hasAudio: true, maxDur: 15, minDur: 1, defaultDur: 8,
+    durOptions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'],
+    resolutions: ['480p', '720p'],
+    grokVideoModes: ['t2v', 'i2v', 'ref2v', 'edit', 'extend'],
+    xaiKey: true,
+  },
+};
+
+// ── Kling model groups (main key → variants list) ────────
+// Group keys are NOT in VIDEO_MODELS — used only for main selector dispatch
+const KLING_GROUPS = {
+  kling_v3: {
+    default: 'kling_v3_t2v_pro',
+    variants: [
+      { key: 'kling_v3_t2v_std', label: 'Standard · T2V · $0.168/s' },
+      { key: 'kling_v3_t2v_pro', label: 'Pro · T2V · $0.224/s' },
+      { key: 'kling_v3_i2v_std', label: 'Standard · I2V · $0.196/s' },
+      { key: 'kling_v3_i2v_pro', label: 'Pro · I2V · $0.280/s' },
+      { key: 'kling_v3_v2v_std', label: 'Standard · Motion Control (V2V)' },
+      { key: 'kling_v3_v2v_pro', label: 'Pro · Motion Control (V2V)' },
+    ],
+  },
+  kling_o3: {
+    default: 'kling_o3_t2v_pro',
+    variants: [
+      { key: 'kling_o3_t2v_std', label: 'Standard · T2V · $0.224/s' },
+      { key: 'kling_o3_t2v_pro', label: 'Pro · T2V · $0.392/s' },
+      { key: 'kling_o3_i2v_std', label: 'Standard · I2V · 7 refs · $0.280/s' },
+      { key: 'kling_o3_i2v_pro', label: 'Pro · I2V · 7 refs · $0.392/s' },
+    ],
+  },
+  kling_o1: {
+    default: 'kling_o1_kf',
+    variants: [
+      { key: 'kling_o1_kf', label: 'Dual Keyframe · $0.112/s' },
+    ],
+  },
+  kling_26: {
+    default: 'kling_26_i2v_pro',
+    variants: [
+      { key: 'kling_26_i2v_pro', label: 'Pro · I2V · $0.070/s' },
+      { key: 'kling_26_v2v_pro', label: 'Pro · Motion Control (V2V)' },
+    ],
+  },
+  kling_25t: {
+    default: 'kling_25t_t2v',
+    variants: [
+      { key: 'kling_25t_t2v', label: 'T2V' },
+      { key: 'kling_25t_i2v', label: 'I2V' },
+    ],
+  },
+  kling_21: {
+    default: 'kling_21_t2v',
+    variants: [
+      { key: 'kling_21_t2v', label: 'Standard · T2V' },
+      { key: 'kling_21_i2v', label: 'Standard · I2V' },
+    ],
+  },
+  kling_16: {
+    default: 'kling_16_t2v',
+    variants: [
+      { key: 'kling_16_t2v', label: 'T2V' },
+      { key: 'kling_16_i2v', label: 'I2V' },
+    ],
+  },
+  seedance15: {
+    default: 'seedance15_t2v',
+    variants: [
+      { key: 'seedance15_t2v', label: 'T2V · Text to Video · $0.26/5s' },
+      { key: 'seedance15_i2v', label: 'I2V · Start + End frame · $0.26/5s' },
+    ],
+  },
+  seedance2: {
+    default: 'seedance2_t2v',
+    variants: [
+      { key: 'seedance2_t2v',  label: 'T2V · Text to Video · $0.30/s' },
+      { key: 'seedance2_i2v',  label: 'I2V · Start + End frame · $0.30/s' },
+      { key: 'seedance2_r2v',  label: 'R2V · Multi-modal refs · $0.30/s' },
+      { key: 'seedance2f_t2v', label: 'T2V Fast · $0.24/s' },
+      { key: 'seedance2f_i2v', label: 'I2V Fast · $0.24/s' },
+      { key: 'seedance2f_r2v', label: 'R2V Fast · $0.18/s' },
+    ],
+  },
+  vidu_q3: {
+    default: 'vidu_q3_t2v',
+    variants: [
+      { key: 'vidu_q3_t2v',    label: 'T2V · Text to Video · $0.154/s' },
+      { key: 'vidu_q3_i2v',    label: 'I2V · Start frame · $0.154/s' },
+      { key: 'vidu_q3_frames', label: 'Start + End frame · $0.154/s' },
+    ],
+  },
+  wan27: {
+    default: 'wan27_i2v',
+    variants: [
+      { key: 'wan27_t2v',  label: 'T2V · Text to Video' },
+      { key: 'wan27_i2v',  label: 'I2V · Start frame · Optional end (FLF2V) · Extend' },
+      { key: 'wan27_r2v',  label: 'R2V · Character refs · Image/video' },
+      { key: 'wan27e_v2v', label: 'Video Edit · Instruction / Style transfer' },
+    ],
+  },
+  wan26: {
+    default: 'wan26_t2v',
+    variants: [
+      { key: 'wan26_t2v',        label: 'T2V · Multi-shot · $0.10/s (720p)' },
+      { key: 'wan26_t2v_single', label: 'T2V · Single shot · $0.10/s (720p)' },
+      { key: 'wan26_i2v',        label: 'I2V · Start frame · $0.10/s (720p)' },
+      { key: 'wan26_r2v_flash',  label: 'R2V Flash · Character refs · $0.05/s' },
+    ],
+  },
+  pixverse_c1: {
+    default: 'pixverse_c1_t2v',
+    variants: [
+      { key: 'pixverse_c1_t2v',        label: 'T2V · Text to Video' },
+      { key: 'pixverse_c1_i2v',        label: 'I2V · Start frame → Video' },
+      { key: 'pixverse_c1_transition', label: 'Transition · First + Last frame' },
+      { key: 'pixverse_c1_fusion',     label: 'Fusion · Reference images (1-7)' },
+    ],
+  },
+  pixverse_v6: {
+    default: 'pixverse_v6_t2v',
+    variants: [
+      { key: 'pixverse_v6_t2v',        label: 'T2V · Multi-clip support' },
+      { key: 'pixverse_v6_i2v',        label: 'I2V · Multi-clip support' },
+      { key: 'pixverse_v6_transition', label: 'Transition · First + Last frame' },
+    ],
+  },
+};
+
+// ── Topaz model definitions ─────────────────────────────
+const TOPAZ_MODELS = {
+  topaz_precise25: {
+    name:        'Topaz Precise 2.5',
+    type:        'topaz_video',
+    apiModel:    'slp-2.5',
+    desc:        'Best for AI-generated video. Reduces plastic artifacts, enhances faces, materials and text. Output: 1080p or 4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   false,
+    maxSlowmo:   16,
+  },
+  topaz_precise2: {
+    name:        'Topaz Precise 2',
+    type:        'topaz_video',
+    apiModel:    'slp-2',
+    desc:        'Balanced quality/cost. Supports scale factors 1×–4× or fixed 1080p/4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   true,
+    maxSlowmo:   16,
+  },
+  topaz_precise1: {
+    name:        'Topaz Precise 1',
+    type:        'topaz_video',
+    apiModel:    'slp-1',
+    desc:        'Original Starlight model. Highest detail but slower and more expensive. Output: 1080p or 4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   false,
+    maxSlowmo:   16,
+  },
+  topaz_hq: {
+    name:        'Topaz Starlight HQ',
+    type:        'topaz_video',
+    apiModel:    'slhq',
+    desc:        'High-quality diffusion upscaler. Natural detail, strong face restoration. Output: 1080p or 4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   false,
+    maxSlowmo:   16,
+  },
+  topaz_mini: {
+    name:        'Topaz Starlight Mini',
+    type:        'topaz_video',
+    apiModel:    'slm',
+    desc:        'Efficient local-class model. Fast, good for archival and motion-heavy footage. Output: 1080p or 4K.',
+    resolutions: ['1080p', '4k'],
+    hasFactor:   false,
+    maxSlowmo:   16,
+  },
+};
+
+const TOPAZ_GROUPS = {
+  topaz: {
+    default:  'topaz_precise25',
+    variants: [
+      { key: 'topaz_precise25', label: 'Precise 2.5 · GenAI video · best quality' },
+      { key: 'topaz_precise2',  label: 'Precise 2 · 1×–4× upscale · balanced' },
+      { key: 'topaz_precise1',  label: 'Precise 1 · highest detail · slower' },
+      { key: 'topaz_hq',        label: 'Starlight HQ · natural detail · faces' },
+      { key: 'topaz_mini',      label: 'Starlight Mini · fast · archival' },
+    ],
+  },
+};
+
+// ── Magnific Video Upscaler models ───────────────────────
+const MAGNIFIC_VIDEO_MODELS = {
+  magnific_vid_creative: {
+    name:  'Magnific Creative',
+    mode:  'creative',
+    desc:  'Prompt-guided video upscaling with creativity controls. Add detail and stylize via prompt. Output: 1K/2K/4K.',
+  },
+  magnific_vid_precision: {
+    name:  'Magnific Precision',
+    mode:  'precision',
+    desc:  'Faithful upscaling — no AI-generated content added. Blend original with upscaled via strength. Output: 1K/2K/4K.',
+  },
+};
+
+// ── Global video state ───────────────────────────────────
+
+// Per-model spend key lookup for accurate spending tracking
+// Audio flag doubles price for Kling models that support native audio
+function _getVideoSpendKey(modelKey, hasAudio) {
+  // Kling V3
+  if (modelKey.startsWith('kling_v3_v2v')) return '_kling_mc';
+  if (modelKey.startsWith('kling_v3') && modelKey.includes('_pro')) return hasAudio ? '_kling_v3_pro_audio' : '_kling_v3_pro';
+  if (modelKey.startsWith('kling_v3')) return hasAudio ? '_kling_v3_std_audio' : '_kling_v3_std';
+  // Kling O3
+  if (modelKey.startsWith('kling_o3') && modelKey.includes('_pro')) return hasAudio ? '_kling_o3_pro_audio' : '_kling_o3_pro';
+  if (modelKey.startsWith('kling_o3')) return hasAudio ? '_kling_o3_std_audio' : '_kling_o3_std';
+  // Kling O1
+  if (modelKey === 'kling_o1_kf') return '_kling_o1';
+  // Kling 2.6
+  if (modelKey.startsWith('kling_26')) return hasAudio ? '_kling_26_audio' : '_kling_26';
+  // Kling 2.5 Turbo (labeled as 2.1 Master in GIS)
+  if (modelKey.startsWith('kling_25t')) return '_kling_25t';
+  // Kling 2.1 Standard
+  if (modelKey.startsWith('kling_21')) return '_kling_21_std';
+  // Kling 1.6
+  if (modelKey.startsWith('kling_16')) return '_kling_16';
+  // Seedance 1.5
+  if (modelKey.startsWith('seedance15')) return '_seedance15';
+  // Vidu Q3
+  if (modelKey.startsWith('vidu_q3')) return '_vidu_q3';
+  // WAN 2.6
+  if (modelKey.startsWith('wan26')) {
+    const res = document.getElementById('wanResolution')?.value || '720p';
+    return res === '1080p' ? '_wan26_1080p' : '_wan26_720p';
+  }
+  return '_fal_video'; // fallback
+}
+
+async function uploadVideoToFal(file, falKey) {
+  // Upload via Worker R2 proxy — storage.fal.run is CORS-blocked from file:// protocol
+  // falKey param kept for API compatibility but not used (R2 needs no external key)
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) throw new Error('Proxy URL missing. Add it in Setup tab.');
+  const res = await fetch(`${proxyUrl}/r2/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'video/mp4' },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Video upload failed: ${res.status} ${await res.text().catch(() => '')}`);
+  const data = await res.json();
+  if (!data.url) throw new Error('No URL in R2 upload response');
+  return data.url;
+}
+
+// ── Mode toggle ───────────────────────────────────────────
+// ── Active model key helper ───────────────────────────────
+function getActiveVideoModelKey() {
+  const mainVal = document.getElementById('videoModelSelect')?.value || '';
+  // Topaz models are direct values — no group/sub-select
+  if (TOPAZ_MODELS[mainVal]) return mainVal;
+  // Magnific video models are direct values
+  if (MAGNIFIC_VIDEO_MODELS[mainVal]) return mainVal;
+  // Kling group — variants in klingVersionSelect
+  if (KLING_GROUPS[mainVal]) {
+    return document.getElementById('klingVersionSelect')?.value || KLING_GROUPS[mainVal].default;
+  }
+  return mainVal;
+}
+
+// ── Model change ─────────────────────────────────────────
+function onVideoModelChange(value) {
+  const prevM = VIDEO_MODELS[_prevVideoModelKey] || null;
+  _videoModelSwitching = true;
+  // Topaz models are selected directly from main select — no sub-select needed
+  if (TOPAZ_MODELS[value]) {
+    const row = document.getElementById('klingVersionRow');
+    if (row) row.style.display = 'none';
+    _applyVideoModel(value);
+    _prevVideoModelKey = value;
+    _videoModelSwitching = false;
+    return;
+  }
+  // Magnific video models — direct, no sub-select
+  if (MAGNIFIC_VIDEO_MODELS[value]) {
+    const row = document.getElementById('klingVersionRow');
+    if (row) row.style.display = 'none';
+    _applyVideoModel(value);
+    _prevVideoModelKey = value;
+    _videoModelSwitching = false;
+    return;
+  }
+  // Kling group
+  if (KLING_GROUPS[value]) {
+    const group = KLING_GROUPS[value];
+    const sel = document.getElementById('klingVersionSelect');
+    if (sel) {
+      sel.innerHTML = group.variants.map(v =>
+        `<option value="${v.key}">${v.label}</option>`
+      ).join('');
+      sel.value = group.default;
+    }
+    const row = document.getElementById('klingVersionRow');
+    if (row) row.style.display = '';
+    _applyVideoModel(group.default);
+    _prevVideoModelKey = group.default;
+    _videoModelSwitching = false;
+    rewriteVideoPromptForModel(prevM, VIDEO_MODELS[group.default] || null);
+    return;
+  }
+  const row = document.getElementById('klingVersionRow');
+  if (row) row.style.display = 'none';
+  _applyVideoModel(value);
+  _prevVideoModelKey = value;
+  _videoModelSwitching = false;
+  rewriteVideoPromptForModel(prevM, VIDEO_MODELS[value] || null);
+}
+
+function onKlingVersionChange(variantKey) {
+  const prevM = VIDEO_MODELS[_prevVideoModelKey] || null;
+  _videoModelSwitching = true;
+  _applyVideoModel(variantKey);
+  _prevVideoModelKey = variantKey;
+  _videoModelSwitching = false;
+  rewriteVideoPromptForModel(prevM, VIDEO_MODELS[variantKey] || null);
+}
+
+
+function _setRow(id, show) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = show ? '' : 'none';
+}
+
+function _applyVideoModel(key) {
+  // ── Topaz models — separate parameter set ───────────────
+  const tm = TOPAZ_MODELS[key];
+  if (tm) {
+    document.getElementById('videoModelDesc').textContent = tm.desc;
+    // Show Topaz-specific rows, hide most normal ones
+    _setRow('topazSrcRow',       true);
+    _setRow('topazResRow',       true);
+    _setRow('topazFactorRow',    !!tm.hasFactor);
+    _setRow('topazFpsRow',       true);
+    _setRow('topazSlowmoRow',    true);
+    _setRow('topazCreativityRow',!!tm.hasCreativity);
+    // Hide incompatible rows
+    _setRow('videoResInfoRow',   false);
+    _setRow('veoResRow',         false);
+    _setRow('lumaResRow',        false);
+    _setRow('wanResRow',         false);
+    _setRow('wan27vParams',      false);
+    _setRow('pixverseParams',    false);
+    _setRow('videoAspectRow',    false);
+    _setRow('videoAudioCtrl',    false);
+    _setRow('videoDurSliderRow', false);
+    _setRow('videoDurRadioRow',  false);
+    _setRow('videoDurRow',       false);
+    _setRow('videoCfgRow',       false);
+    _setRow('videoCountRow',     false);
+    // Hide prompt, styles, camera — not used for upscale
+    _setRow('videoPromptSec',    false);
+    _setRow('videoTagsRow',      false);
+    // Hide ref section — Topaz uses its own source video slot
+    _setRow('videoRefSection',   false);
+    _setRow('videoV2VSection',   false);
+    _setRow('lumaVideoParams',   false);
+    _setRow('veoRefModeRow',     false);
+    _setRow('grokVideoParams',   false);
+    _setRow('klingVersionRow',   false); // Topaz models are directly in main select
+    // Limit slowmo options for Astra (max 8x)
+    const slowmoSel = document.getElementById('topazSlowmo');
+    if (slowmoSel) {
+      Array.from(slowmoSel.options).forEach(opt => {
+        const v = parseInt(opt.value);
+        opt.disabled = v > (tm.maxSlowmo || 16);
+        if (opt.disabled && opt.selected) { slowmoSel.value = '0'; }
+      });
+    }
+    // Update button label + time hint
+    const lbl = document.getElementById('videoGenBtnLabel');
+    if (lbl) lbl.textContent = '▶ Upscale Video';
+    const hint = document.getElementById('videoGenTimeHint');
+    if (hint) hint.textContent = 'Upscale takes 5–15 min';
+    return;
+  }
+  // ── Magnific Video models ────────────────────────────────
+  const mvm = MAGNIFIC_VIDEO_MODELS[key];
+  if (mvm) {
+    document.getElementById('videoModelDesc').textContent = mvm.desc;
+    // Reuse topazSrcRow for source video selection
+    _setRow('topazSrcRow',        true);
+    _setRow('magnificVidOpts',    true);
+    _setRow('topazResRow',        false);
+    _setRow('topazFactorRow',     false);
+    _setRow('topazFpsRow',        false);
+    _setRow('topazSlowmoRow',     false);
+    _setRow('topazCreativityRow', false);
+    _setRow('videoResInfoRow',    false);
+    _setRow('veoResRow',          false);
+    _setRow('lumaResRow',         false);
+    _setRow('wanResRow',          false);
+    _setRow('wan27vParams',       false);
+    _setRow('pixverseParams',    false);
+    _setRow('videoAspectRow',     false);
+    _setRow('videoAudioCtrl',     false);
+    _setRow('videoDurSliderRow',  false);
+    _setRow('videoDurRadioRow',   false);
+    _setRow('videoDurRow',        false);
+    _setRow('videoCfgRow',        false);
+    _setRow('videoCountRow',      false);
+    _setRow('videoPromptSec',     false);
+    _setRow('videoTagsRow',       false);
+    _setRow('videoRefSection',    false);
+    _setRow('videoV2VSection',    false);
+    _setRow('lumaVideoParams',    false);
+    _setRow('veoRefModeRow',      false);
+    _setRow('grokVideoParams',    false);
+    _setRow('klingVersionRow',    false);
+    // Show/hide mode-specific controls
+    const isCreative = mvm.mode === 'creative';
+    _setRow('magnificVidCreativeOpts', isCreative);
+    _setRow('magnificVidPrecisionOpts', !isCreative);
+    const lbl = document.getElementById('videoGenBtnLabel');
+    if (lbl) lbl.textContent = '▶ Upscale Video';
+    const hint = document.getElementById('videoGenTimeHint');
+    if (hint) hint.textContent = 'Upscale takes 2–8 min';
+    return;
+  }
+
+  // ── Hide Magnific video rows for non-Magnific models ────
+  _setRow('magnificVidOpts', false);
+
+  // ── Hide all Topaz rows for normal models ────────────────
+  _setRow('topazSrcRow',       false);
+  _setRow('topazResRow',       false);
+  _setRow('topazFactorRow',    false);
+  _setRow('topazFpsRow',       false);
+  _setRow('topazSlowmoRow',    false);
+  _setRow('topazCreativityRow',false);
+  // Restore normal rows that Topaz hides
+  _setRow('videoPromptSec',    true);
+  _setRow('videoTagsRow',      true);
+  _setRow('videoDurRow',       true);
+  _setRow('videoCfgRow',       true);
+  _setRow('videoCountRow',     true);
+  _setRow('videoAspectRow',    true);
+  // Restore button label
+  const lbl = document.getElementById('videoGenBtnLabel');
+  if (lbl) lbl.textContent = '▶ Generate Video';
+  const hint = document.getElementById('videoGenTimeHint');
+  if (hint) hint.textContent = 'Generation takes 1–5 min';
+
+  const m = VIDEO_MODELS[key];
+  if (!m) return;
+  document.getElementById('videoModelDesc').textContent = m.desc;
+
+  // Resolution info
+  const resEl = document.getElementById('videoResInfo');
+  const resInfoRow = document.getElementById('videoResInfoRow');
+  const hasResSwitcher = m.type === 'veo' || m.type === 'luma_video' || m.type === 'wan_video';
+  if (resInfoRow) resInfoRow.style.display = hasResSwitcher ? 'none' : '';
+  if (resEl && !hasResSwitcher) {
+    const isPro = key.includes('_pro');
+    resEl.textContent = isPro ? '1080p · ' + (m.refMode === 'none' ? 'T2V' : 'I2V') : '720p · ' + (m.refMode === 'none' ? 'T2V' : 'I2V');
+  }
+
+  // Ref panel — show/hide and configure based on refMode
+  const refSec = document.getElementById('videoRefSection');
+  const refLabel = document.getElementById('videoRefLabel');
+  const refNote = document.getElementById('videoRefNote');
+  const refCount = document.getElementById('videoRefCount');
+  const hasRefs = m.refMode && m.refMode !== 'none';
+  if (refSec) refSec.style.display = hasRefs ? 'block' : 'none';
+
+  // V2V Motion Control section
+  const v2vSec = document.getElementById('videoV2VSection');
+  if (v2vSec) v2vSec.style.display = m.refMode === 'video_ref' ? 'block' : 'none';
+
+  if (hasRefs) {
+    if (refLabel) refLabel.childNodes[0].textContent = m.refLabel || 'Reference images';
+    // Clip to new model's maxRefs (don't clear — preserve refs across model switch)
+    if (videoRefs.length > m.maxRefs) videoRefs = videoRefs.slice(0, m.maxRefs);
+    if (refCount) refCount.textContent = `${videoRefs.length} / ${m.maxRefs}`;
+    if (refNote && m.refMode === 'keyframe') {
+      refNote.textContent = m.type === 'pixverse_video' ? 'Add first frame, then last frame. Video morphs between them.' : 'Add start frame first, then end frame.';
+      refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'multi' && m.pixverseMode === 'fusion') {
+      refNote.innerHTML = 'Use <b>@pic1</b>, <b>@pic2</b>... in prompt to reference each image. Tag label with [bg] for backgrounds.';
+      refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'multi') {
+      refNote.textContent = `Reference subjects as @Element1, @Element2... in your prompt.`;
+      refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'wan_r2v') {
+      refNote.textContent = 'Add image/video refs. Reference them as Character1, Character2... in your prompt.';
+      refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'seedance2_r2v') {
+      refNote.innerHTML = 'Image refs → <b>[Image1]</b>, <b>[Image2]</b>... in prompt. Videos &amp; audio via panel above.';
+      refNote.style.display = 'block';
+    } else if (refNote && m.refMode === 'video_ref') {
+      refNote.textContent = 'Upload action video above for motion reference. Character image below is optional.';
+      refNote.style.display = 'block';
+    } else if (refNote) {
+      refNote.style.display = 'none';
+    }
+    renderVideoRefPanel();
+  }
+
+  // Audio checkbox
+  // Audio toggle — show only for models with audio support
+  const audioCtrl = document.getElementById('videoAudioCtrl');
+  const audioEl = document.getElementById('videoEnableAudio');
+  if (audioCtrl) audioCtrl.style.display = m.hasAudio ? '' : 'none';
+  if (audioEl) {
+    if (!m.hasAudio) audioEl.checked = false;
+  }
+  updateAudioToggleUI();
+
+  // Duration — slider for continuous, radio buttons for fixed options (older models)
+  const durSlider = document.getElementById('videoDuration');
+  const durRadioRow = document.getElementById('videoDurRadioRow');
+  if (m.durOptions) {
+    // Fixed options (e.g. 5s / 10s) — show radios, hide slider
+    const sliderRow = document.getElementById('videoDurSliderRow');
+    if (sliderRow) sliderRow.style.display = 'none';
+    if (durRadioRow) {
+      durRadioRow.style.display = '';
+      durRadioRow.innerHTML = m.durOptions.map(d =>
+        `<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:10px;font-size:11px;color:var(--dim);">
+          <input type="radio" name="videoDurFixed" value="${d}" ${d === (m.defaultDur !== undefined ? m.defaultDur : m.durOptions[0]) ? 'checked' : ''} onchange="document.getElementById('videoDuration').value=this.value;document.getElementById('videoDurVal').textContent=this.value+'s'">
+          ${d}s
+        </label>`
+      ).join('');
+      // Sync slider value to first option
+      const defDur = m.defaultDur !== undefined ? m.defaultDur : m.durOptions[0];
+      if (durSlider) { durSlider.value = defDur; durSlider.max = m.maxDur; }
+      const durValEl = document.getElementById('videoDurVal');
+      if (durValEl) durValEl.textContent = defDur + 's';
+    }
+  } else {
+    // Continuous slider
+    const sliderRow = document.getElementById('videoDurSliderRow');
+    if (sliderRow) sliderRow.style.display = '';
+    if (durRadioRow) durRadioRow.style.display = 'none';
+    if (durSlider) {
+      durSlider.max = m.maxDur;
+      if (parseInt(durSlider.value) > m.maxDur) {
+        durSlider.value = m.maxDur;
+        const durValEl = document.getElementById('videoDurVal');
+        if (durValEl) durValEl.textContent = m.maxDur + 's';
+      }
+    }
+  }
+  const durNote = document.getElementById('videoDurNote');
+  if (durNote) durNote.textContent = m.durOptions ? `Fixed: ${m.durOptions.join('s / ')}s` : (m.maxDur < 15 ? `Max ${m.maxDur}s` : '');
+
+  // Aspect ratio: hide for I2V single (inferred from image) — but show for Veo and Luma (T2V/I2V toggle)
+  const arRow = document.getElementById('videoAspectRow');
+  if (arRow) arRow.style.display = (m.refMode === 'single' || m.refMode === 'single_end') && m.type !== 'veo' && m.type !== 'luma_video' ? 'none' : '';
+
+  // Veo resolution selector — show only for Veo models, rebuild options per model
+  const veoResRow = document.getElementById('veoResRow');
+  const veoResSel = document.getElementById('veoResolution');
+  if (veoResRow) veoResRow.style.display = m.type === 'veo' ? '' : 'none';
+  if (veoResSel && m.type === 'veo') {
+    const resLabels = {
+      '720p':  '720p — HD Standard',
+      '1080p': '1080p — Full HD',
+      '4k':    '4K — Ultra HD  ·  $$',
+    };
+    const curRes = veoResSel.value;
+    veoResSel.innerHTML = (m.resolutions || ['720p', '1080p']).map(r =>
+      `<option value="${r}">${resLabels[r] || r}</option>`
+    ).join('');
+    // Restore previous selection if still valid, else default to 1080p
+    if (m.resolutions?.includes(curRes)) veoResSel.value = curRes;
+    else veoResSel.value = '1080p';
+    // Sync duration radio states for current resolution (enables/disables 4s/6s)
+    onVeoResolutionChange();
+  }
+
+  // Veo ref mode selector
+  const veoRefModeRow = document.getElementById('veoRefModeRow');
+  if (veoRefModeRow) veoRefModeRow.style.display = m.type === 'veo' ? '' : 'none';
+  if (m.type === 'veo') {
+    onVeoRefModeChange(document.getElementById('veoRefMode')?.value || 't2v');
+  }
+
+  // Grok Video params
+  const grokVideoParams = document.getElementById('grokVideoParams');
+  if (grokVideoParams) grokVideoParams.style.display = m.type === 'grok_video' ? '' : 'none';
+  if (m.type === 'grok_video') {
+    onGrokVideoModeChange(document.getElementById('grokVideoMode')?.value || 't2v');
+  }
+
+  // Luma Ray3 controls — show/hide panel + configure
+  // Ray2/Ray2-Flash: only resolution selector, no special panel
+  // Ray3+: full controls (loop, colorMode, charRef)
+  const isLumaRay3 = m.type === 'luma_video' && (m.modelId?.includes('ray-3') || m.modelId?.includes('ray-hdr'));
+  const lumaPanel = document.getElementById('lumaVideoParams');
+  if (lumaPanel) lumaPanel.style.display = isLumaRay3 ? '' : 'none';
+  if (m.type === 'luma_video') {
+    // Show ref panel for keyframes
+    const refSec = document.getElementById('videoRefSection');
+    const refLabel = document.getElementById('videoRefLabel');
+    const refCount = document.getElementById('videoRefCount');
+    if (refSec) refSec.style.display = 'block';
+    if (refLabel) refLabel.childNodes[0].textContent = 'Keyframes (optional)';
+    if (refCount) refCount.textContent = `${videoRefs.length} / 2`;
+    // Rebuild resolution select
+    const lumaResSel = document.getElementById('lumaResolution');
+    if (lumaResSel) {
+      const lumaResLabels = { '540p': '540p', '720p': '720p', '1080p': '1080p — native', '4k': '4K — upscaled' };
+      lumaResSel.innerHTML = (m.resolutions || ['720p', '1080p']).map(r =>
+        `<option value="${r}"${r === '1080p' ? ' selected' : ''}>${lumaResLabels[r] || r}</option>`
+      ).join('');
+    }
+    // Show resolution row (always for luma)
+    const lumaResRow = document.getElementById('lumaResRow');
+    if (lumaResRow) lumaResRow.style.display = '';
+    if (isLumaRay3) {
+      // HDR row + char ref
+      const hdrRow = document.getElementById('lumaHdrRow');
+      if (hdrRow) hdrRow.style.display = m.supportsHdr ? '' : 'none';
+      const charRow = document.getElementById('lumaCharRefRow');
+      if (charRow) charRow.style.display = m.supportsCharRef ? '' : 'none';
+    }
+    renderVideoRefPanel();
+  } else {
+    const lumaResRow = document.getElementById('lumaResRow');
+    if (lumaResRow) lumaResRow.style.display = 'none';
+  }
+
+  // WAN resolution row — shown for all wan_video models
+  const wanResRow = document.getElementById('wanResRow');
+  if (wanResRow) wanResRow.style.display = m.type === 'wan_video' ? '' : 'none';
+
+  const wan27vParams = document.getElementById('wan27vParams');
+  if (wan27vParams) wan27vParams.style.display = m.type === 'wan27_video' ? '' : 'none';
+  // Extend video row: only I2V (single_end refMode)
+  const wan27vExtendRow = document.getElementById('wan27vExtendRow');
+  if (wan27vExtendRow) wan27vExtendRow.style.display = (m.type === 'wan27_video' && m.refMode === 'single_end') ? '' : 'none';
+
+  // wan27_video has own params panel → hide generic duplicate rows
+  if (m.type === 'wan27_video') {
+    _setRow('videoResInfoRow', false);
+    _setRow('videoDurRow',     false);
+    _setRow('videoCfgRow',     false);
+    _setRow('videoCountRow',   false);
+  }
+
+  const wan27eSrcRow  = document.getElementById('wan27eSrcRow');
+  const wan27eParams  = document.getElementById('wan27eParams');
+  const isWan27e = m.type === 'wan27e_video';
+  if (wan27eSrcRow) wan27eSrcRow.style.display = isWan27e ? '' : 'none';
+  if (wan27eParams) wan27eParams.style.display  = isWan27e ? '' : 'none';
+  if (isWan27e) {
+    _setRow('videoResInfoRow', false);
+    _setRow('videoDurRow',     false);
+    _setRow('videoCfgRow',     false);
+    _setRow('videoCountRow',   false);
+  }
+
+  // PixVerse params panel
+  const pixverseParams = document.getElementById('pixverseParams');
+  const isPixverse = m.type === 'pixverse_video';
+  if (pixverseParams) pixverseParams.style.display = isPixverse ? '' : 'none';
+  if (isPixverse) {
+    _setRow('videoCfgRow',     false);
+    // Rebuild quality select
+    const qSel = document.getElementById('pixverseQuality');
+    if (qSel && m.qualityOptions) {
+      qSel.innerHTML = m.qualityOptions.map(q =>
+        `<option value="${q}"${q === '720p' ? ' selected' : ''}>${q}</option>`
+      ).join('');
+    }
+    // Show/hide multi-clip checkbox (only for models that support it)
+    const mcRow = document.getElementById('pixverseMultiClip')?.closest('.ctrl');
+    if (mcRow) mcRow.style.display = m.supportsMultiClip ? '' : 'none';
+  }
+
+  // Seedance 2.0 params panel
+  const sd2Params = document.getElementById('seedance2Params');
+  const isSd2 = m.type === 'seedance2_video';
+  if (sd2Params) sd2Params.style.display = isSd2 ? '' : 'none';
+  if (isSd2) {
+    _setRow('videoCfgRow',     false);
+    _setRow('videoDurRow',     false);
+    _setRow('videoResInfoRow', false);
+    _setRow('videoCountRow',   false);
+    // R2V video/audio slots: only for seedance2_r2v refMode
+    const isR2V = m.refMode === 'seedance2_r2v';
+    const sd2R2VSection = document.getElementById('sd2R2VSection');
+    if (sd2R2VSection) sd2R2VSection.style.display = isR2V ? '' : 'none';
+  }
+
+  updateVideoResInfo();
+}
+
+// ── Veo ref mode change — update ref panel accordingly ───
+function onVeoRefModeChange(mode) {
+  const refSec = document.getElementById('videoRefSection');
+  const refLabel = document.getElementById('videoRefLabel');
+  const refCount = document.getElementById('videoRefCount');
+  const refNote = document.getElementById('veoRefNote');
+  const needsRefs = mode !== 't2v';
+  if (refSec) refSec.style.display = needsRefs ? 'block' : 'none';
+
+  const maxRefs = mode === 'frames' ? 2 : mode === 'ingredients' ? 3 : 1;
+  // Clip refs to new mode's maxRefs (don't clear — preserve refs when switching modes)
+  if (videoRefs.length > maxRefs) videoRefs = videoRefs.slice(0, maxRefs);
+  if (refLabel) refLabel.childNodes[0].textContent =
+    mode === 'i2v'          ? 'Start frame' :
+    mode === 'frames'       ? 'Start frame + End frame' :
+    mode === 'ingredients'  ? 'Reference images (up to 3)' : '';
+  if (refCount) refCount.textContent = `${videoRefs.length} / ${maxRefs}`;
+
+  const noteText =
+    mode === 'frames'      ? 'Add start frame first, then end frame.' :
+    mode === 'ingredients' ? 'Up to 3 asset images — character, object, or style.' : '';
+  if (refNote) { refNote.textContent = noteText; refNote.style.display = noteText ? 'block' : 'none'; }
+
+  // Patch VIDEO_MODELS entry so ref panel uses correct maxRefs
+  const modelKey = getActiveVideoModelKey();
+  const m = VIDEO_MODELS[modelKey];
+  if (m?.type === 'veo') {
+    m.refMode = needsRefs ? 'single' : 'none';
+    m.maxRefs = maxRefs;
+  }
+  renderVideoRefPanel();
+  updateVideoResInfo();
+}
+
+function onVeoResolutionChange() {
+  const sel = document.getElementById('veoResolution');
+  const note = document.getElementById('veoResNote');
+  const res = sel?.value || '720p';
+  if (note) note.style.display = res === '4k' ? 'block' : 'none';
+  // 1080p and 4K require 8s duration — disable shorter options, force 8s
+  const needsForce8 = (res === '1080p' || res === '4k');
+  document.querySelectorAll('input[name="videoDurFixed"]').forEach(r => {
+    const v = parseInt(r.value);
+    r.disabled = needsForce8 && v < 8;
+    if (r.disabled && r.checked) {
+      r.checked = false;
+      const r8 = document.querySelector('input[name="videoDurFixed"][value="8"]');
+      if (r8) { r8.checked = true; r8.dispatchEvent(new Event('change')); }
+    }
+    const lbl = r.closest('label');
+    if (lbl) lbl.style.opacity = r.disabled ? '0.35' : '1';
+  });
+  updateVideoResInfo();
+}
+
+function updateVideoResInfo() {
+  const modelKey = getActiveVideoModelKey();
+  const m = VIDEO_MODELS[modelKey];
+  const resEl = document.getElementById('videoResInfo');
+  const resInfoRow = document.getElementById('videoResInfoRow');
+  if (!m) return;
+
+  const hasResSwitcher = m.type === 'veo' || m.type === 'luma_video' || m.type === 'wan_video';
+  const hasOwnPanel    = m.type === 'wan27_video' || m.type === 'wan27e_video' || m.type === 'seedance2_video';
+  if (resInfoRow) resInfoRow.style.display = (hasResSwitcher || hasOwnPanel) ? 'none' : '';
+  if (!resEl || hasResSwitcher || hasOwnPanel) return;
+
+  if (m.type === 'pixverse_video') {
+    const q = document.getElementById('pixverseQuality')?.value || '720p';
+    const aspect = document.getElementById('videoAspectRatio')?.value || '16:9';
+    resEl.textContent = `${q} · ${aspect}`;
+  } else if (m.type === 'veo') {
+    const res = document.getElementById('veoResolution')?.value || '720p';
+    const mode = videoRefs.length > 0 ? 'I2V' : 'T2V';
+    resEl.textContent = `${res} · ${mode} · Google`;
+  } else {
+    const aspect = document.getElementById('videoAspectRatio')?.value || '16:9';
+    const isPro = modelKey.includes('_pro');
+    resEl.textContent = `${isPro ? '1080p' : '720p'} · ${aspect}`;
+  }
+}
+
+function initVideoCountHighlight() {
+  document.querySelectorAll('input[name="videoCount"]').forEach(r => {
+    r.addEventListener('change', updateVideoCountHighlight);
+  });
+  updateVideoCountHighlight();
+}
+
+function updateVideoCountHighlight() {
+  document.querySelectorAll('input[name="videoCount"]').forEach(r => {
+    const lbl = r.closest('label');
+    if (lbl) {
+      lbl.style.borderColor = r.checked ? 'var(--accent)' : 'var(--border)';
+      lbl.style.color = r.checked ? 'var(--accent)' : 'var(--dim)';
+    }
+  });
+}
+
+async function callVeoVideo(job) {
+  const { model, prompt, aspectRatio, googleKey, veoResolution = '720p',
+          veoRefMode = 't2v', veoDuration = 8 } = job;
+
+  const BASE = 'https://generativelanguage.googleapis.com/v1beta';
+  const headers = { 'x-goog-api-key': googleKey, 'Content-Type': 'application/json' };
+
+  // Build instance based on veoRefMode
+  const instance = { prompt };
+
+  if (veoRefMode === 'i2v' && videoRefs.length > 0) {
+    const r0 = videoRefs[0];
+    const asset = r0.assetId ? await dbGet('assets', r0.assetId) : null;
+    const imgData = asset?.imageData || r0.data;
+    const mime = asset?.mimeType || r0.mimeType || 'image/jpeg';
+    if (imgData) instance.image = { bytesBase64Encoded: imgData, mimeType: mime };
+  } else if (veoRefMode === 'frames') {
+    if (videoRefs[0]) {
+      const r0 = videoRefs[0];
+      const a0 = r0.assetId ? await dbGet('assets', r0.assetId) : null;
+      const d0 = a0?.imageData || r0.data;
+      if (d0) instance.image = { bytesBase64Encoded: d0, mimeType: a0?.mimeType || r0.mimeType || 'image/jpeg' };
+    }
+    if (videoRefs[1]) {
+      const r1 = videoRefs[1];
+      const a1 = r1.assetId ? await dbGet('assets', r1.assetId) : null;
+      const d1 = a1?.imageData || r1.data;
+      if (d1) instance.lastFrame = { bytesBase64Encoded: d1, mimeType: a1?.mimeType || r1.mimeType || 'image/jpeg' };
+    }
+  } else if (veoRefMode === 'ingredients' && videoRefs.length > 0) {
+    const loaded = await Promise.all(videoRefs.slice(0, 3).map(async r => {
+      if (r.assetId) return dbGet('assets', r.assetId);
+      if (r.data) return { imageData: r.data, mimeType: r.mimeType || 'image/jpeg' };
+      return null;
+    }));
+    instance.referenceImages = loaded
+      .filter(a => a?.imageData)
+      .map(a => ({
+        image: { inlineData: { mimeType: a.mimeType || 'image/jpeg', data: a.imageData } },
+        referenceType: 'asset',
+      }));
+  }
+
+  // Parameters — NO generateAudio (unsupported, Veo always generates audio automatically)
+  // Constraint: 1080p and 4K require 8s duration (API returns 400 otherwise)
+  const effectiveDuration = (veoResolution === '1080p' || veoResolution === '4k') ? 8 : veoDuration;
+  const parameters = {
+    aspectRatio,
+    durationSeconds: effectiveDuration,
+    resolution: veoResolution,
+    sampleCount: 1,
+  };
+
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  const submitRes = await fetch(`${BASE}/models/${model.modelId}:predictLongRunning`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ instances: [instance], parameters }),
+  });
+  if (!submitRes.ok) {
+    let errText = '';
+    try { errText = await submitRes.text(); } catch(e) {}
+    throw new Error(`Veo submit ${submitRes.status}: ${errText.slice(0, 300)}`);
+  }
+  const submitData = await submitRes.json();
+  const operationName = submitData.name;
+  if (!operationName) throw new Error(`No operation name: ${JSON.stringify(submitData).slice(0, 200)}`);
+
+  job.status = 'queued';
+  renderVideoQueue();
+  updateVideoPlaceholderStatus(job, 'IN QUEUE…');
+
+  const POLL_INTERVAL = 10000;
+  const deadline = Date.now() + 15 * 60 * 1000;
+
+  await new Promise((resolve, reject) => {
+    const poll = async () => {
+      if (Date.now() > deadline) { reject(new Error('Veo timeout after 15 minutes')); return; }
+      if (job.cancelled) { reject(new Error('Cancelled')); return; }
+      try {
+        const pollRes = await fetch(`${BASE}/${operationName}`, { headers: { 'x-goog-api-key': googleKey } });
+        if (!pollRes.ok) { setTimeout(poll, POLL_INTERVAL); return; }
+        const pollData = await pollRes.json();
+        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+        if (pollData.done) {
+          if (pollData.error) { reject(new Error(pollData.error.message || 'Veo generation failed')); return; }
+          resolve(); return;
+        }
+        job.status = 'running';
+        renderVideoQueue();
+        updateVideoPlaceholderStatus(job, `GENERATING · ${elapsed}s`);
+        setTimeout(poll, POLL_INTERVAL);
+      } catch(e) { setTimeout(poll, POLL_INTERVAL); }
+    };
+    setTimeout(poll, POLL_INTERVAL);
+  });
+
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+  const finalRes = await fetch(`${BASE}/${operationName}`, { headers: { 'x-goog-api-key': googleKey } });
+  if (!finalRes.ok) throw new Error(`Veo result fetch failed: ${finalRes.status}`);
+  const finalData = await finalRes.json();
+
+  const videoUri = finalData.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+  if (!videoUri) throw new Error(`No video URI in Veo result: ${JSON.stringify(finalData).slice(0, 300)}`);
+
+  const videoRes = await fetch(videoUri, { headers: { 'x-goog-api-key': googleKey } });
+  if (!videoRes.ok) throw new Error(`Veo video download failed: ${videoRes.status}`);
+  const videoArrayBuffer = await videoRes.arrayBuffer();
+
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey: job.modelKey, prompt: job.prompt,
+    params: { duration: effectiveDuration, aspectRatio: job.aspectRatio, resolution: veoResolution, veoRefMode },
+    duration: effectiveDuration,
+    cdnUrl: videoUri,
+  }, job, ['google', model.modelId, 1, effectiveDuration]);
+  toast(`Veo video generated · ${elapsed}s`, 'ok');
+}
+
+//       GIS downloads MP4 directly from Luma CDN
+async function callLumaVideo(job) {
+  const {
+    model, modelKey, prompt, aspectRatio, lumaKey, proxyUrl, targetFolder,
+    lumaResolution, lumaDurationSel, lumaLoop, lumaColorMode, lumaCharRefAssetId,
+    videoRefsSnapshot,
+  } = job;
+
+  if (!lumaKey)  throw new Error('Missing Luma API key');
+  if (!proxyUrl) throw new Error('Missing proxy URL');
+
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'UPLOADING REFS…');
+
+  // Load keyframe images from assets DB
+  const refs = videoRefs; // live refs at time of submit
+  const frame0Asset = refs[0]?.assetId ? await dbGet('assets', refs[0].assetId) : null;
+  const frame1Asset = refs[1]?.assetId ? await dbGet('assets', refs[1].assetId) : null;
+  const charAsset   = lumaCharRefAssetId ? await dbGet('assets', lumaCharRefAssetId) : null;
+
+  // Build submit payload
+  const submitBody = {
+    luma_key:     lumaKey,
+    model:        model.modelId,
+    prompt,
+    aspect_ratio: aspectRatio,
+    resolution:   lumaResolution || '1080p',
+    duration:     lumaDurationSel || '5s',
+    loop:         !!lumaLoop,
+  };
+  if (frame0Asset?.imageData) {
+    submitBody.frame0_b64  = frame0Asset.imageData;
+    submitBody.frame0_mime = frame0Asset.mimeType || 'image/jpeg';
+  }
+  if (frame1Asset?.imageData) {
+    submitBody.frame1_b64  = frame1Asset.imageData;
+    submitBody.frame1_mime = frame1Asset.mimeType || 'image/jpeg';
+  }
+  if (charAsset?.imageData) {
+    submitBody.char_ref_b64  = charAsset.imageData;
+    submitBody.char_ref_mime = charAsset.mimeType || 'image/jpeg';
+  }
+  // HDR / EXR — Ray3 only, T2V and I2V only (not if Modify)
+  if (model.supportsHdr && lumaColorMode && lumaColorMode !== 'sdr') {
+    submitBody.color_mode = lumaColorMode;
+  }
+
+  // Submit to Worker
+  const submitResp = await fetch(`${proxyUrl}/luma/video/submit`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(submitBody),
+  });
+  if (!submitResp.ok) {
+    const err = await submitResp.json().catch(() => ({}));
+    throw new Error(`Luma submit ${submitResp.status}: ${err.detail || err.error || submitResp.statusText}`);
+  }
+  const { generation_id } = await submitResp.json();
+  if (!generation_id) throw new Error('Luma: no generation_id from Worker');
+
+  job.status = 'generating';
+  updateVideoPlaceholderStatus(job, 'GENERATING…');
+
+  // Poll for completion (GIS polls, Worker just does single status checks)
+  const POLL_MS = 5000;
+  const TIMEOUT = 20 * 60 * 1000; // 20 minutes
+  const deadline = Date.now() + TIMEOUT;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+
+    const statusResp = await fetch(`${proxyUrl}/luma/video/status`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ luma_key: lumaKey, generation_id }),
+    });
+    if (!statusResp.ok) {
+      const err = await statusResp.json().catch(() => ({}));
+      throw new Error(`Luma status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+    }
+    const status = await statusResp.json();
+
+    if (status.status === 'failed') {
+      throw new Error(`Luma generation failed: ${status.error || 'unknown'}`);
+    }
+
+    if (status.status === 'done') {
+      if (!status.video_url) throw new Error('Luma: done but no video_url');
+
+      job.status = 'fetching';
+      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+      // Download MP4 directly from Luma CDN (Worker never downloads video)
+      const videoRes = await fetch(status.video_url);
+      if (!videoRes.ok) throw new Error(`Luma video download failed (${videoRes.status})`);
+      const videoArrayBuffer = await videoRes.arrayBuffer();
+      const durSec = parseInt(lumaDurationSel || '5');
+
+      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+        model: model.name, modelKey, prompt,
+        params: { aspectRatio, resolution: lumaResolution, duration: lumaDurationSel, loop: lumaLoop, colorMode: lumaColorMode },
+        duration: durSec,
+        cdnUrl: status.video_url,
+        exrUrl: status.exr_url || null,
+        usedVideoRefs: videoRefsSnapshot || [],
+      }, job, ['luma', model.modelId, 1, durSec]);
+      const exrNote = status.exr_url ? ' · EXR ↓' : '';
+      toast(`Ray3 video generated · ${elapsed}s${exrNote}`, 'ok');
+      return;
+    }
+    // status === 'pending' → continue polling
+  }
+
+  throw new Error('Luma video timeout — generation did not complete within 20 minutes');
+}
+
+// ── PixVerse C1 video generation ─────────────────────────
+// Flow: (I2V: GIS → Worker POST /pixverse/upload-image → img_id)
+//       GIS → Worker POST /pixverse/t2v or /pixverse/i2v → { video_id }
+//       GIS polls → Worker POST /pixverse/status → { status, video_url }
+//       GIS downloads MP4 directly from PixVerse CDN
+// Helper: upload a single image to PixVerse, returns img_id
+async function _pixverseUpload(proxyUrl, pixverseKey, imgData, mimeType) {
+  const resp = await fetch(`${proxyUrl}/pixverse/upload-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: pixverseKey, image_base64: imgData, mime_type: mimeType }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(`PixVerse upload ${resp.status}: ${err.ErrMsg || err.error || resp.statusText}`);
+  }
+  const data = await resp.json();
+  const imgId = data.Resp?.img_id;
+  if (!imgId) throw new Error('PixVerse: no img_id — ' + JSON.stringify(data));
+  return imgId;
+}
+
+async function callPixverseVideo(job) {
+  const { model, modelKey, prompt, duration, aspectRatio, enableAudio, pixverseKey, proxyUrl } = job;
+
+  if (!pixverseKey) throw new Error('Missing PixVerse API key');
+  if (!proxyUrl)    throw new Error('Missing proxy URL');
+
+  const quality   = document.getElementById('pixverseQuality')?.value || '720p';
+  const negPrompt = document.getElementById('pixverseNegPrompt')?.value?.trim() || '';
+  const seedStr   = document.getElementById('pixverseSeed')?.value?.trim();
+  const seed      = seedStr ? parseInt(seedStr) : undefined;
+  const multiClip = document.getElementById('pixverseMultiClip')?.checked || false;
+  const offPeak   = document.getElementById('pixverseOffPeak')?.checked || false;
+  const durNum    = Math.max(model.minDur || 1, Math.min(model.maxDur || 15, parseInt(duration)));
+  const pvMode    = model.pixverseMode || (model.refMode === 'single' ? 'i2v' : 't2v');
+  const pvModelId = model.modelId || 'c1';
+
+  // Build negative prompt — inject anti-cut phrase when multi-clip OFF and model doesn't support the switch
+  let finalNeg = negPrompt;
+  if (!multiClip && !model.supportsMultiClip && pvMode === 't2v' && !negPrompt.includes('no cuts')) {
+    finalNeg = finalNeg ? finalNeg + ', single continuous shot, no cuts, no transitions' : 'single continuous shot, no cuts, no transitions';
+  }
+
+  // Shared fields for all modes
+  const shared = {};
+  if (finalNeg) shared.negative_prompt = finalNeg;
+  if (seed != null) shared.seed = seed;
+  // Multi-clip: only send for models that support it. API is INVERTED: true=single, false=multi
+  if (model.supportsMultiClip) {
+    shared.generate_multi_clip_switch = !multiClip; // invert: checkbox ON (want multi) → send false (API: multi)
+  }
+  shared.generate_audio_switch = !!enableAudio;
+  if (offPeak) shared.off_peak_mode = true;
+
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  let video_id;
+  let endpoint;
+
+  // ── Load ref image data from assets DB ──
+  async function loadRefData(refIdx) {
+    const ref = videoRefs[refIdx];
+    if (!ref?.assetId) throw new Error(`PixVerse: ref ${refIdx + 1} missing`);
+    const asset = await dbGet('assets', ref.assetId);
+    if (!asset?.imageData) throw new Error(`Asset not found for ref ${refIdx + 1}`);
+    return { imgData: asset.imageData, mimeType: asset.mimeType || ref.mimeType || 'image/png', label: ref.userLabel || ref.autoName || `ref${refIdx + 1}` };
+  }
+
+  if (pvMode === 'transition') {
+    // ── Transition: upload 2 images → first_frame_img + last_frame_img ──
+    if (videoRefs.length < 2) throw new Error('Transition requires 2 images (start + end frame)');
+    updateVideoPlaceholderStatus(job, 'UPLOADING FRAMES…');
+    const r0 = await loadRefData(0);
+    const r1 = await loadRefData(1);
+    const imgId0 = await _pixverseUpload(proxyUrl, pixverseKey, r0.imgData, r0.mimeType);
+    const imgId1 = await _pixverseUpload(proxyUrl, pixverseKey, r1.imgData, r1.mimeType);
+
+    endpoint = '/pixverse/transition';
+    const payload = { apiKey: pixverseKey, prompt, model: pvModelId, duration: durNum, quality, first_frame_img: imgId0, last_frame_img: imgId1, ...shared };
+    updateVideoPlaceholderStatus(job, 'SUBMITTING TRANSITION…');
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse transition ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+
+  } else if (pvMode === 'fusion') {
+    // ── Fusion: upload N images → image_references array ──
+    if (videoRefs.length === 0) throw new Error('Fusion requires at least 1 reference image');
+    updateVideoPlaceholderStatus(job, 'UPLOADING REFS…');
+    const imageRefs = [];
+    for (let i = 0; i < videoRefs.length; i++) {
+      const r = await loadRefData(i);
+      const imgId = await _pixverseUpload(proxyUrl, pixverseKey, r.imgData, r.mimeType);
+      const label = r.label.toLowerCase();
+      const type = (label.includes('[bg]') || label.includes('background') || label.includes('scene')) ? 'background' : 'subject';
+      // PixVerse ref_name: simple alphanumeric only — use pic1, pic2... for reliability
+      const refName = `pic${i + 1}`;
+      imageRefs.push({ type, img_id: imgId, ref_name: refName });
+    }
+
+    // Auto-rewrite prompt: replace @RefLabel, @autoName, @ElementN with @picN
+    let fusionPrompt = prompt;
+    for (let i = 0; i < videoRefs.length; i++) {
+      const ref = videoRefs[i];
+      const picTag = `@pic${i + 1}`;
+      // Replace known GIS mention patterns: @Ref_XXX, @UserLabel, @ElementN
+      if (ref.userLabel) fusionPrompt = fusionPrompt.replace(new RegExp('@' + ref.userLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\// __GIS_JS__'), 'gi'), picTag);
+      if (ref.autoName)  fusionPrompt = fusionPrompt.replace(new RegExp('@' + ref.autoName.replace(/[.*+?^${}()|[\]\\]/g, '\\// __GIS_JS__'), 'gi'), picTag);
+      fusionPrompt = fusionPrompt.replace(new RegExp(`@Element${i + 1}\\b`, 'gi'), picTag);
+      fusionPrompt = fusionPrompt.replace(new RegExp(`@Image${i + 1}\\b`, 'gi'), picTag);
+    }
+    // If no @picN found in prompt at all, append generic references
+    if (!fusionPrompt.includes('@pic')) {
+      const refTags = imageRefs.map(r => `@${r.ref_name}`).join(' and ');
+      fusionPrompt = fusionPrompt + ` featuring ${refTags}`;
+    }
+
+    endpoint = '/pixverse/fusion';
+    const payload = { apiKey: pixverseKey, image_references: imageRefs, prompt: fusionPrompt, model: pvModelId, duration: durNum, quality, aspect_ratio: aspectRatio, ...shared };
+    updateVideoPlaceholderStatus(job, 'SUBMITTING FUSION…');
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse fusion ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+
+  } else if (pvMode === 'i2v' && videoRefs.length > 0) {
+    // ── I2V: upload 1 image → img_id ──
+    updateVideoPlaceholderStatus(job, 'UPLOADING IMAGE…');
+    const r0 = await loadRefData(0);
+    const imgId = await _pixverseUpload(proxyUrl, pixverseKey, r0.imgData, r0.mimeType);
+
+    endpoint = '/pixverse/i2v';
+    const payload = { apiKey: pixverseKey, prompt, img_id: imgId, model: pvModelId, duration: durNum, quality, ...shared };
+    updateVideoPlaceholderStatus(job, 'SUBMITTING I2V…');
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse I2V ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+
+  } else {
+    // ── T2V ──
+    endpoint = '/pixverse/t2v';
+    const payload = { apiKey: pixverseKey, prompt, model: pvModelId, duration: durNum, quality, aspect_ratio: aspectRatio, ...shared };
+    const resp = await fetch(`${proxyUrl}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(`PixVerse T2V ${resp.status}: ${e.ErrMsg || e.error || resp.statusText}`); }
+    const d = await resp.json();
+    video_id = d.Resp?.video_id;
+    if (!video_id) throw new Error('PixVerse: no video_id — ' + JSON.stringify(d));
+  }
+
+  // ── Poll for completion ──
+  job.status = 'generating';
+  updateVideoPlaceholderStatus(job, offPeak ? 'GENERATING (off-peak)…' : 'GENERATING…');
+
+  const POLL_MS = offPeak ? 15000 : 5000;
+  const TIMEOUT = (offPeak ? 120 : 20) * 60 * 1000;
+  const deadline = Date.now() + TIMEOUT;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+
+    const statusResp = await fetch(`${proxyUrl}/pixverse/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: pixverseKey, video_id }),
+    });
+    if (!statusResp.ok) {
+      const err = await statusResp.json().catch(() => ({}));
+      throw new Error(`PixVerse status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+    }
+    const sData = await statusResp.json();
+    const resp = sData.Resp || sData;
+    const st = resp.status;
+
+    // PixVerse statuses: 1=done, 2/8=failed, 3/5=processing, 7=moderation, 9=queued
+    if (st === 2 || st === 8) throw new Error(`PixVerse generation failed: ${resp.error_message || resp.err_msg || 'unknown'}`);
+    if (st === 7) throw new Error('PixVerse: content moderation failed — modify your prompt and retry');
+
+    if (st === 1) {
+      const videoUrl = resp.url || resp.video_url;
+      if (!videoUrl) throw new Error('PixVerse: done but no video URL');
+
+      job.status = 'fetching';
+      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+      const videoRes = await fetch(videoUrl);
+      if (!videoRes.ok) throw new Error(`PixVerse video download failed (${videoRes.status})`);
+      const videoArrayBuffer = await videoRes.arrayBuffer();
+
+      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+        model: model.name, modelKey, prompt,
+        params: { duration: durNum, aspectRatio, quality, enableAudio, multiClip, offPeak, negativePrompt: finalNeg, mode: pvMode },
+        duration: durNum,
+        cdnUrl: videoUrl,
+        usedVideoRefs: job.videoRefsSnapshot || [],
+      }, job, ['pixverse', '_pixverse_video', 1, durNum]);
+      toast(`PixVerse C1 ${pvMode.toUpperCase()} generated · ${elapsed}s`, 'ok');
+      return;
+    }
+    // st === 3, 5, 9 → continue polling
+  }
+
+  throw new Error(`PixVerse video timeout — generation did not complete within ${offPeak ? '2 hours' : '20 minutes'}`);
+}
+
+// T2V i I2V — sdílí stejnou funkci, falEndpoint rozlišuje
+async function callWan27Video(job) {
+  const { model, modelKey, prompt, targetFolder, falKey,
+          videoRefsSnapshot, wan27vSnap } = job;
+
+  if (!falKey) throw new Error('fal.ai API key missing. Add it in Setup tab.');
+
+  const endpoint     = model.falEndpoint || 'fal-ai/wan/v2.7/image-to-video';
+  const resolution   = wan27vSnap?.resolution    || '1080p';
+  const duration     = wan27vSnap?.duration      || 5;
+  const negPrompt    = wan27vSnap?.negPrompt     || '';
+  const promptExpand = wan27vSnap?.promptExpand  !== false;
+  const safety       = wan27vSnap?.safety        !== false;
+  const seed         = wan27vSnap?.seed          ? parseInt(wan27vSnap.seed) : undefined;
+  const audioUrl     = wan27vSnap?.audioUrl      || null;
+  const extendVideoId = wan27vSnap?.extendVideoId || null;
+  const isT2V        = model.refMode === 'none';
+  const isR2V        = model.refMode === 'wan_r2v';
+
+  const payload = {
+    prompt:                   prompt || '',
+    resolution,
+    enable_prompt_expansion:  promptExpand,
+    enable_safety_checker:    safety,
+  };
+  // R2V has no duration field — only T2V and I2V accept duration
+  if (!isR2V) payload.duration = duration; // WAN 2.7 requires integer (not string like WAN 2.6)
+  if (negPrompt)          payload.negative_prompt = negPrompt;
+  if (seed !== undefined) payload.seed = seed;
+  if (audioUrl)           payload.audio_url = audioUrl;
+
+  if (isR2V) {
+    // R2V: load character refs → reference_image_urls[] / reference_video_urls[]
+    // videoRefsSnapshot contains image assets (pre-loaded with imageData)
+    const imageRefs = [], videoRefs_ = [];
+    for (const snap of (videoRefsSnapshot || [])) {
+      if (snap.mimeType?.startsWith('video/')) {
+        // Video ref — encode as data URI
+        if (snap.imageData) videoRefs_.push(`data:${snap.mimeType};base64,${snap.imageData}`);
+      } else {
+        // Image ref
+        let imgData = snap.imageData;
+        if (!imgData && snap.assetId) {
+          const asset = await dbGet('assets', snap.assetId);
+          imgData = asset?.imageData;
+        }
+        if (imgData) {
+          const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+          imageRefs.push(`data:${compressed.mimeType};base64,${compressed.data}`);
+        }
+      }
+    }
+    if (imageRefs.length > 0) payload.reference_image_urls = imageRefs;
+    if (videoRefs_.length > 0) payload.reference_video_urls = videoRefs_;
+
+  } else if (!isT2V) {
+    // I2V: load refs as data URI
+    const loadRef = async (snap) => {
+      if (!snap) return null;
+      let imgData = snap.imageData;
+      if (!imgData && snap.assetId) {
+        const asset = await dbGet('assets', snap.assetId);
+        imgData = asset?.imageData;
+      }
+      if (!imgData) return null;
+      const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+      return `data:${compressed.mimeType};base64,${compressed.data}`;
+    };
+    const firstFrameUri = await loadRef(videoRefsSnapshot?.[0]);
+    const lastFrameUri  = await loadRef(videoRefsSnapshot?.[1]);
+    if (!firstFrameUri) throw new Error('Start frame (first ref) required for WAN 2.7 I2V.');
+    payload.image_url = firstFrameUri;
+    if (lastFrameUri) payload.end_image_url = lastFrameUri;
+
+    // Extend video — optional source video to continue (encodes as data URI)
+    if (extendVideoId) {
+      const extFull = await dbGet('videos', extendVideoId).catch(() => null);
+      if (extFull?.videoData) {
+        payload.video_url = `data:video/mp4;base64,${_arrayBufferToBase64(extFull.videoData)}`;
+      }
+    }
+  }
+
+  // Submit, poll, download via shared helper
+  console.log('[wan27] submit →', endpoint, '| resolution:', resolution, '| duration:', duration);
+  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7', timeoutMin: 25 });
+
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt: job.prompt,
+    params: { duration, resolution, seed: seed || null, negPrompt, promptExpand },
+    duration,
+  }, job, ['fal', resolution === '1080p' ? '_wan27_1080p' : '_wan27_720p', 1, duration]);
+  toast(`WAN 2.7 done · ${elapsed}s`, 'ok');
+}
+
+// ── WAN 2.7 Video Edit — fal.ai queue (přímé, bez proxy) ──
+// fal-ai/wan/v2.7/edit-video
+// Source video: ANY gallery video → base64 data URI (no CDN URL dependency)
+// Ref image: optional, base64 data URI
+async function callWan27eVideo(job) {
+  const { model, modelKey, prompt, targetFolder, falKey,
+          videoRefsSnapshot, wan27eSnap } = job;
+
+  if (!falKey)               throw new Error('fal.ai API key missing. Add it in Setup tab.');
+  if (!prompt)               throw new Error('Prompt required — describe the edit or style transfer.');
+  if (!wan27eSnap?.srcVideoId) throw new Error('No source video selected.');
+
+  const endpoint     = model.falEndpoint || 'fal-ai/wan/v2.7/edit-video';
+  const resolution   = wan27eSnap.resolution   || '1080p';
+  const duration     = wan27eSnap.duration;      // string enum: "0"|"2"..."10"
+  const audioSetting = wan27eSnap.audioSetting  || 'auto';  // 'auto' | 'origin'
+  const aspectRatio  = wan27eSnap.aspectRatio   || 'auto';
+  const safety       = wan27eSnap.safety        !== false;
+  const seed         = wan27eSnap.seed          ? parseInt(wan27eSnap.seed) : undefined;
+
+  // Load source video from DB → base64 data URI
+  job.status = 'submitting'; renderVideoQueue();
+  const srcFull = await dbGet('videos', wan27eSnap.srcVideoId).catch(() => null);
+  if (!srcFull?.videoData) throw new Error('Source video data not found in gallery. Try re-adding it.');
+  const srcMeta = await dbGet('video_meta', wan27eSnap.srcVideoId).catch(() => null);
+
+  // Auto-match resolution to source video to avoid quality downgrade
+  let effectiveRes = resolution;
+  if (srcMeta?.outHeight && srcMeta.outHeight <= 720 && resolution === '1080p') {
+    effectiveRes = '720p';
+  }
+  const actualDuration = srcMeta?.duration || 5;
+
+  // Encode source video as base64 data URI (fal.ai accepts data URIs natively)
+  const videoUri = `data:video/mp4;base64,${_arrayBufferToBase64(srcFull.videoData)}`;
+
+  const payload = {
+    prompt,
+    video_url:              videoUri,
+    resolution:             effectiveRes,
+    audio_setting:          audioSetting,
+    enable_safety_checker:  safety,
+  };
+  if (aspectRatio && aspectRatio !== 'auto') payload.aspect_ratio = aspectRatio;
+  if (duration && duration !== '0')          payload.duration     = duration;
+  if (seed !== undefined)                    payload.seed         = seed;
+
+  // Optional reference image for style guidance
+  const refSnap = videoRefsSnapshot?.[0];
+  if (refSnap) {
+    let imgData = refSnap.imageData;
+    if (!imgData && refSnap.assetId) {
+      const asset = await dbGet('assets', refSnap.assetId);
+      imgData = asset?.imageData;
+    }
+    if (imgData) {
+      const compressed = await compressImageForUpload(imgData, refSnap.mimeType || 'image/jpeg');
+      payload.reference_image_url = `data:${compressed.mimeType};base64,${compressed.data}`;
+    }
+  }
+
+  // Submit, poll, download via shared helper
+  console.log('[wan27e] submit → fal.ai | resolution:', effectiveRes, '| duration:', duration, '| audio:', audioSetting);
+  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7 Edit', timeoutMin: 30, progressLabel: 'EDITING' });
+
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt: job.prompt,
+    params: { resolution: effectiveRes, audioSetting, aspectRatio, seed: seed || null, srcVideoId: wan27eSnap.srcVideoId },
+    duration: actualDuration,
+  }, job, ['fal', effectiveRes === '1080p' ? '_wan27e_1080p' : '_wan27e_720p', 1, actualDuration]);
+  toast(`WAN 2.7 Edit done · ${elapsed}s`, 'ok');
+}
+
+// ── Seedance 2.0 — fal.ai queue (direct, no proxy) ──────
+// Handles T2V, I2V (start+end frame), R2V (images + videos + audio)
+// Multi-shot: controlled via prompt ([lens switch], timeline [0-3s]..., Shot 1:...)
+// R2V refs in prompt: [Image1], [Video1], [Audio1]
+async function callSeedance2Video(job) {
+  const { model, modelKey, prompt, aspectRatio, enableAudio, falKey,
+          videoRefsSnapshot, sd2Snap } = job;
+
+  if (!falKey) throw new Error('fal.ai API key missing. Add it in Setup tab.');
+
+  const endpoint   = model.endpoint;
+  const durVal     = sd2Snap?.autoDuration ? 'auto' : (sd2Snap?.duration || '5');
+  const resolution = sd2Snap?.resolution || '720p';
+  const seed       = sd2Snap?.seed ? parseInt(sd2Snap.seed) : undefined;
+  const isI2V      = model.refMode === 'single_end';
+  const isR2V      = model.refMode === 'seedance2_r2v';
+
+  const payload = {
+    prompt:         prompt || '',
+    duration:       durVal,   // STRING — "4"–"15" or "auto"
+    resolution,
+    generate_audio: !!enableAudio,
+  };
+  // aspect_ratio: T2V always, I2V/R2V only if not auto
+  if (!isI2V || aspectRatio !== 'auto') payload.aspect_ratio = aspectRatio;
+  if (seed !== undefined) payload.seed = seed;
+
+  // ── I2V: start + optional end frame ──
+  if (isI2V) {
+    const loadRef = async (snap) => {
+      if (!snap) return null;
+      let imgData = snap.imageData;
+      if (!imgData && snap.assetId) {
+        const asset = await dbGet('assets', snap.assetId);
+        imgData = asset?.imageData;
+      }
+      if (!imgData) return null;
+      const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+      return `data:${compressed.mimeType};base64,${compressed.data}`;
+    };
+    const startUri = await loadRef(videoRefsSnapshot?.[0]);
+    const endUri   = await loadRef(videoRefsSnapshot?.[1]);
+    if (!startUri) throw new Error('Start frame (first ref) required for Seedance 2.0 I2V.');
+    payload.image_url = startUri;
+    if (endUri) payload.end_image_url = endUri;
+  }
+
+  // ── R2V: image refs + video refs + audio URLs ──
+  if (isR2V) {
+    // Image refs from videoRefs (standard GIS image assets)
+    const imageUrls = [];
+    for (const snap of (videoRefsSnapshot || [])) {
+      let imgData = snap.imageData;
+      if (!imgData && snap.assetId) {
+        const asset = await dbGet('assets', snap.assetId);
+        imgData = asset?.imageData;
+      }
+      if (imgData) {
+        const compressed = await compressImageForUpload(imgData, snap.mimeType || 'image/jpeg');
+        imageUrls.push(`data:${compressed.mimeType};base64,${compressed.data}`);
+      }
+    }
+    if (imageUrls.length > 0) payload.image_urls = imageUrls;
+
+    // Video refs — load from gallery DB, upload to R2 for public URLs
+    const videoUrls = [];
+    const proxyUrl = job.proxyUrl || getProxyUrl();
+    for (const vidId of (sd2Snap?.vidSrcIds || [])) {
+      if (!vidId) continue;
+      const full = await dbGet('videos', vidId).catch(() => null);
+      if (!full?.videoData) continue;
+      updateVideoPlaceholderStatus(job, `UPLOADING VIDEO REF…`);
+      const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
+      const url = await uploadVideoToFal(blob, falKey);
+      videoUrls.push(url);
+    }
+    if (videoUrls.length > 0) payload.video_urls = videoUrls;
+
+    // Audio URLs — direct paste from user
+    const audioUrls = (sd2Snap?.audioUrls || []).filter(Boolean);
+    if (audioUrls.length > 0) payload.audio_urls = audioUrls;
+  }
+
+  // Submit, poll, download via shared helper
+  const logPayload = {...payload};
+  ['image_url','end_image_url'].forEach(k => { if (logPayload[k]) logPayload[k] = logPayload[k].slice(0, 40) + '…'; });
+  if (logPayload.image_urls) logPayload.image_urls = logPayload.image_urls.map(u => u.slice(0, 40) + '…');
+  console.log('[Seedance2] submit →', endpoint, JSON.stringify(logPayload));
+
+  const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(
+    falKey, endpoint, payload, job, { label: model.name, timeoutMin: 25 }
+  );
+
+  // Price key: standard vs fast, R2V fast is cheaper
+  const isFast = endpoint.includes('/fast/');
+  const priceKey = isR2V && isFast ? '_seedance2_r2v_fast'
+                 : isFast          ? '_seedance2_fast'
+                 :                   '_seedance2_std';
+  const durNum = parseInt(durVal) || 5;
+
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt: job.prompt,
+    params: { duration: durVal, resolution, seed: seed || null, enableAudio },
+    duration: durNum,
+    cdnUrl: videoUrl,
+  }, job, ['fal', priceKey, 1, durNum]);
+  toast(`Seedance 2.0 done · ${elapsed}s`, 'ok');
+}
+
+// ── xAI Grok Imagine Video ──────────────────────────────────
+// Flow: GIS → Worker POST /xai/video/submit|edit|extend → { request_id }
+//       GIS polls → Worker POST /xai/video/status → { status, video_url }
+//       GIS downloads → Worker POST /xai/video/download → binary MP4
+async function callGrokVideo(job) {
+  const { model, modelKey, prompt, proxyUrl, xaiKey, grokVideoSnap, videoRefsSnapshot, targetFolder } = job;
+
+  if (!xaiKey)   throw new Error('Missing xAI API key');
+  if (!proxyUrl)  throw new Error('Missing proxy URL');
+  if (!grokVideoSnap) throw new Error('Missing Grok Video parameters');
+
+  const mode = grokVideoSnap.mode || 't2v';
+  const duration = grokVideoSnap.duration || 8;
+  const resolution = grokVideoSnap.resolution || '720p';
+  const aspectRatio = job.aspectRatio || '16:9';
+
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  // ── Build submit payload based on mode ──────────────────
+  let submitUrl, submitBody;
+
+  if (mode === 'edit') {
+    // V2V Edit — load video from DB, upload to R2 for HTTPS URL
+    if (!grokVideoSnap.srcVideoId) throw new Error('V2V Edit requires a source video — click ▷ Use on a gallery video');
+    job.status = 'uploading';
+    updateVideoPlaceholderStatus(job, 'UPLOADING VIDEO…');
+    const srcFull = await dbGet('videos', grokVideoSnap.srcVideoId).catch(() => null);
+    if (!srcFull?.videoData) throw new Error('Source video data not found in gallery');
+    const blob = new Blob([srcFull.videoData], { type: 'video/mp4' });
+    const r2Resp = await fetch(`${proxyUrl}/r2/upload`, { method: 'POST', headers: { 'Content-Type': 'video/mp4' }, body: blob });
+    if (!r2Resp.ok) throw new Error(`R2 upload failed: ${r2Resp.status}`);
+    const { url: r2Url } = await r2Resp.json();
+    submitUrl = `${proxyUrl}/xai/video/edit`;
+    submitBody = { xai_key: xaiKey, prompt, video_url: r2Url };
+
+  } else if (mode === 'extend') {
+    // Extend — load video from DB, upload to R2
+    if (!grokVideoSnap.srcVideoId) throw new Error('Extend requires a source video — click ▷ Use on a gallery video');
+    job.status = 'uploading';
+    updateVideoPlaceholderStatus(job, 'UPLOADING VIDEO…');
+    const srcFull = await dbGet('videos', grokVideoSnap.srcVideoId).catch(() => null);
+    if (!srcFull?.videoData) throw new Error('Source video data not found in gallery');
+    const blob = new Blob([srcFull.videoData], { type: 'video/mp4' });
+    const r2Resp = await fetch(`${proxyUrl}/r2/upload`, { method: 'POST', headers: { 'Content-Type': 'video/mp4' }, body: blob });
+    if (!r2Resp.ok) throw new Error(`R2 upload failed: ${r2Resp.status}`);
+    const { url: r2Url } = await r2Resp.json();
+    submitUrl = `${proxyUrl}/xai/video/extend`;
+    submitBody = { xai_key: xaiKey, prompt, video_url: r2Url, duration };
+
+  } else {
+    // T2V / I2V / Ref2V — all go to /xai/video/submit
+    submitUrl = `${proxyUrl}/xai/video/submit`;
+    submitBody = {
+      xai_key: xaiKey, mode, prompt,
+      duration, aspect_ratio: aspectRatio, resolution,
+    };
+
+    if (mode === 'i2v') {
+      // I2V: first videoRef as start frame (base64 data URI)
+      const refs = videoRefsSnapshot || [];
+      if (!refs.length) throw new Error('I2V requires a start frame — add a video reference');
+      job.status = 'uploading';
+      updateVideoPlaceholderStatus(job, 'PREPARING IMAGE…');
+      const asset = refs[0].assetId ? await dbGet('assets', refs[0].assetId).catch(() => null) : null;
+      const imgData = asset?.imageData || refs[0].imageData;
+      if (!imgData) throw new Error('Cannot load start frame image data');
+      const mime = asset?.mimeType || refs[0].mimeType || 'image/jpeg';
+      submitBody.image_url = `data:${mime};base64,${imgData}`;
+
+    } else if (mode === 'ref2v') {
+      // Ref2V: up to 7 ref images as data URIs
+      const refs = videoRefsSnapshot || [];
+      if (!refs.length) throw new Error('Ref-to-Video requires at least 1 reference image');
+      job.status = 'uploading';
+      updateVideoPlaceholderStatus(job, 'PREPARING REFS…');
+      const refUrls = [];
+      for (const r of refs.slice(0, 7)) {
+        const asset = r.assetId ? await dbGet('assets', r.assetId).catch(() => null) : null;
+        const imgData = asset?.imageData || r.imageData;
+        if (!imgData) continue;
+        const mime = asset?.mimeType || r.mimeType || 'image/jpeg';
+        refUrls.push(`data:${mime};base64,${imgData}`);
+      }
+      if (!refUrls.length) throw new Error('Could not load any reference image data');
+      submitBody.reference_images = refUrls;
+    }
+  }
+
+  // ── Submit to Worker ────────────────────────────────────
+  job.status = 'submitting';
+  updateVideoPlaceholderStatus(job, 'SUBMITTING…');
+
+  const submitResp = await fetch(submitUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(submitBody),
+  });
+  if (!submitResp.ok) {
+    const err = await submitResp.json().catch(() => ({}));
+    throw new Error(`Grok Video submit ${submitResp.status}: ${err.error || err.detail || submitResp.statusText}`);
+  }
+  const { request_id } = await submitResp.json();
+  if (!request_id) throw new Error('Grok Video: no request_id from Worker');
+
+  // ── Poll for completion ─────────────────────────────────
+  job.status = 'generating';
+  updateVideoPlaceholderStatus(job, 'GENERATING…');
+
+  const POLL_MS = 5000;
+  const TIMEOUT = 15 * 60 * 1000; // 15 minutes
+  const deadline = Date.now() + TIMEOUT;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+
+    const statusResp = await fetch(`${proxyUrl}/xai/video/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ xai_key: xaiKey, request_id }),
+    });
+    if (!statusResp.ok) {
+      const err = await statusResp.json().catch(() => ({}));
+      throw new Error(`Grok Video status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+    }
+    const status = await statusResp.json();
+
+    if (status.status === 'failed') {
+      throw new Error(`Grok Video failed: ${status.error || 'unknown'}`);
+    }
+    if (status.status === 'expired') {
+      throw new Error('Grok Video: request expired');
+    }
+
+    if (status.status === 'done') {
+      if (!status.video_url) throw new Error('Grok Video: done but no video_url');
+
+      // ── Download via proxy (xAI URLs lack CORS) ───────
+      job.status = 'fetching';
+      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+      const dlResp = await fetch(`${proxyUrl}/xai/video/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_url: status.video_url }),
+      });
+      if (!dlResp.ok) throw new Error(`Grok Video download failed (${dlResp.status})`);
+      const videoArrayBuffer = await dlResp.arrayBuffer();
+
+      const actualDur = status.duration || duration;
+      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+        model: model.name, modelKey, prompt,
+        params: { mode, duration: actualDur, aspectRatio, resolution, srcVideoUrl: grokVideoSnap.srcVideoUrl || null },
+        duration: actualDur,
+        cdnUrl: status.video_url,
+        usedVideoRefs: videoRefsSnapshot || [],
+      }, job, ['xai', 'grok-imagine-video', 1, actualDur]);
+      toast(`Grok Video done · ${elapsed}s · ${mode.toUpperCase()}`, 'ok');
+      return;
+    }
+    // status === 'pending' → continue polling
+  }
+
+  throw new Error('Grok Video timeout — generation did not complete within 15 minutes');
+}
+
+// ── Grok Video — mode change handler ────────────────────────
+// Global: source video gallery ID for V2V Edit / Extend
+let _grokVideoSrcId = null;
+
+function onGrokVideoModeChange(mode) {
+  const notes = {
+    t2v:    'Prompt-only generation with native audio',
+    i2v:    'Upload a start frame as video reference → animated into video',
+    ref2v:  'Up to 7 reference images as visual guide (not start frame) · Max 10s',
+    edit:   'Edit an existing video — add/remove/restyle · Max 8.7s input · No duration/aspect/resolution control',
+    extend: 'Continue a video from its last frame · Adds 2–10s',
+  };
+  const noteEl = document.getElementById('grokVideoModeNote');
+  if (noteEl) noteEl.textContent = notes[mode] || '';
+
+  // Duration + resolution — hidden for Edit (output matches input)
+  const durEl = document.getElementById('grokVideoDur')?.parentElement;
+  const resEl = document.querySelector('input[name="grokVideoRes"]')?.closest('.ctrl');
+  if (durEl) durEl.style.display = mode === 'edit' ? 'none' : '';
+  if (resEl) resEl.style.display = (mode === 'edit' || mode === 'extend') ? 'none' : '';
+
+  // Duration max per mode
+  const durSelect = document.getElementById('grokVideoDur');
+  if (durSelect) {
+    const maxDur = mode === 'ref2v' ? 10 : (mode === 'extend' ? 10 : 15);
+    const minDur = mode === 'extend' ? 2 : 1;
+    for (const opt of durSelect.options) {
+      const v = parseInt(opt.value);
+      opt.disabled = v > maxDur || v < minDur;
+    }
+    // If current selection is out of range, reset
+    const cur = parseInt(durSelect.value);
+    if (cur > maxDur || cur < minDur) {
+      durSelect.value = mode === 'extend' ? '6' : '8';
+    }
+  }
+
+  // Source video row — show for Edit and Extend
+  const srcRow = document.getElementById('grokVideoSrcRow');
+  if (srcRow) srcRow.style.display = (mode === 'edit' || mode === 'extend') ? '' : 'none';
+
+  // Video ref section — show for I2V and Ref2V
+  const refSec = document.getElementById('videoRefSection');
+  const refLabel = document.getElementById('videoRefLabel');
+  const refCount = document.getElementById('videoRefCount');
+  if (mode === 'i2v') {
+    if (refSec) refSec.style.display = 'block';
+    if (refLabel) refLabel.childNodes[0].textContent = 'Start frame';
+    if (refCount) refCount.textContent = `${videoRefs.length} / 1`;
+  } else if (mode === 'ref2v') {
+    if (refSec) refSec.style.display = 'block';
+    if (refLabel) refLabel.childNodes[0].textContent = 'Reference images (visual guide)';
+    if (refCount) refCount.textContent = `${videoRefs.length} / 7`;
+  } else {
+    // T2V, Edit, Extend — hide ref section
+    if (refSec) refSec.style.display = (mode === 't2v' || mode === 'edit' || mode === 'extend') ? 'none' : '';
+  }
+}
+
+// Called when user clicks "Use" on a gallery video → sets source for Grok Edit/Extend
+async function setGrokVideoSrc(videoId) {
+  _grokVideoSrcId = videoId;
+  const meta = await dbGet('video_meta', videoId).catch(() => null);
+  const label = meta?.prompt?.slice(0, 40) || `video #${videoId}`;
+  const durNote = meta?.duration ? ` · ${meta.duration}s` : '';
+  const labelEl = document.getElementById('grokVideoSrcLabel');
+  if (labelEl) labelEl.textContent = `${label}${durNote}`;
+}
+
+let _prevVideoModelKey  = null;  // tracks last applied model key for rewrite
+let _videoModelSwitching = false; // guard: prevents renderVideoRefPanel from firing rewrite during model switch
+// Reverse-map model-specific names back to @UserLabel form
+function videoPromptModelToUserLabels(prompt, activeRefs, prevM) {
+  if (!prompt || !activeRefs.length || !prevM) return prompt;
+  const mode = prevM.refMode || '';
+
+  if (mode === 'multi') {
+    // PixVerse Fusion: @pic1 → @UserLabel; Kling: @Element1 → @UserLabel
+    const pattern = prevM?.pixverseMode === 'fusion'
+      ? /@pic(\d+)\b/gi
+      : /@Element(\d+)/gi;
+    return prompt.replace(pattern, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  if (mode === 'wan_r2v') {
+    // Character1, Character2 → @UserLabel (no @ prefix in WAN R2V)
+    return prompt.replace(/\bCharacter(\d+)\b/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  if (mode === 'seedance2_r2v') {
+    // [Image1], [Image2] → @UserLabel
+    return prompt.replace(/\[Image(\d+)\]/gi, (full, n) => {
+      const idx = parseInt(n) - 1;
+      const ref = activeRefs[idx];
+      if (!ref) return full;
+      const label = (ref.userLabel || ref.autoName || `Ref_${idx + 1}`).replace(/\s+/g, '_');
+      return '@' + label;
+    });
+  }
+
+  return prompt;
+}
+
+// Apply model-specific names to canonical @UserLabel prompt
+function videoPromptUserLabelsToModel(prompt, activeRefs, newM) {
+  if (!prompt || !activeRefs.length || !newM) return prompt;
+  const mode = newM.refMode || '';
+
+  // Build label → index map
+  const labelMap = new Map();
+  activeRefs.forEach((r, i) => {
+    const key = (r.userLabel || r.autoName || '').replace(/_/g, ' ').toLowerCase();
+    if (key) labelMap.set(key, i);
+    const keyU = (r.userLabel || r.autoName || '').toLowerCase();
+    if (keyU) labelMap.set(keyU, i);
+    const an = (r.autoName || '').toLowerCase();
+    if (an) labelMap.set(an, i);
+  });
+
+  function findIdx(mention) {
+    const m = mention.replace(/_/g, ' ').toLowerCase();
+    if (labelMap.has(m)) return labelMap.get(m);
+    return labelMap.get(mention.toLowerCase()) ?? -1;
+  }
+
+  if (mode === 'multi') {
+    // PixVerse Fusion: @UserLabel → @pic{N+1}; Kling: @UserLabel → @Element{N+1}
+    const isFusion = newM?.pixverseMode === 'fusion';
+    return prompt.replace(/@([\w]+)/g, (full, mention) => {
+      const idx = findIdx(mention);
+      return idx >= 0 ? (isFusion ? `@pic${idx + 1}` : `@Element${idx + 1}`) : full;
+    });
+  }
+
+  if (mode === 'wan_r2v') {
+    // @UserLabel → Character{N+1} (no @ prefix)
+    return prompt.replace(/@([\w]+)/g, (full, mention) => {
+      const idx = findIdx(mention);
+      return idx >= 0 ? `Character${idx + 1}` : full;
+    });
+  }
+
+  if (mode === 'seedance2_r2v') {
+    // @UserLabel → [Image{N+1}]
+    return prompt.replace(/@([\w]+)/g, (full, mention) => {
+      const idx = findIdx(mention);
+      return idx >= 0 ? `[Image${idx + 1}]` : full;
+    });
+  }
+
+  return prompt;
+}
+
+// Rewrite videoPrompt textarea when video model or refs change
+// prevM: previous VIDEO_MODELS model object (null = first load)
+// newM: new VIDEO_MODELS model object
+function rewriteVideoPromptForModel(prevM, newM) {
+  const ta = document.getElementById('videoPrompt');
+  if (!ta || !ta.value.trim()) return;
+  if (!videoRefs.length) return;
+
+  // Modes that use @mention naming
+  const mentionModes = ['multi', 'wan_r2v', 'seedance2_r2v'];
+  const prevMode = prevM?.refMode || '';
+  const newMode  = newM?.refMode  || '';
+  if (!mentionModes.includes(prevMode) && !mentionModes.includes(newMode)) return;
+
+  // Step 1: convert from prev model format → canonical @UserLabels
+  const canonical = prevM
+    ? videoPromptModelToUserLabels(ta.value, videoRefs, prevM)
+    : ta.value;
+
+  // Step 2: apply new model format
+  const newPrompt = videoPromptUserLabelsToModel(canonical, videoRefs, newM);
+
+  if (newPrompt !== ta.value) {
+    const pos = ta.selectionStart;
+    ta.value = newPrompt;
+    ta.selectionStart = ta.selectionEnd = Math.min(pos, newPrompt.length);
+  }
+}
