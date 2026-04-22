@@ -6,6 +6,131 @@
 // VIDEO — Kling video generation, gallery, lightbox
 // ═══════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════
+// UNIFIED PANEL — UI flags defaults per model type (Session 2, v207en)
+// Every video model's UI is described by flags declaring which controls to show.
+// Per-entry `uiOverrides: {...}` merges on top of these type defaults.
+//
+// The unified panel (#vpParams) reads these flags via `_getVideoUi(modelKey)`
+// to show/hide sections: resolution, aspect, CFG, duration, seed, audio,
+// negative prompt, count, source slots, ref weights, advanced toggles etc.
+//
+// Flag semantics:
+//   resolutions    — array of allowed values for <select id="vpResolution">; null = hidden
+//   aspectRatios   — array of allowed values for <select id="vpAspect">; null = hidden
+//   durationType   — 'slider' | 'select' | 'radio' | 'none'
+//   showCfg, showSeed, showAudio, showCount, showNegPrompt — boolean controls in core params
+//   modeSelect     — sub-select under model dropdown (null | 'klingVersion' | 'veoRefMode' | 'grokMode' | 'pixverseMode')
+//   sourceSlot     — VIDEO_SOURCE_SLOTS key placed directly under refs (null | 'topaz' | 'wan27v' | 'wan27e' | 'v2v' | 'sd2Vid' | 'grok')
+//   sourceAudio    — 3 audio URL inputs directly under source video (only Seedance 2.0)
+//   refWeights     — 'luma3' = 3 progressive sliders shown per ref count; false = hidden
+//   cameraMove     — 'pixverse_v4' = model camera move dropdown under prompt tags
+//   advancedGroup  — 'topaz' | 'magnific' | null — keeps separate advanced section
+//   supportsMultiClip, supportsMultiShots, supportsOffPeak — bottom toggle checkboxes
+// ═══════════════════════════════════════════════════════
+const VIDEO_UI_DEFAULTS = {
+  // Default: full-featured video generator
+  _base: {
+    resolutions:      null,    aspectRatios: ['16:9','9:16','1:1'],
+    showCfg:          false,   cfgMin: 0, cfgMax: 1, cfgDefault: 0.5, cfgStep: 0.05,
+    durationType:     'slider', durationMin: 3, durationMax: 15, durationDefault: 5, durationOptions: null,
+    showSeed:         false,   showNegPrompt: false, showCount: true, countMax: 4,
+    showAudio:        false,
+    modeSelect:       null,    sourceSlot: null, sourceAudio: false,
+    refWeights:       false,   cameraMove: null, advancedGroup: null,
+    supportsMultiClip: false,  supportsMultiShots: false, supportsOffPeak: false,
+  },
+  veo: {
+    resolutions: ['720p','1080p'], aspectRatios: ['16:9','9:16'],
+    durationType: 'select', durationOptions: [4,6,8], durationDefault: 8,
+    showAudio: true, modeSelect: 'veoRefMode',
+  },
+  luma_video: {
+    resolutions: ['540p','720p','1080p'], aspectRatios: ['16:9','9:16','1:1','4:3','3:4','21:9','9:21'],
+    durationType: 'select', durationOptions: [5,9], durationDefault: 5,
+    refWeights: 'luma3',
+  },
+  kling_video: {
+    resolutions: ['720p','1080p'], aspectRatios: ['16:9','9:16','1:1'],
+    durationType: 'select', durationOptions: [5,10], durationDefault: 5,
+    showSeed: true, showAudio: true, modeSelect: 'klingVersion',
+    showCfg: true, cfgMin: 0, cfgMax: 1, cfgDefault: 0.5,
+  },
+  seedance2_video: {
+    resolutions: ['480p','720p','1080p'], aspectRatios: ['16:9','9:16','1:1','4:3','3:4','21:9','9:21'],
+    durationType: 'select', durationOptions: [4,5,6,7,8,9,10,11,12], durationDefault: 5,
+    showSeed: true, showAudio: true, showNegPrompt: false,
+    modeSelect: 'klingVersion',  // group-based (std/fast × t2v/i2v/r2v)
+    sourceAudio: true,           // 3× audio URL inputs under source video
+  },
+  seedance_video: {
+    resolutions: ['480p','720p','1080p'], aspectRatios: ['16:9','9:16','1:1'],
+    durationType: 'select', durationOptions: [5,10], durationDefault: 5,
+    showSeed: true, showAudio: false, modeSelect: 'klingVersion',
+  },
+  vidu_video: {
+    resolutions: ['360p','720p','1080p'], aspectRatios: ['16:9','9:16','1:1'],
+    durationType: 'select', durationOptions: [4,8], durationDefault: 4,
+    showSeed: true, modeSelect: 'klingVersion',
+  },
+  wan27_video: {
+    resolutions: ['720p','1080p'], aspectRatios: ['16:9','9:16','1:1'],
+    durationType: 'select', durationOptions: [5,8], durationDefault: 5,
+    showSeed: true, showAudio: true, showNegPrompt: true,
+    modeSelect: 'klingVersion',
+  },
+  wan26_video: {
+    resolutions: ['480p','720p','1080p'], aspectRatios: ['16:9','9:16','1:1'],
+    durationType: 'select', durationOptions: [5,10], durationDefault: 5,
+    showSeed: true, showAudio: true, modeSelect: 'klingVersion',
+    supportsMultiShots: true,
+  },
+  pixverse_video: {
+    resolutions: ['540p','720p','1080p'], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'],
+    durationType: 'select', durationOptions: [5,8], durationDefault: 5,
+    showSeed: true, showAudio: true, showNegPrompt: true,
+    modeSelect: 'pixverseMode', cameraMove: 'pixverse_v4',
+    supportsMultiClip: true, supportsOffPeak: true,
+  },
+  grok_video: {
+    resolutions: ['720p','1080p'], aspectRatios: ['16:9','9:16'],
+    durationType: 'select', durationOptions: [5,6,7,8,9,10], durationDefault: 6,
+    showAudio: true, modeSelect: 'grokMode', sourceSlot: 'grok',
+  },
+  topaz_upscaler: {
+    resolutions: null, aspectRatios: null, durationType: 'none',
+    showCount: false, advancedGroup: 'topaz', sourceSlot: 'topaz',
+  },
+  magnific_video: {
+    resolutions: null, aspectRatios: null, durationType: 'none',
+    showCount: false, advancedGroup: 'magnific', sourceSlot: 'topaz',  // magnific reuses Topaz source slot UI
+  },
+};
+
+// Merge type defaults + entry uiOverrides into final UI flags for a model.
+// Entry-level fields (resolutions, aspectRatios, maxDur, minDur) override type defaults
+// for legacy compatibility — these already exist on entries.
+// Returns `null` if model not found.
+function _getVideoUi(modelKey) {
+  const m = VIDEO_MODELS[modelKey]
+         || (typeof TOPAZ_MODELS !== 'undefined' && TOPAZ_MODELS[modelKey])
+         || (typeof MAGNIFIC_VIDEO_MODELS !== 'undefined' && MAGNIFIC_VIDEO_MODELS[modelKey])
+         || null;
+  if (!m) return null;
+  const ui = {
+    ...VIDEO_UI_DEFAULTS._base,
+    ...(VIDEO_UI_DEFAULTS[m.type] || {}),
+    ...(m.uiOverrides || {}),
+  };
+  // Entry-level fields take precedence over type defaults (legacy)
+  if (m.resolutions)  ui.resolutions  = m.resolutions;
+  if (m.aspectRatios) ui.aspectRatios = m.aspectRatios;
+  if (typeof m.maxDur === 'number') ui.durationMax = m.maxDur;
+  if (typeof m.minDur === 'number') ui.durationMin = m.minDur;
+  if (m.hasAudio === false) ui.showAudio = false;   // explicit disable
+  return ui;
+}
+
 // ── Video model definitions ──────────────────────────────
 const VIDEO_MODELS = {
   // refMode: 'none' | 'single' | 'single_end' | 'keyframe' | 'multi'
@@ -214,6 +339,7 @@ const VIDEO_MODELS = {
     refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
     spendKey: '_kling_mc',
+    uiOverrides: { sourceSlot: 'v2v' },
   },
   kling_v3_v2v_pro: {
     name: 'Kling V3 Pro · Motion Control', type: 'kling_video',
@@ -223,6 +349,7 @@ const VIDEO_MODELS = {
     refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
     spendKey: '_kling_mc',
+    uiOverrides: { sourceSlot: 'v2v' },
   },
   kling_26_v2v_pro: {
     name: 'Kling 2.6 Pro · Motion Control', type: 'kling_video',
@@ -232,6 +359,7 @@ const VIDEO_MODELS = {
     refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
     spendKey: '_kling_26',
+    uiOverrides: { sourceSlot: 'v2v' },
   },
 
   // ── Older models — economy options ───────────────────────
@@ -346,6 +474,7 @@ const VIDEO_MODELS = {
     resolutions: ['480p', '720p', '1080p'], imageField: 'image_url',
     refLabel: 'Image refs (up to 9)',
     desc: 'R2V · 9 imgs + 3 videos + 3 audio · 1080p · Video edit/extend (video refs 0.6×)',
+    uiOverrides: { sourceSlot: 'sd2Vid' },
   },
   seedance2f_t2v: {
     name: 'Seedance 2.0 Fast', type: 'seedance2_video',
@@ -369,6 +498,7 @@ const VIDEO_MODELS = {
     resolutions: ['480p', '720p'], imageField: 'image_url',
     refLabel: 'Image refs (up to 9)',
     desc: 'R2V Fast · 9 imgs + 3 videos + 3 audio · Video refs 0.6× · $0.18/s',
+    uiOverrides: { sourceSlot: 'sd2Vid' },
   },
 
   // ── Vidu Q3 — Shengshu via fal.ai ───────────────────────
@@ -438,6 +568,7 @@ const VIDEO_MODELS = {
     refMode: 'wan_r2v', maxRefs: 5, maxDur: 10, hasAudio: false,
     refLabel: 'Character refs (image or video)',
     desc: 'R2V · Character consistency · Image/video refs · Up to 10s · Alibaba via fal.ai',
+    uiOverrides: { sourceSlot: 'wan27v' },
   },
   wan27e_v2v: {
     name: 'Wan 2.7 Video Edit', type: 'wan27e_video',
@@ -445,6 +576,7 @@ const VIDEO_MODELS = {
     refMode: 'single', maxRefs: 1, maxDur: 10, hasAudio: false,
     refLabel: 'Reference image (optional)',
     desc: 'V2V · Instruction edit · Style transfer · Any source video · Optional ref image · Up to 10s · fal.ai',
+    uiOverrides: { sourceSlot: 'wan27e' },
   },
 
   wan26_t2v: {
@@ -779,6 +911,275 @@ const MAGNIFIC_VIDEO_MODELS = {
     desc:  'Faithful upscaling — no AI-generated content added. Blend original with upscaled via strength. Output: 1K/2K/4K.',
   },
 };
+
+// ═══════════════════════════════════════════════════════
+// Unified Video Panel — UI flags per model (Session 2)
+// ═══════════════════════════════════════════════════════
+// Central source of truth for "which UI controls does THIS model need".
+// Read from `_applyVideoModel` to show/hide sections in the unified panel
+// (analogous to how image models use inline ui flags).
+//
+// Rather than injecting a per-entry `ui: {...}` into every one of ~60
+// VIDEO_MODELS / KLING_GROUPS / TOPAZ_MODELS / MAGNIFIC_VIDEO_MODELS entries
+// (which would be massively duplicated across variants), we derive UI flags
+// from type + model key patterns, with family-level defaults and
+// variant-level overrides. This is the same strategy as `_getVideoSpendKey`
+// from v206en #2.
+//
+// Returns a FROZEN object with all UI flags set. Consumer can safely
+// destructure and use any flag without existence-checking.
+// ═══════════════════════════════════════════════════════
+function getVideoUi(modelKey) {
+  if (!modelKey) return _videoUiEmpty();
+
+  // Look up in any of the 4 registries.
+  const vm    = VIDEO_MODELS[modelKey];
+  const kg    = KLING_GROUPS[modelKey];
+  const tm    = TOPAZ_MODELS[modelKey];
+  const mm    = MAGNIFIC_VIDEO_MODELS[modelKey];
+  const any   = vm || tm || mm;
+
+  // Kling group "parent" entries (e.g. 'kling_v3', 'seedance2') — UI is that
+  // of their default variant (the actual model that will run).
+  if (kg) return getVideoUi(kg.default);
+
+  if (!any) return _videoUiEmpty();
+
+  // Group detection helpers based on modelKey prefix.
+  const isKling     = !!vm && vm.type === 'kling';
+  const isLuma      = !!vm && vm.type === 'luma_video';
+  const isSeedance  = !!vm && vm.type === 'seedance';
+  const isSeedance2 = modelKey.startsWith('seedance2_') || modelKey.startsWith('seedance2f_');
+  const isVidu      = !!vm && vm.type === 'vidu';
+  const isWan27     = !!vm && vm.type === 'wan27';
+  const isWan26     = !!vm && vm.type === 'wan26';
+  const isPixverse  = !!vm && vm.type === 'pixverse';
+  const isPixverseV6 = modelKey.startsWith('pixverse_v6_');
+  const isPixverseC1 = modelKey.startsWith('pixverse_c1_');
+  const isVeo       = !!vm && vm.type === 'veo';
+  const isGrok      = !!vm && vm.type === 'grok';
+  const isTopaz     = !!tm;
+  const isMagnific  = !!mm;
+
+  // Variant suffix (T2V, I2V, R2V, V2V, KF, Transition, Fusion, Extend)
+  const isT2V        = modelKey.endsWith('_t2v') || modelKey.endsWith('_t2v_std') || modelKey.endsWith('_t2v_pro') || modelKey.endsWith('_t2v_single');
+  const isI2V        = modelKey.endsWith('_i2v') || modelKey.endsWith('_i2v_std') || modelKey.endsWith('_i2v_pro');
+  const isR2V        = modelKey.endsWith('_r2v') || modelKey.endsWith('_r2v_flash');
+  const isV2V        = modelKey.endsWith('_v2v') || modelKey.endsWith('_v2v_std') || modelKey.endsWith('_v2v_pro');
+  const isKeyframe   = modelKey.endsWith('_kf') || modelKey.endsWith('_frames');
+  const isTransition = modelKey.endsWith('_transition');
+  const isFusion     = modelKey.endsWith('_fusion');
+
+  // Start with family defaults.
+  const ui = _videoUiEmpty();
+
+  // ── Family-level defaults ─────────────────────────────
+
+  if (isVeo) {
+    Object.assign(ui, {
+      showResolution:   true,
+      resolutions:      vm.resolutions || ['720p', '1080p', '4k'],
+      showAspect:       true,
+      aspectRatios:     vm.aspectRatios || ['16:9', '9:16'],
+      showDuration:     true, durationType: 'slider',
+      durationMin:      vm.minDur || 4, durationMax: vm.maxDur || 8,
+      durationOptions:  vm.durOptions || [],
+      showAudio:        true,
+      showCount:        true,
+      modeSelect:       'veoRefMode',   // sub-select: t2v / i2v / frames / ingredients
+      showRefs:         true, refMaxCount: 3,  // Ingredients up to 3
+    });
+  }
+
+  if (isKling) {
+    Object.assign(ui, {
+      showResolution:   !!vm.resolutions,
+      resolutions:      vm.resolutions || [],
+      showAspect:       !!vm.aspectRatios,
+      aspectRatios:     vm.aspectRatios || ['16:9', '9:16', '1:1'],
+      showDuration:     true, durationType: (vm.durOptions && vm.durOptions.length <= 3) ? 'radio' : 'slider',
+      durationMin:      5, durationMax: vm.maxDur || 10, durationOptions: vm.durOptions || [5, 10],
+      showCfg:          true, cfgMin: 0, cfgMax: 1,
+      showSeed:         true,
+      showNegPrompt:    true,
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      modeSelect:       'klingVersion',  // Kling version variant sub-select
+      showRefs:         isI2V || isKeyframe,
+      refMaxCount:      isKeyframe ? 2 : (vm.maxRefs || 1),
+      sourceSlot:       isV2V ? 'v2v' : null,
+    });
+  }
+
+  if (isLuma) {
+    Object.assign(ui, {
+      showResolution:   true,
+      resolutions:      vm.resolutions || ['540p', '720p', '1080p', '4k'],
+      showAspect:       true,
+      aspectRatios:     vm.aspectRatios || ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', '9:21'],
+      showDuration:     true, durationType: 'select',
+      durationOptions:  vm.durOptions || [5, 9],
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      showRefs:         true,
+      refMaxCount:      vm.maxRefs || 3,
+      showRefWeights:   true,        // Per-ref weight sliders
+      advancedGroup:    'luma',      // Loop, HDR color mode
+    });
+  }
+
+  if (isSeedance) {
+    Object.assign(ui, {
+      showResolution:   true,
+      resolutions:      vm.resolutions || (isSeedance2 ? ['480p', '720p', '1080p'] : ['720p', '1080p']),
+      showAspect:       false,       // Seedance uses resolution for aspect
+      showDuration:     true, durationType: 'slider',
+      durationMin:      vm.minDur || 3, durationMax: vm.maxDur || 12,
+      showSeed:         true,
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      showRefs:         isI2V || isR2V,
+      refMaxCount:      isR2V ? (vm.maxRefs || 4) : (isI2V ? 2 : 0),
+      showAudioSources: isSeedance2,      // 3× audio URL inputs for Seedance 2.0
+      audioSourceCount: isSeedance2 ? 3 : 0,
+      sourceSlot:       isSeedance2 ? (isR2V ? null : 'sd2Vid') : null,
+    });
+  }
+
+  if (isVidu) {
+    Object.assign(ui, {
+      showResolution:   true, resolutions: vm.resolutions || ['360p', '720p', '1080p'],
+      showAspect:       true, aspectRatios: vm.aspectRatios || ['16:9', '9:16', '1:1'],
+      showDuration:     true, durationType: 'select', durationOptions: vm.durOptions || [4, 6, 8],
+      showSeed:         true,
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      showRefs:         isI2V || isKeyframe,
+      refMaxCount:      isKeyframe ? 2 : (vm.maxRefs || 1),
+    });
+  }
+
+  if (isWan27) {
+    Object.assign(ui, {
+      showResolution:   true, resolutions: vm.resolutions || ['480p', '720p', '1080p'],
+      showAspect:       true, aspectRatios: vm.aspectRatios || ['16:9', '9:16', '1:1'],
+      showDuration:     !isR2V, durationType: 'slider',  // R2V has no duration
+      durationMin:      vm.minDur || 5, durationMax: vm.maxDur || 10,
+      showSeed:         true,
+      showNegPrompt:    true,
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      showRefs:         isI2V || isR2V,
+      refMaxCount:      isR2V ? (vm.maxRefs || 4) : 1,
+      sourceSlot:       isV2V ? 'wan27e' : (isI2V && modelKey === 'wan27_i2v' ? 'wan27v' : null),
+    });
+  }
+
+  if (isWan26) {
+    Object.assign(ui, {
+      showResolution:   true, resolutions: vm.resolutions || ['720p', '1080p'],
+      showAspect:       true, aspectRatios: vm.aspectRatios || ['16:9', '9:16'],
+      showDuration:     true, durationType: 'slider',
+      durationMin:      vm.minDur || 5, durationMax: vm.maxDur || 10,
+      showSeed:         true,
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      showRefs:         isI2V || isR2V,
+      refMaxCount:      isR2V ? (vm.maxRefs || 4) : 1,
+      showMultiShots:   modelKey === 'wan26_t2v',  // Multi-shot toggle only for T2V multi
+    });
+  }
+
+  if (isPixverse) {
+    Object.assign(ui, {
+      showResolution:   false,       // Pixverse uses quality select instead
+      showAspect:       true, aspectRatios: vm.aspectRatios || ['16:9', '9:16', '1:1', '4:3', '3:4'],
+      showDuration:     true, durationType: 'select', durationOptions: vm.durOptions || [5, 8],
+      showSeed:         true,
+      showNegPrompt:    true,
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      showRefs:         isI2V || isTransition || isFusion,
+      refMaxCount:      isFusion ? (vm.maxRefs || 7) : (isTransition ? 2 : 1),
+      modeSelect:       'pixverseMode',   // C1 vs V6 sub-variants
+      advancedGroup:    'pixverse',        // Quality select, camera movement
+      showCameraMove:   isPixverseV6 && (isT2V || isI2V),  // v4/v4.5 (V6 exposed) only
+      showMultiClip:    isPixverseV6 || isTransition,       // V6 multi-clip, C1 transition
+      showOffPeak:      true,               // All Pixverse supports off-peak
+    });
+  }
+
+  if (isGrok) {
+    Object.assign(ui, {
+      showResolution:   true, resolutions: vm.resolutions || ['720p', '1080p'],
+      showAspect:       true, aspectRatios: vm.aspectRatios || ['16:9', '9:16'],
+      showDuration:     true, durationType: 'select', durationOptions: vm.durOptions || [6, 10],
+      showAudio:        !!vm.hasAudio,
+      showCount:        true,
+      modeSelect:       'grokMode',    // t2v / i2v / ref2v / edit / extend
+      showRefs:         true,          // Varies by mode, resolved at runtime
+      refMaxCount:      7,             // Ref2V supports up to 7
+      sourceSlot:       'grok',        // Edit/Extend use source video
+    });
+  }
+
+  if (isTopaz) {
+    Object.assign(ui, {
+      showResolution:   false,  // Derived from input
+      showAspect:       false,
+      showDuration:     false,
+      showCount:        false,
+      advancedGroup:    'topaz',
+      sourceSlot:       'topaz',
+      showAudio:        false,
+    });
+  }
+
+  if (isMagnific) {
+    Object.assign(ui, {
+      showResolution:   false,
+      showAspect:       false,
+      showDuration:     false,
+      showCount:        false,
+      advancedGroup:    'magnific',
+      sourceSlot:       'magnific',
+      showAudio:        false,
+    });
+  }
+
+  return Object.freeze(ui);
+}
+
+function _videoUiEmpty() {
+  return {
+    // Core visibility flags (common defaults):
+    showResolution:   false, resolutions: [],
+    showAspect:       false, aspectRatios: [],
+    showDuration:     false, durationType: 'slider',  // 'slider' | 'select' | 'radio'
+    durationMin:      3, durationMax: 15, durationOptions: [],
+    showCfg:          false, cfgMin: 0, cfgMax: 1,
+    showSeed:         false,
+    showAudio:        false,
+    showNegPrompt:    false,
+    showCount:        false,
+    // References:
+    showRefs:         false, refMaxCount: 0,
+    showRefWeights:   false,
+    // Source video / audio:
+    sourceSlot:       null,   // 'topaz' | 'wan27v' | 'wan27e' | 'v2v' | 'sd2Vid' | 'grok' | 'magnific'
+    showAudioSources: false, audioSourceCount: 0,
+    // Sub-select (mode):
+    modeSelect:       null,   // 'klingVersion' | 'veoRefMode' | 'grokMode' | 'pixverseMode'
+    // Individual params group (kept as-is — too model-specific to decompose):
+    advancedGroup:    null,   // 'topaz' | 'magnific' | 'pixverse' | 'luma'
+    // Camera move sub-menu (under prompt):
+    showCameraMove:   false,
+    // Bottom toggles (above Save to folder):
+    showMultiClip:    false,
+    showMultiShots:   false,
+    showOffPeak:      false,
+  };
+}
 
 // ── Global video state ───────────────────────────────────
 

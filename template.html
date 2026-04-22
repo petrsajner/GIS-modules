@@ -2789,28 +2789,6 @@ select.inpaint-num option { background:#fff; color:#111; }
       <div class="psec">
         <div class="plabel">Video Model</div>
         <select id="videoModelSelect" onchange="onVideoModelChange(this.value)" style="width:100%;background:rgba(212,160,23,.1);border:1px solid var(--accent);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-          <optgroup label="── Luma Ray ──">
-            <option value="luma_ray2_flash" selected>Ray2 Flash · T2V+I2V · Fast · $0.24/5s · Luma</option>
-            <option value="luma_ray2">Ray2 · T2V+I2V · $0.71/5s · Luma</option>
-          </optgroup>
-          <optgroup label="── xAI Grok ──">
-            <option value="grok_video">Grok Video · T2V+I2V+Ref+Edit+Extend · $0.05/s · xAI</option>
-          </optgroup>
-          <optgroup label="── Seedance ──">
-            <option value="seedance2">★ Seedance 2.0 · Multi-modal · ByteDance</option>
-            <option value="seedance15">Seedance 1.5 Pro · ByteDance</option>
-          </optgroup>
-          <optgroup label="── PixVerse ──">
-            <option value="pixverse_c1">PixVerse C1 · Film-grade · Audio · 15s</option>
-            <option value="pixverse_v6">PixVerse V6 · Multi-clip · Audio · 15s</option>
-          </optgroup>
-          <optgroup label="── Vidu ──">
-            <option value="vidu_q3">Vidu Q3 · Shengshu</option>
-          </optgroup>
-          <optgroup label="── Wan ──">
-            <option value="wan27">Wan 2.7 · fal.ai</option>
-            <option value="wan26">Wan 2.6 · Alibaba</option>
-          </optgroup>
           <optgroup label="── Google Veo ──">
             <option value="veo_31">Veo 3.1 · T2V + I2V · $0.40/s</option>
             <option value="veo_31_fast">Veo 3.1 Fast · T2V + I2V · $0.15/s</option>
@@ -2823,6 +2801,28 @@ select.inpaint-num option { background:#fff; color:#111; }
             <option value="kling_25t">Kling 2.5 Turbo</option>
             <option value="kling_21">Kling 2.1</option>
             <option value="kling_16">Kling 1.6</option>
+          </optgroup>
+          <optgroup label="── PixVerse ──">
+            <option value="pixverse_c1">PixVerse C1 · Film-grade · Audio · 15s</option>
+            <option value="pixverse_v6">PixVerse V6 · Multi-clip · Audio · 15s</option>
+          </optgroup>
+          <optgroup label="── Seedance ──">
+            <option value="seedance2" selected>★ Seedance 2.0 · Multi-modal · ByteDance</option>
+            <option value="seedance15">Seedance 1.5 Pro · ByteDance</option>
+          </optgroup>
+          <optgroup label="── xAI Grok ──">
+            <option value="grok_video">Grok Video · T2V+I2V+Ref+Edit+Extend · $0.05/s · xAI</option>
+          </optgroup>
+          <optgroup label="── Luma Ray ──">
+            <option value="luma_ray2_flash">Ray2 Flash · T2V+I2V · Fast · $0.24/5s · Luma</option>
+            <option value="luma_ray2">Ray2 · T2V+I2V · $0.71/5s · Luma</option>
+          </optgroup>
+          <optgroup label="── Vidu ──">
+            <option value="vidu_q3">Vidu Q3 · Shengshu</option>
+          </optgroup>
+          <optgroup label="── Wan ──">
+            <option value="wan27">Wan 2.7 · fal.ai</option>
+            <option value="wan26">Wan 2.6 · Alibaba</option>
           </optgroup>
           <optgroup label="── Topaz ✦ ──">
             <option value="topaz_precise25">Topaz Precise 2.5 · GenAI · best quality</option>
@@ -2840,6 +2840,334 @@ select.inpaint-num option { background:#fff; color:#111; }
           T2V · Native audio · Up to 15s · Highest quality
         </div>
       </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- UNIFIED VIDEO PANEL (#vpParams) — Session 2              -->
+      <!-- Currently HIDDEN (display:none). Will be activated in    -->
+      <!-- the next session when _applyVideoModel + generateVideo   -->
+      <!-- + reuseVideoJob are refactored to drive/read it.         -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div id="vpParams" style="display:none;flex-direction:column;">
+
+        <!-- 1. Mode sub-select (Kling version / Veo refMode / Grok mode / PixVerse mode) -->
+        <div class="psec" id="vpModeSection" style="display:none;padding:6px 14px;">
+          <div class="ctrl" style="margin:0;">
+            <div class="ctrl-label" id="vpModeLabel" style="color:var(--text);">Mode</div>
+            <select id="vpModeSelect" onchange="onVpModeChange(this.value)"
+              style="width:100%;background:rgba(212,160,23,.1);border:1px solid var(--accent);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+            </select>
+            <div id="vpModeNote" style="font-size:10px;color:var(--dim2);margin-top:3px;display:none;"></div>
+          </div>
+        </div>
+
+        <!-- 2. Common header: Prompt -->
+        <div class="psec" id="vpPromptSection">
+          <div class="plabel">Prompt
+            <button class="ibtn" onclick="vpAiPrompt()" style="font-size:10px;padding:3px 9px;margin-left:auto;">✦ AI</button>
+          </div>
+          <textarea id="vpPrompt" placeholder="Describe the scene, camera movement, lighting…" style="height:90px;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 10px;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
+        </div>
+
+        <!-- Style + Camera tags + model camera move (inline pod camera tags) -->
+        <div id="vpTagsRow">
+          <div id="vpStyleTags"></div>
+          <div id="vpCameraTags"></div>
+          <div class="ctrl" id="vpCameraMoveRow" style="display:none;padding:6px 14px 0;">
+            <div class="ctrl-label" style="font-size:10px;color:var(--dim);">Model camera move</div>
+            <select id="vpCameraMove"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+              <option value="">None</option>
+              <!-- Options populated per model in _applyVideoModel -->
+            </select>
+          </div>
+        </div>
+
+        <!-- Negative prompt (1-row collapsible, upNeg pattern from images) -->
+        <div class="psec" id="vpNegPromptSection" style="display:none;padding:0 14px;">
+          <div onclick="vpToggleNegPrompt()" style="cursor:pointer;padding:4px 0;font-size:10px;color:var(--dim2);user-select:none;display:flex;align-items:center;gap:6px;">
+            <span id="vpNegPromptCaret">▸</span>
+            <span>Negative prompt</span>
+            <span id="vpNegPromptStatus" style="color:var(--accent);display:none;"> · active</span>
+          </div>
+          <div id="vpNegPromptBody" style="display:none;padding:4px 0 8px;">
+            <input type="text" id="vpNegPrompt" placeholder="blurry, low quality, deformed…"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 8px;outline:none;box-sizing:border-box;">
+          </div>
+        </div>
+
+        <!-- Reference images -->
+        <div class="psec" id="vpRefsSection" style="display:none;">
+          <div class="plabel" id="vpRefsLabel">Reference images
+            <span id="vpRefsCount" style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">0 / 1</span>
+          </div>
+          <div id="vpRefsNote" style="font-size:10px;color:var(--dim2);margin-bottom:7px;line-height:1.5;display:none;"></div>
+          <input type="file" id="vpRefsInput" accept="image/*" multiple style="display:none" onchange="vpRefsFileSelected(this.files)">
+          <div class="ref-panel-scroll" id="vpRefsPanelScroll">
+            <div class="ref-add-tile" id="vpRefsAddTile" onclick="document.getElementById('vpRefsInput').click()">
+              <span>+ Add</span>
+            </div>
+          </div>
+          <!-- Luma per-ref weight sliders (dynamic, populated by _vpRenderRefWeights) -->
+          <div id="vpRefWeights" style="display:none;padding:6px 0 0;"></div>
+        </div>
+
+        <!-- Source video (treated as a reference — directly below refs) -->
+        <div class="psec" id="vpSourceVideoSection" style="display:none;">
+          <div class="plabel">Source video
+            <span id="vpSourceVideoInfo" style="color:var(--dim2);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">None selected</span>
+          </div>
+          <div id="vpSourceVideoThumb" style="display:none;margin-bottom:6px;position:relative;">
+            <img id="vpSourceVideoImg" src="" style="width:100%;max-height:180px;object-fit:contain;background:#111;display:block;">
+            <div id="vpSourceVideoMeta" style="display:flex;gap:10px;flex-wrap:wrap;padding:5px 0 2px;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.6;"></div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+            <button class="ibtn" id="vpSourceVideoPickBtn" onclick="vpPickSourceVideo()" style="font-size:10px;padding:3px 9px;">▷ Pick from gallery</button>
+            <button class="ibtn" id="vpSourceVideoDescribeBtn" onclick="vpDescribeSourceVideo()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
+            <button class="ibtn" id="vpSourceVideoClearBtn" onclick="vpClearSourceVideo()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
+          </div>
+        </div>
+
+        <!-- Source audio (Seedance 2.0: 3× URL inputs, hned pod source video) -->
+        <div class="psec" id="vpSourceAudioSection" style="display:none;">
+          <div class="plabel">Source audio URLs
+            <span style="color:var(--dim2);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">max 3</span>
+          </div>
+          <input type="url" id="vpSourceAudio1" placeholder="Audio URL 1 (optional)" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;box-sizing:border-box;margin-bottom:4px;">
+          <input type="url" id="vpSourceAudio2" placeholder="Audio URL 2 (optional)" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;box-sizing:border-box;margin-bottom:4px;">
+          <input type="url" id="vpSourceAudio3" placeholder="Audio URL 3 (optional)" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;box-sizing:border-box;">
+        </div>
+
+        <!-- 4. Core params: Resolution, Aspect, CFG, Duration, Seed -->
+        <div id="vpCoreParams">
+          <!-- Resolution -->
+          <div class="ctrl" id="vpResolutionRow" style="display:none;">
+            <div class="ctrl-label">Resolution</div>
+            <select id="vpResolution" onchange="updateVpResInfo()"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+            </select>
+            <div id="vpResolutionNote" style="font-size:10px;color:var(--dim2);margin-top:3px;display:none;"></div>
+          </div>
+
+          <!-- Aspect ratio -->
+          <div class="ctrl" id="vpAspectRow" style="display:none;">
+            <div class="ctrl-label">Aspect ratio</div>
+            <select id="vpAspect" onchange="updateVpResInfo()"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+            </select>
+          </div>
+
+          <!-- CFG Scale -->
+          <div class="ctrl" id="vpCfgRow" style="display:none;">
+            <div class="ctrl-label">CFG Scale <span id="vpCfgVal" style="color:var(--accent);">0.5</span></div>
+            <input type="range" id="vpCfg" min="0" max="1" step="0.05" value="0.5"
+              oninput="document.getElementById('vpCfgVal').textContent = parseFloat(this.value).toFixed(2);">
+          </div>
+
+          <!-- Duration (3 modes: slider / select / radio) -->
+          <div class="ctrl" id="vpDurationRow" style="display:none;">
+            <div class="ctrl-label">Duration <span id="vpDurationVal" style="color:var(--accent);">5s</span></div>
+            <div id="vpDurationSliderWrap">
+              <input type="range" id="vpDuration" min="3" max="15" step="1" value="5"
+                oninput="document.getElementById('vpDurationVal').textContent = this.value + 's';">
+            </div>
+            <select id="vpDurationSelect" style="display:none;width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;"></select>
+            <div id="vpDurationRadios" style="display:none;padding:4px 0;"></div>
+            <div id="vpDurationNote" style="font-size:10px;color:var(--dim2);margin-top:3px;display:none;"></div>
+          </div>
+
+          <!-- Seed -->
+          <div class="ctrl" id="vpSeedRow" style="display:none;">
+            <div class="ctrl-label">Seed <span style="color:var(--dim2);font-size:10px;font-weight:400;margin-left:6px;">(random if empty)</span></div>
+            <input type="number" id="vpSeed" placeholder="e.g. 42" min="0" max="2147483647"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;box-sizing:border-box;">
+          </div>
+        </div>
+
+        <!-- 5. Individual parameters (per-family) -->
+
+        <!-- Luma advanced: Loop, HDR color mode -->
+        <div class="psec" id="vpLumaAdvanced" style="display:none;padding:6px 14px;">
+          <div class="ctrl" style="margin:0;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="vpLumaLoop" style="width:14px;height:14px;accent-color:var(--acc);">
+              <span>Loop (seamless)</span>
+            </label>
+          </div>
+          <div class="ctrl" id="vpLumaHdrRow" style="display:none;margin-top:6px;">
+            <div class="ctrl-label">Color mode</div>
+            <select id="vpLumaColorMode"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="sdr">SDR (standard)</option>
+              <option value="hdr">HDR (Rec. 2020)</option>
+              <option value="exr">HDR + EXR download</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Pixverse advanced: Quality select -->
+        <div class="psec" id="vpPixverseAdvanced" style="display:none;padding:6px 14px;">
+          <div class="ctrl" style="margin:0;">
+            <div class="ctrl-label">Quality</div>
+            <select id="vpPixverseQuality" onchange="updateVpResInfo()"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+              <option value="360p">360p</option>
+              <option value="540p">540p</option>
+              <option value="720p">720p</option>
+              <option value="1080p" selected>1080p</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Topaz advanced: Factor, FPS, Slowmo, Creativity -->
+        <div class="psec" id="vpTopazAdvanced" style="display:none;padding:6px 14px;">
+          <div class="ctrl" style="margin:0;">
+            <div class="ctrl-label">Resolution</div>
+            <select id="vpTopazResolution"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="FHD">1080p (FHD)</option>
+              <option value="4K" selected>2160p (4K)</option>
+            </select>
+          </div>
+          <div class="ctrl" id="vpTopazFactorRow" style="margin-top:6px;">
+            <div class="ctrl-label">Upscale factor</div>
+            <select id="vpTopazFactor"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="1">1× (interpolation only)</option>
+              <option value="2" selected>2×</option>
+              <option value="4">4×</option>
+            </select>
+          </div>
+          <div class="ctrl" id="vpTopazFpsRow" style="margin-top:6px;">
+            <div class="ctrl-label">Target FPS</div>
+            <select id="vpTopazFps"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="">Source (auto-detect)</option>
+              <option value="24">24</option>
+              <option value="30">30</option>
+              <option value="48">48</option>
+              <option value="60">60</option>
+              <option value="120">120</option>
+            </select>
+          </div>
+          <div class="ctrl" id="vpTopazSlowmoRow" style="margin-top:6px;">
+            <div class="ctrl-label">Slow motion</div>
+            <select id="vpTopazSlowmo"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="1" selected>Off (1×)</option>
+              <option value="2">2× (half speed)</option>
+              <option value="4">4× (quarter speed)</option>
+              <option value="8">8×</option>
+            </select>
+          </div>
+          <div class="ctrl" id="vpTopazCreativityRow" style="display:none;margin-top:6px;">
+            <div class="ctrl-label">Creativity</div>
+            <select id="vpTopazCreativity"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="0">Off</option>
+              <option value="1">Low</option>
+              <option value="2" selected>Medium</option>
+              <option value="3">High</option>
+              <option value="4">Max</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Magnific advanced: FPS Boost, Sharpen, Grain, Prompt, Creativity, Flavor, Strength -->
+        <div class="psec" id="vpMagnificAdvanced" style="display:none;padding:6px 14px;">
+          <div class="ctrl" style="margin:0;">
+            <div class="ctrl-label">Resolution</div>
+            <select id="vpMagnificResolution"
+              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+              <option value="1k">1K</option>
+              <option value="2k" selected>2K</option>
+              <option value="4k">4K</option>
+            </select>
+          </div>
+          <div class="ctrl" style="margin-top:6px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="vpMagnificFps" style="width:14px;height:14px;accent-color:var(--purple);">
+              <span>FPS Boost (2×)</span>
+            </label>
+          </div>
+          <div class="ctrl" style="margin-top:6px;">
+            <div class="ctrl-label">Sharpen <span class="cv" id="vpMagnificSharpenVal">0</span></div>
+            <input type="range" id="vpMagnificSharpen" min="0" max="100" value="0" step="1"
+              oninput="document.getElementById('vpMagnificSharpenVal').textContent = this.value;">
+          </div>
+          <div class="ctrl" style="margin-top:6px;">
+            <div class="ctrl-label">Smart Grain <span class="cv" id="vpMagnificGrainVal">0</span></div>
+            <input type="range" id="vpMagnificGrain" min="0" max="100" value="0" step="1"
+              oninput="document.getElementById('vpMagnificGrainVal').textContent = this.value;">
+          </div>
+          <div id="vpMagnificCreativeOpts">
+            <div class="ctrl" style="margin-top:6px;">
+              <div class="ctrl-label">Prompt (optional)</div>
+              <input type="text" id="vpMagnificPrompt" placeholder="e.g. cinematic detail, sharp textures"
+                style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;box-sizing:border-box;">
+            </div>
+            <div class="ctrl" style="margin-top:6px;">
+              <div class="ctrl-label">Creativity <span class="cv" id="vpMagnificCreativityVal">50</span></div>
+              <input type="range" id="vpMagnificCreativity" min="0" max="100" value="50" step="1"
+                oninput="document.getElementById('vpMagnificCreativityVal').textContent = this.value;">
+            </div>
+            <div class="ctrl" style="margin-top:6px;">
+              <div class="ctrl-label">Flavor</div>
+              <div style="display:flex;gap:3px;margin-top:4px;">
+                <label id="vpMagnificFlavor_vivid" style="flex:1;text-align:center;padding:5px 2px;border:1px solid var(--purple);cursor:pointer;font-size:11px;color:var(--purple);">
+                  <input type="radio" name="vpMagnificFlavor" value="vivid" checked style="display:none;">Vivid
+                </label>
+                <label id="vpMagnificFlavor_natural" style="flex:1;text-align:center;padding:5px 2px;border:1px solid var(--border);cursor:pointer;font-size:11px;color:var(--dim);">
+                  <input type="radio" name="vpMagnificFlavor" value="natural" style="display:none;">Natural
+                </label>
+              </div>
+            </div>
+          </div>
+          <div id="vpMagnificPrecisionOpts" style="display:none;">
+            <div class="ctrl" style="margin-top:6px;">
+              <div class="ctrl-label">Upscale Strength <span class="cv" id="vpMagnificStrengthVal">60</span></div>
+              <input type="range" id="vpMagnificStrength" min="0" max="100" value="60" step="5"
+                oninput="document.getElementById('vpMagnificStrengthVal').textContent = this.value;">
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Count -->
+        <div class="ctrl" id="vpCountRow" style="display:none;padding:6px 14px;">
+          <div class="ctrl-label">Count <span id="vpCountVal" style="color:var(--accent);">1</span></div>
+          <input type="range" id="vpCount" min="1" max="4" step="1" value="1"
+            oninput="document.getElementById('vpCountVal').textContent = this.value;">
+        </div>
+
+        <!-- 7. Bottom toggles: Multiclip, Multi-shots, Off-peak, Audio -->
+        <div id="vpBottomToggles" style="padding:6px 14px;">
+          <div class="ctrl" id="vpMultiClipRow" style="display:none;margin:0 0 4px 0;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="vpMultiClip" style="width:14px;height:14px;accent-color:var(--acc);">
+              <span>Multi-clip (2-8 segments)</span>
+            </label>
+          </div>
+          <div class="ctrl" id="vpMultiShotsRow" style="display:none;margin:0 0 4px 0;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="vpMultiShots" style="width:14px;height:14px;accent-color:var(--acc);">
+              <span>Multi-shots (multiple cuts)</span>
+            </label>
+          </div>
+          <div class="ctrl" id="vpOffPeakRow" style="display:none;margin:0 0 4px 0;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="vpOffPeak" style="width:14px;height:14px;accent-color:var(--acc);">
+              <span>Off-peak (slower, cheaper)</span>
+            </label>
+          </div>
+          <div class="ctrl" id="vpAudioRow" style="display:none;margin:0;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="vpAudio" checked style="width:14px;height:14px;accent-color:var(--acc);">
+              <span>🔊 Generate audio</span>
+            </label>
+          </div>
+        </div>
+
+      </div>
+      <!-- ═══ End of #vpParams — unified video panel ═══ -->
 
       <!-- Kling version selector — shown only when a Kling group is selected -->
       <div class="psec" id="klingVersionRow" style="display:none;padding:6px 14px;">

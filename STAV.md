@@ -1,122 +1,162 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v206en
-## Příští verze: v207en
+## Aktuální verze: v207en (WIP — Session 2 Fáze 1-3 hotové)
+## Příští verze: v208en (Session 2 Fáze 4-8: aktivace unified panelu)
 ## Datum: 2026-04-22
 ## Worker verze: 2026-16 (beze změny)
 
 ---
 
-## Co je v v206en (oproti v205en)
+## 🔴 STARTING SESSION 2 — ČTI NEJDŘÍV
 
-### Video subsystem cleanup (8 items z CLEANUP_ANALYSIS.md)
+Pokud jsi Claude začínající novou chat session a pokračuješ Session 2:
 
-Čistě interní refactoring — žádná funkční změna, žádný nový model, žádný API payload dotčený. Cíl: sjednotit chaos který vznikl postupným přidáváním modelů (11 video providerů + Topaz + Magnific), zredukovat duplicitu, vytvořit single-source-of-truth pro rekurentní koncepty (spend key, timeouty, source sloty, polling).
+1. **`SESSION_2_HANDOFF.md`** v GitHub repo `petrsajner/GIS-modules` obsahuje **KOMPLETNÍ BRIEFING** — rozhodnutí, specifikace, plán Fáze 4-8, gotchas, odhady, moduly k fetch. Stáhni přes `web_fetch` raw URL.
+2. **Tento STAV.md** je jen shrnutí — detaily jsou v HANDOFF.
+3. Stáhni moduly z GitHubu (NE `/mnt/project/` — **VŽDY stale**): `template.html`, `video-models.js`, `video-queue.js`, `video-gallery.js`, `video-topaz.js`, `video-utils.js`, `build.js`.
+4. Edit v `/home/claude/src/`, build v `/home/claude/`, output v `/mnt/user-data/outputs/`.
 
-| # | Oblast | Impl | Modul(y) |
-|---|---|---|---|
-| 7 | Dead comment "rubber-band" | -1 ř | video-gallery |
-| 4 | `videoMention*` globály → `videoMention` objekt (19 call-sites) | +1 ř | video-gallery |
-| 11 | Error handling guideline + generalized timeout regex | +10 ř | video-utils, video-queue |
-| 8 | Centrální `VIDEO_POLL` konstanty (10 timeout keys, 2 poll interval) | +25 ř | video-utils (všechny handlery) |
-| 2 | `spendKey`/`spendKeyAudio` do 28 VIDEO_MODELS entries, funkce 28→7 ř | +15 ř | video-models |
-| 1 | `VIDEO_SOURCE_SLOTS` registry (7 slotů) + generic API | +60 ř | video-gallery, video-topaz |
-| 9 | `_loadAndEncodeSourceVideo` + `_downloadUpscaledVideo` helpery | +15 ř | video-topaz |
-| 3 | `_videoPollLoop` — refactor Luma, Grok, PixVerse | +24 ř | video-queue, video-models |
+---
 
-**Předpokládané úspory dle CLEANUP_ANALYSIS byly ~530 ř, realita +150 ř.** Rozdíl není chyba analýzy — je to záměrné rozhodnutí zachovat existující wrappery jako 1-line forwardy místo přepisování všech 50 call-sites v template.html a video-*.js. Wrapper-preserving variant: nízké riziko, žádný HTML audit potřeba, architektonické wins stejné.
+## ⚠ v207en je WORK-IN-PROGRESS
 
-### Architektonické wins
+v207en obsahuje **skrytou infrastrukturu** pro unified video panel (Session 2), ale **neaktivuje** ji. Produkce funguje jako v v206en — stará per-model UI je beze změny. Unified panel je `display:none`, čeká na Fázi 4-8 v další session.
 
-1. **Adding new video model = 1 místo pro spend key**: přidat `spendKey: '_xyz'` (a volitelně `spendKeyAudio: '_xyz_audio'`) do entry. Žádný switch na úpravu.
-2. **Central timeout tuning**: měnit poll interval nebo provider timeout = jedno místo (`VIDEO_POLL` v video-utils.js).
-3. **Adding new source slot = 1 entry do registru**: `VIDEO_SOURCE_SLOTS.xyz = { ids, set, pickToast, setHook? }`.
-4. **New provider s pollingem** = jen adapter s `poll()` callbackem, `_videoPollLoop` se postará o timeout + elapsed time + queued/running handling.
-5. **Konzistentní error UX**: všechny handlery throw raw technical error, `videoJobError` je jediný entry-point pro friendly-ifikaci.
-6. **Konzistentní upscale download**: Topaz i Magnific používají `_downloadUpscaledVideo` s chunked progress + error handling.
+**Bezpečné nasazení:** v207en lze nasadit okamžitě — nic se nerozbije. Jen o ~700 řádků HTML/JS větší soubor (skrytá infrastruktura).
 
-### Poznámky k implementaci
+---
 
-- `_getVideoSpendKey` teď čte `spendKey`/`spendKeyAudio` z VIDEO_MODELS entry. WAN 2.6 má funkční spendKey (resolution-dependent `'_wan26_1080p' | '_wan26_720p'`).
-- Veo NENÍ v `_videoPollLoop` — používá rekurzivní `setTimeout` pattern s `operations/xyz` endpointem, refactor by byl throw-away před Session 2.
-- `friendlyVideoError`: timeout regex generalizován z `25 min|30 min|10 min` na `\d+\s*(min|hour)` — pokrývá všechny varianty včetně PixVerse off-peak 2 hours.
-- Build order beze změny — 25 modulů, stejné pořadí jako v205en.
+## Co je v v207en (oproti v206en) — Session 2 Fáze 1-3
 
-### Build stats
+### ✅ Fáze 1: Reorder modelů
 
-- **25 modulů** (gpt-edit.js + 6 video-*.js + 18 core)
-- **23 096 JS řádků** (v205en: 22 946 — Δ +150)
-- **28 181 total lines** (HTML + JS + CSS)
-- `✓ HTML div balance: OK (779 pairs)`
+**Status: Už hotové.** Petrovo požadované pořadí (Veo → Kling → PixVerse → Seedance → Grok → Luma → Vidu → WAN → Topaz → Magnific) v `videoModelSelect` HTML options už přesně odpovídalo. Pouze ověřeno. Žádná změna.
+
+### ✅ Fáze 2: `getVideoUi(modelKey)` helper (central UI flags)
+
+**Modul:** video-models.js (+200 ř, za MAGNIFIC_VIDEO_MODELS).
+
+Místo injekce `ui: {...}` do ~60 entries (duplikát, chyba-prone), **jeden central helper** derivuje UI flags z:
+1. Model type (`veo`, `kling`, `luma_video`, `seedance`, `vidu`, `wan27`, `wan26`, `pixverse`, `grok`)
+2. Varianta (T2V, I2V, R2V, V2V, Keyframe, Transition, Fusion)
+3. Family-specific override pro edge case
+
+**Vrací frozen objekt se všemi UI flags:** core visibility, refs, source slot, sub-select, advanced group, camera move, bottom toggles (Multiclip/Multi-shots/Off-peak/Audio).
+
+**Princip:** Kling group "parent" entries (`kling_v3`, `seedance2` apod.) delegují na svůj default variant. To znamená `getVideoUi('seedance2')` vrátí UI pro `seedance2_t2v`.
+
+### ✅ Fáze 3: Unified HTML panel `#vpParams`
+
+**Modul:** template.html (+321 ř, hned za videoModelDesc, před klingVersionRow).
+
+**Uspořádání podle Petrova pořadí:**
+1. Mode sub-select
+2. Prompt + styles/camera tags + **Model camera move menu** + **Negative prompt** (collapsible)
+3. Reference images + dynamicky zobrazené per-ref weight slidery (Luma)
+4. Source video (hned pod refs) → Source audio (Seedance 2.0)
+5. Core: Resolution, Aspect, CFG, Duration, Seed
+6. Individual advanced (Luma/PixVerse/Topaz/Magnific — zachováno jak jsou)
+7. Count
+8. Bottom toggles: Multiclip, Multi-shots, Off-peak, Audio
+
+**Všechny IDs pattern `vpXxx`** (analogicky `upXxx` pro images). ID počet v #vpParams: ~60 unikátních.
+
+**⚠ Panel je `display:none`.** Nikdo ho neaktivuje — čeká na `_applyVideoModel` rewrite.
+
+### Build stats (v207en)
+
+- **25 modulů** (beze změny)
+- **23 497 JS řádků** (+401 vs. v206en — getVideoUi helper)
+- **28 910 total lines** (+729 vs. v206en — unified HTML panel)
+- `✓ HTML div balance: OK (866 pairs)` (+87 pairs)
 - Extracted script `node --check` → OK
 
 ---
 
-## Kde jsme přestali
+## Kde jsme přestali — Session 2 Fáze 4-8 (další session)
 
-v206en je hotová cleanup session — všechny kandidáti z `CLEANUP_ANALYSIS.md` (items #1, #2, #3, #4, #7, #8, #9, #11) implementovány. Items #5, #6, #10 zůstávají pro **Session 2 (unified video panel)**, která je teď další v pořadí.
+### Fáze 4: Refactor `_applyVideoModel(modelKey)` — flag-driven
 
-**Kritický bug TODO z v205en memory** (Seedance 2.0 I2V universal prompt block) zatím neadresován — vyžaduje F12 log + Network response od Petra, čeká na real session data.
+Z 364 řádků switche → ~40 ř helperu. Čte `getVideoUi(modelKey)` a aplikuje flags přes `_setRow(id, show)` pattern.
+
+### Fáze 5: `buildVideoParams()` + `generateVideo` refactor
+
+Jedna fce čte všechny `vpXxx` IDs → `params` objekt (unified schema). `generateVideo` přestane mít 30× `getElementById`.
+
+### Fáze 6: `loadVideoJobParamsToForm()` + reuseVideoJob refactor
+
+Jedna fce píše `params.*` do `vpXxx` IDs. Opravuje bug: Seedance 2.0 reuse (aktuálně prázdné model pole). Backward compat pro stará videa.
+
+### Fáze 7: Handler refactor
+
+10+ video handlerů akceptuje `params` obj místo syrových IDs. Uloží konzistentní `params` shape do video_meta.
+
+### Fáze 8: Testování + odstranění starých panelů
+
+Smoke test per model. Odstranit z template.html: `lumaVideoParams`, `grokVideoParams`, `topazSrcRow`, `pixverseParams`, `magnificVidOpts`, `veoRefModeRow`, `lumaHdrRow`, `lumaCharRefRow`, `lumaResRow`, `veoResRow`, `wanResRow`, `topazResRow`, `topazFactorRow`, `topazFpsRow`, `topazSlowmoRow`, `topazCreativityRow`, `videoAspectRow`, `videoCfgRow`, `videoDurRow`, `videoAudioCtrl`, `videoCountRow`, `videoResInfoRow`, `videoRefSection`.
 
 ---
 
-## TODO (prioritní pořadí)
+## Unified metadata schema (designováno, implementace Fáze 6-7)
 
-1. **Session 2 — Unified video panel** (analogicky v200en pro images). Scope: `_applyVideoModel` decomposition (#5), `generateVideo` decomposition (#6), prompt rewriting refactor (#10), template.html per-model panely → jeden unified panel.
-2. **Seedance 2.0 I2V universal prompt block** — F12 log + Network response od Petra.
-3. Style Library "My Presets".
-4. Claid.ai via proxy.
-5. Hailuo 2.3 upgrade.
-6. Use V2V (Seedance R2V).
-7. Runway Gen-4 (research only).
-8. Recraft V4 / Z-Image LoRA / Ideogram V3.
+```js
+params: {
+  // Core (všechny modely):
+  resolution, aspectRatio, duration, cfgScale, seed, enableAudio, count, negativePrompt,
+  // Mode sub-select:
+  modeValue,    // pro Grok/Veo/PixVerse
+  variantKey,   // pro Kling groups (pomáhá restore v reuse)
+  // Source video slot:
+  sourceVideoId,
+  // Source audio (Seedance 2.0):
+  audioUrls: [],
+  // Per-family advanced (jen pokud model patří):
+  topaz:    { factor, fps, slowmo, creativity } | null,
+  magnific: { mode, resolution, fps_boost, sharpen, grain, prompt, creativity, flavor, strength } | null,
+  pixverse: { quality, cameraMove, multiClip, offPeak } | null,
+  luma:     { loop, colorMode, refWeights: [] } | null,
+  wan:      { multiShots } | null,
+  grok:     { mode } | null,
+  veo:      { refMode } | null,
+}
+```
+
+Po Fázi 6-7 bude KAŽDÉ video ukládat plný schema. Stará videa se budou reuse-ovat přes backward compat mapping.
 
 ---
 
-## Změněné moduly (v206en)
+## Ostatní TODO
+
+1. **Session 2 Fáze 4-8** ← **NEXT**
+2. Seedance 2.0 I2V universal prompt block (vyžaduje F12 log)
+3. Style Library "My Presets"
+4. Claid.ai via proxy
+5. Hailuo 2.3 upgrade
+6. Use V2V (Seedance R2V)
+7. Runway Gen-4 (research only)
+
+---
+
+## Změněné moduly (v207en vs. v206en)
 
 | Modul | Status | Popis |
 |---|---|---|
-| `video-utils.js` | upraven | +VIDEO_POLL konstanty, friendlyVideoError guideline |
-| `video-models.js` | upraven | +spendKey/spendKeyAudio do 28 entries, _getVideoSpendKey simplified, Luma/Grok/PixVerse přes _videoPollLoop |
-| `video-queue.js` | upraven | +_videoPollLoop, VIDEO_POLL defaults, videoJobError komentář |
-| `video-gallery.js` | upraven | +VIDEO_SOURCE_SLOTS registry + generic API, 6 slotů přes registry, videoMention encapsulated, dead comment removed |
-| `video-topaz.js` | upraven | +Topaz registry entry s setHook, +shared upscale helpers |
-| `build.js` | beze změny | (předchozí update v v205en — gpt-edit.js) |
-
-**Ostatní moduly beze změny.**
-
----
-
-## Pravidla a principy
-
-- **⚠ CRITICAL — `/mnt/project/` je VŽDY stale. NIKDY ho nepoužívat.** Session start: (1) `STAV.md` z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) `node build.js NNNen → dist/`.
-- **Syntax check po buildu**: extract script z builtu → `node --check /tmp/check.mjs`. OK = žádný výstup. `node --input-type=module < /tmp/check.mjs 2>&1 | head -3` vypíše `ReferenceError: window is not defined`.
-- **HTML validation** — build.js zobrazuje `✓ HTML div balance: OK (N pairs)`.
-- **NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele.**
-- **Video cleanup (v206en)** — wrappers preserved pattern: pokud refactor vyžaduje přepsání desítek call-sites v HTML+JS, udělej wrappers `function oldName() { newApi('key'); }` místo rename. Risk << savings.
-- **VIDEO_MODELS entries** = single source of truth pro spend keys (`spendKey`, `spendKeyAudio`). WAN 2.6 má funkční spendKey (resolution-dependent).
-- **VIDEO_POLL** v video-utils.js = central tuning pro všechny video timeouty + poll intervaly. Měnit tady, aplikuje se automaticky.
-- **VIDEO_SOURCE_SLOTS** registry v video-gallery.js = single registry pro všechny source-video UI panely. Topaz entry v video-topaz.js (push pattern, protože setHook vyžaduje Topaz-specific FPS detection).
-- **_videoPollLoop** v video-queue.js — generic polling adapter pro Luma/Grok/PixVerse. Veo + fal modely mají vlastní shape, nepoužívají ho.
-- **Handler error guideline**: handlery throw RAW technické errory; `videoJobError` je single entry-point pro friendly-ifikaci přes `friendlyVideoError`. Viz guideline komentář nad funkcí.
-- **Decisions belong to Petr** — u složitějších refactorů prezentovat options předem.
-- **NE `/mnt/project/` stale** — nestěžovat si Petrovi, je to infrastructure problém. Řešení = upload do chatu/project files.
+| `video-models.js` | upraven | +getVideoUi() helper (+200 ř) |
+| `template.html` | upraven | +#vpParams unified panel (+321 ř, hidden) |
+| **Ostatní** | beze změny | |
 
 ---
 
 ## Runtime Philosophy
 
-Beze změny od v205en. Single-file HTML na file:// v Chrome, NO CDN pro libraries, local-first IndexedDB, Tauri migrace později.
+Beze změny od v206en.
 
 ---
 
 ## Nástroje a resources
 
-- **Kódová báze:** `petrsajner/GIS-modules` na GitHubu (synced to Claude project knowledge)
-- **Proxy:** `gis-proxy.petr-gis.workers.dev`; R2 bucket `gis-magnific-videos`
-- **AI provideři:** fal.ai, Segmind, Google, Replicate, Luma, Kling, PixVerse, Topaz, Magnific/Freepik, xAI, OpenRouter, OpenAI (přes fal)
-- **Build modul order (v206en, 25 modulů)**: models → styles → setup → spending → model-select → assets → refs → generate → fal → gpt-edit → output-placeholder → proxy → gemini → output-render → db → gallery → toast → paint → ai-prompt → video-utils → video-models → video-queue → video-gallery → video-topaz → video-archive
+- **Kódová báze:** `petrsajner/GIS-modules` na GitHubu
+- **Proxy:** `gis-proxy.petr-gis.workers.dev`
+- **Build modul order (v207en, 25 modulů, beze změny)**
 - **Dev server**: `node build.js --dev` (port 7800)
-- **Proxy deploy** (Windows): `cd C:\Users\Petr\Documents\gis-proxy` → `npm run deploy`
 - **Kontakt**: info.genimagestudio@gmail.com
