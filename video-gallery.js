@@ -54,12 +54,61 @@ function _srcSlotDescribe(imgId) {
   _describeFromThumb(img.src);
 }
 
+// ═══════════════════════════════════════════════════════
+// Video source-slot registry (v206en cleanup #1).
+// Each entry describes DOM IDs + state hooks for one slot.
+// Models that extend it (Topaz in video-topaz.js) push their own entries
+// at load time — see `VIDEO_SOURCE_SLOTS.topaz = {...}` in video-topaz.js.
+// Fields:
+//   ids         — { info, thumb, img, meta, clearBtn, describeBtn }
+//   set(id)     — store the videoId in the module-level state variable
+//   pickToast   — text shown when user clicks a "pick from gallery" button
+//   setHook?    — async optional post-_srcSlotSet callback, receives {meta,thumb}
+//   clearHook?  — optional post-_srcSlotClear callback (e.g. resetting <input>)
+// ═══════════════════════════════════════════════════════
+const VIDEO_SOURCE_SLOTS = Object.create(null);
+
+function videoSlotClear(key) {
+  const slot = VIDEO_SOURCE_SLOTS[key];
+  if (!slot) return;
+  slot.set(null);
+  _srcSlotClear(slot.ids);
+  if (slot.clearHook) slot.clearHook();
+}
+
+async function videoSlotSet(key, videoId) {
+  const slot = VIDEO_SOURCE_SLOTS[key];
+  if (!slot) return null;
+  slot.set(videoId);
+  const result = await _srcSlotSet(slot.ids, videoId);
+  if (slot.setHook) await slot.setHook(videoId, result);
+  return result;
+}
+
+async function videoSlotDescribe(key) {
+  const slot = VIDEO_SOURCE_SLOTS[key];
+  if (!slot) return;
+  _srcSlotDescribe(slot.ids.img);
+}
+
+function videoSlotPick(key) {
+  const slot = VIDEO_SOURCE_SLOTS[key];
+  if (!slot) return;
+  switchView('video');
+  toast(slot.pickToast || 'Select a video, then click ▷ Use on it', 'ok');
+}
+
 // ── WAN 2.7 I2V extend-video helpers ─────────────────────
 const _wan27vIds = { info:'wan27vSrcInfo', thumb:'wan27vSrcThumb', img:'wan27vSrcImg', meta:'wan27vSrcMeta', clearBtn:'wan27vSrcClearBtn', describeBtn:'wan27vSrcDescribeBtn' };
-function wan27vClearSource() { wan27vSrcVideoId = null; _srcSlotClear(_wan27vIds); }
-async function wan27vSetSource(videoId) { wan27vSrcVideoId = videoId; await _srcSlotSet(_wan27vIds, videoId); }
-function wan27vPickFromGallery() { switchView('video'); toast('Select a video in the gallery, then click ▷ Use', 'ok'); }
-async function wan27vDescribeSource() { _srcSlotDescribe('wan27vSrcImg'); }
+VIDEO_SOURCE_SLOTS.wan27v = {
+  ids: _wan27vIds,
+  set: (id) => { wan27vSrcVideoId = id; },
+  pickToast: 'Select a video in the gallery, then click ▷ Use',
+};
+function wan27vClearSource()        { videoSlotClear('wan27v'); }
+async function wan27vSetSource(id)  { return videoSlotSet('wan27v', id); }
+function wan27vPickFromGallery()    { videoSlotPick('wan27v'); }
+async function wan27vDescribeSource() { await videoSlotDescribe('wan27v'); }
 
 // ── Shared: open describe modal with a thumbnail dataURL ──────
 async function _describeFromThumb(thumbDataUrl) {
@@ -79,6 +128,18 @@ async function _describeFromThumb(thumbDataUrl) {
 
 // ── V2V / Motion Control helpers ─────────────────────────
 const _v2vIds = { info:'v2vSrcInfo', thumb:'v2vSrcThumb', img:'v2vSrcImg', meta:'v2vSrcMeta', clearBtn:'v2vClearBtn', describeBtn:'v2vDescribeBtn' };
+// V2V has two input paths (gallery pick + file upload). Registry handles the
+// gallery-pick path; file-upload path uses _v2vSetPanel directly.
+VIDEO_SOURCE_SLOTS.v2v = {
+  ids: _v2vIds,
+  set: (id) => { videoMotionFile = null; videoMotionVideoId = id; },
+  pickToast: 'Select a video in the gallery, then click ▷ Use',
+  clearHook: () => {
+    videoMotionFile = null; videoMotionVideoId = null;
+    const input = document.getElementById('v2vVideoInput');
+    if (input) input.value = '';
+  },
+};
 
 function _v2vSetPanel(thumbDataUrl, infoText) {
   const el = id => document.getElementById(id);
@@ -117,20 +178,22 @@ async function v2vSetFromGallery(videoId) {
 }
 
 function clearV2VVideo() {
-  videoMotionFile = null; videoMotionVideoId = null;
-  _srcSlotClear(_v2vIds);
-  const input = document.getElementById('v2vVideoInput');
-  if (input) input.value = '';
+  videoSlotClear('v2v');
 }
 
-function v2vPickFromGallery() { switchView('video'); toast('Select a video in the gallery, then click ▷ Use', 'ok'); }
-async function v2vDescribeSource() { _srcSlotDescribe('v2vSrcImg'); }
+function v2vPickFromGallery()       { videoSlotPick('v2v'); }
+async function v2vDescribeSource()  { await videoSlotDescribe('v2v'); }
 
 const _wan27eIds = { info:'wan27eSrcInfo', thumb:'wan27eSrcThumb', img:'wan27eSrcImg', meta:'wan27eSrcMeta', clearBtn:'wan27eSrcClearBtn', describeBtn:'wan27eSrcDescribeBtn' };
-function wan27eClearSource() { wan27eSrcVideoId = null; _srcSlotClear(_wan27eIds); }
-async function wan27eSetSource(videoId) { wan27eSrcVideoId = videoId; await _srcSlotSet(_wan27eIds, videoId); }
-async function wan27eDescribeSource() { _srcSlotDescribe('wan27eSrcImg'); }
-async function wan27ePickFromGallery() { switchView('video'); toast('Select a video, then click ▷ Use on it', 'ok'); }
+VIDEO_SOURCE_SLOTS.wan27e = {
+  ids: _wan27eIds,
+  set: (id) => { wan27eSrcVideoId = id; },
+  pickToast: 'Select a video, then click ▷ Use on it',
+};
+function wan27eClearSource()        { videoSlotClear('wan27e'); }
+async function wan27eSetSource(id)  { return videoSlotSet('wan27e', id); }
+async function wan27eDescribeSource() { await videoSlotDescribe('wan27e'); }
+async function wan27ePickFromGallery() { videoSlotPick('wan27e'); }
 
 // ── Seedance 2.0 R2V: 3 source video slots ──────────────
 const _sd2VidIds = [
@@ -138,10 +201,18 @@ const _sd2VidIds = [
   { info:'sd2VidSrc2Info', thumb:'sd2VidSrc2Thumb', img:'sd2VidSrc2Img', meta:'sd2VidSrc2Meta', clearBtn:'sd2VidSrc2ClearBtn', describeBtn:'sd2VidSrc2DescribeBtn' },
   { info:'sd2VidSrc3Info', thumb:'sd2VidSrc3Thumb', img:'sd2VidSrc3Img', meta:'sd2VidSrc3Meta', clearBtn:'sd2VidSrc3ClearBtn', describeBtn:'sd2VidSrc3DescribeBtn' },
 ];
-function sd2VidClear(i) { sd2VidSrc[i] = null; _srcSlotClear(_sd2VidIds[i]); }
-async function sd2VidSet(i, videoId) { sd2VidSrc[i] = videoId; await _srcSlotSet(_sd2VidIds[i], videoId); }
-async function sd2VidDescribe(i) { _srcSlotDescribe(_sd2VidIds[i].img); }
-function sd2VidPick() { switchView('video'); toast('Select a video, then click ▷ Use on it', 'ok'); }
+// Register 3 indexed slots — keys sd2Vid_0..2
+for (let i = 0; i < 3; i++) {
+  VIDEO_SOURCE_SLOTS[`sd2Vid_${i}`] = {
+    ids: _sd2VidIds[i],
+    set: ((idx) => (id) => { sd2VidSrc[idx] = id; })(i),
+    pickToast: 'Select a video, then click ▷ Use on it',
+  };
+}
+function sd2VidClear(i)               { videoSlotClear(`sd2Vid_${i}`); }
+async function sd2VidSet(i, videoId)  { return videoSlotSet(`sd2Vid_${i}`, videoId); }
+async function sd2VidDescribe(i)      { await videoSlotDescribe(`sd2Vid_${i}`); }
+function sd2VidPick()                 { videoSlotPick('sd2Vid_0'); }
 // Routes "▷ Use" from gallery → next empty R2V slot
 async function sd2VidUseFromGallery(videoId) {
   const slot = sd2VidSrc.indexOf(null);
@@ -1387,16 +1458,13 @@ function videoUpdateFilterBanner(filtered, total) {
   if (label && active) label.textContent = `${filtered} / ${total} videos`;
 }
 
-// ── Video rubber-band selection ───────────────────────────
 // ═══════════════════════════════════════════════════════
 // @MENTION AUTOCOMPLETE V VIDEO PROMPTU
 // (kopie systému z refs.js, pro #videoPrompt textarea)
 // ═══════════════════════════════════════════════════════
 
-let videoMentionOpen = false;
-let videoMentionFilter = '';
-let videoMentionAssets = [];
-let videoMentionActiveIdx = -1;
+// Encapsulated mention state (v206en cleanup #4)
+const videoMention = { open: false, filter: '', assets: [], activeIdx: -1 };
 
 function initVideoMentionSystem() {
   const ta = document.getElementById('videoPrompt');
@@ -1414,7 +1482,7 @@ async function handleVideoMentionInput(e) {
   const before = ta.value.slice(0, pos);
   const match = before.match(/@(\w*)$/);
   if (!match) { closeVideoMention(); return; }
-  videoMentionFilter = match[1].toLowerCase();
+  videoMention.filter = match[1].toLowerCase();
   await showVideoMentionDropdown(ta, match.index, pos);
 }
 
@@ -1422,23 +1490,23 @@ async function showVideoMentionDropdown(ta, atStart, curPos) {
   const m = VIDEO_MODELS[getActiveVideoModelKey()] || {};
   const prefix = getVideoRefMentionPrefix(m);
   // Filter refs by mention text matching the typed filter
-  videoMentionAssets = videoRefs.filter((r, gi) => {
+  videoMention.assets = videoRefs.filter((r, gi) => {
     const text = getVideoRefMentionText(r, gi, m).toLowerCase();
-    return !videoMentionFilter || text.startsWith(videoMentionFilter) || text.includes(videoMentionFilter);
+    return !videoMention.filter || text.startsWith(videoMention.filter) || text.includes(videoMention.filter);
   });
 
   const dd = document.getElementById('mentionDropdown');
-  if (!videoMentionAssets.length) {
+  if (!videoMention.assets.length) {
     dd.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--dim2);font-style:italic;">No refs added — add reference images below the prompt first</div>';
   } else {
-    dd.innerHTML = videoMentionAssets.map((r, i) => {
+    dd.innerHTML = videoMention.assets.map((r, i) => {
       const globalIdx = videoRefs.indexOf(r);
       const mentionText = getVideoRefMentionText(r, globalIdx, m);
       const displayLabel = getVideoRefDisplayLabel(r, globalIdx, m);
       const thumbSrc = r.thumb ? `data:image/jpeg;base64,${r.thumb}` : '';
       const insertPreview = prefix + mentionText;
       return `
-      <div class="mention-item ${i === videoMentionActiveIdx ? 'mi-active' : ''}" data-idx="${i}" onmousedown="insertVideoMention(event,${i})">
+      <div class="mention-item ${i === videoMention.activeIdx ? 'mi-active' : ''}" data-idx="${i}" onmousedown="insertVideoMention(event,${i})">
         <img class="mi-thumb" src="${thumbSrc}" alt="${escHtml(displayLabel)}">
         <div class="mi-info">
           <div class="mi-name">${escHtml(insertPreview)}</div>
@@ -1457,23 +1525,23 @@ async function showVideoMentionDropdown(ta, atStart, curPos) {
   dd.style.left = x + 'px';
   dd.style.top = y + 'px';
   dd.classList.add('show');
-  videoMentionOpen = true;
-  videoMentionActiveIdx = -1;
+  videoMention.open = true;
+  videoMention.activeIdx = -1;
 }
 
 function handleVideoMentionKeydown(e) {
-  if (!videoMentionOpen) return;
+  if (!videoMention.open) return;
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    videoMentionActiveIdx = Math.min(videoMentionActiveIdx + 1, videoMentionAssets.length - 1);
-    document.querySelectorAll('.mention-item').forEach((el, i) => el.classList.toggle('mi-active', i === videoMentionActiveIdx));
+    videoMention.activeIdx = Math.min(videoMention.activeIdx + 1, videoMention.assets.length - 1);
+    document.querySelectorAll('.mention-item').forEach((el, i) => el.classList.toggle('mi-active', i === videoMention.activeIdx));
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
-    videoMentionActiveIdx = Math.max(videoMentionActiveIdx - 1, 0);
-    document.querySelectorAll('.mention-item').forEach((el, i) => el.classList.toggle('mi-active', i === videoMentionActiveIdx));
-  } else if (e.key === 'Enter' && videoMentionActiveIdx >= 0) {
+    videoMention.activeIdx = Math.max(videoMention.activeIdx - 1, 0);
+    document.querySelectorAll('.mention-item').forEach((el, i) => el.classList.toggle('mi-active', i === videoMention.activeIdx));
+  } else if (e.key === 'Enter' && videoMention.activeIdx >= 0) {
     e.preventDefault();
-    insertVideoMentionByIdx(videoMentionActiveIdx);
+    insertVideoMentionByIdx(videoMention.activeIdx);
   } else if (e.key === 'Escape') {
     closeVideoMention();
   }
@@ -1485,8 +1553,8 @@ function insertVideoMention(e, idx) {
 }
 
 function insertVideoMentionByIdx(idx) {
-  if (idx < 0 || idx >= videoMentionAssets.length) return;
-  const r = videoMentionAssets[idx];
+  if (idx < 0 || idx >= videoMention.assets.length) return;
+  const r = videoMention.assets[idx];
   const m = VIDEO_MODELS[getActiveVideoModelKey()] || {};
   const prefix = getVideoRefMentionPrefix(m);
   const globalIdx = videoRefs.indexOf(r);
@@ -1507,8 +1575,8 @@ function insertVideoMentionByIdx(idx) {
 
 function closeVideoMention() {
   document.getElementById('mentionDropdown')?.classList.remove('show');
-  videoMentionOpen = false;
-  videoMentionActiveIdx = -1;
+  videoMention.open = false;
+  videoMention.activeIdx = -1;
 }
 
 // ── Video prompt live rewriting ───────────────────────────

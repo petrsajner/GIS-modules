@@ -111,6 +111,8 @@ const VIDEO_MODELS = {
     desc: 'T2V · Native audio · Up to 15s · Fast iteration',
     refMode: 'none', maxRefs: 0,
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_v3_std',
+    spendKeyAudio: '_kling_v3_std_audio',
   },
   kling_v3_t2v_pro: {
     name: 'Kling V3 Pro T2V', type: 'kling_video',
@@ -118,6 +120,8 @@ const VIDEO_MODELS = {
     desc: 'T2V · Native audio · Up to 15s · Highest quality',
     refMode: 'none', maxRefs: 0,
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_v3_pro',
+    spendKeyAudio: '_kling_v3_pro_audio',
   },
   kling_v3_i2v_std: {
     name: 'Kling V3 Standard I2V', type: 'kling_video',
@@ -126,6 +130,8 @@ const VIDEO_MODELS = {
     refMode: 'single_end', maxRefs: 2,
     refLabel: 'Start frame (drag 2nd = end frame)',
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_v3_std',
+    spendKeyAudio: '_kling_v3_std_audio',
   },
   kling_v3_i2v_pro: {
     name: 'Kling V3 Pro I2V', type: 'kling_video',
@@ -134,6 +140,8 @@ const VIDEO_MODELS = {
     refMode: 'single_end', maxRefs: 2,
     refLabel: 'Start frame (add 2nd = end frame)',
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_v3_pro',
+    spendKeyAudio: '_kling_v3_pro_audio',
   },
   kling_o3_t2v_std: {
     name: 'Kling O3 Standard T2V', type: 'kling_video',
@@ -141,6 +149,8 @@ const VIDEO_MODELS = {
     desc: 'T2V · Native audio · Voice control · Up to 15s',
     refMode: 'none', maxRefs: 0,
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_o3_std',
+    spendKeyAudio: '_kling_o3_std_audio',
   },
   kling_o3_t2v_pro: {
     name: 'Kling O3 Pro T2V', type: 'kling_video',
@@ -148,6 +158,8 @@ const VIDEO_MODELS = {
     desc: 'T2V · Native audio · Voice control · Up to 15s · Highest quality',
     refMode: 'none', maxRefs: 0,
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_o3_pro',
+    spendKeyAudio: '_kling_o3_pro_audio',
   },
   kling_o3_i2v_std: {
     name: 'Kling O3 Standard I2V', type: 'kling_video',
@@ -157,6 +169,8 @@ const VIDEO_MODELS = {
     refLabel: 'Element refs (up to 7) · use @Element1 in prompt',
     imageField: 'image_url',
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_o3_std',
+    spendKeyAudio: '_kling_o3_std_audio',
   },
   kling_o3_i2v_pro: {
     name: 'Kling O3 Pro I2V', type: 'kling_video',
@@ -166,6 +180,8 @@ const VIDEO_MODELS = {
     refLabel: 'Element refs (up to 7) · use @Element1 in prompt',
     imageField: 'image_url',
     hasAudio: true, maxDur: 15,
+    spendKey: '_kling_o3_pro',
+    spendKeyAudio: '_kling_o3_pro_audio',
   },
   kling_o1_kf: {
     name: 'Kling O1 Dual Keyframe', type: 'kling_video',
@@ -174,6 +190,7 @@ const VIDEO_MODELS = {
     refMode: 'keyframe', maxRefs: 2,
     refLabel: 'Start frame + End frame (both required)',
     hasAudio: false, maxDur: 10,
+    spendKey: '_kling_o1',
   },
   kling_26_i2v_pro: {
     name: 'Kling 2.6 Pro I2V', type: 'kling_video',
@@ -182,6 +199,8 @@ const VIDEO_MODELS = {
     refMode: 'single', maxRefs: 1,
     refLabel: 'Start frame',
     hasAudio: true, maxDur: 10, durOptions: [5, 10],
+    spendKey: '_kling_26',
+    spendKeyAudio: '_kling_26_audio',
   },
 
   // ── V2V / Motion Control (V3 + V2.6) ─────────────────────
@@ -194,6 +213,7 @@ const VIDEO_MODELS = {
     refMode: 'video_ref', maxRefs: 1,
     refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
+    spendKey: '_kling_mc',
   },
   kling_v3_v2v_pro: {
     name: 'Kling V3 Pro · Motion Control', type: 'kling_video',
@@ -202,6 +222,7 @@ const VIDEO_MODELS = {
     refMode: 'video_ref', maxRefs: 1,
     refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
+    spendKey: '_kling_mc',
   },
   kling_26_v2v_pro: {
     name: 'Kling 2.6 Pro · Motion Control', type: 'kling_video',
@@ -210,6 +231,7 @@ const VIDEO_MODELS = {
     refMode: 'video_ref', maxRefs: 1,
     refLabel: 'Character image (required)',
     hasAudio: false, maxDur: 10,
+    spendKey: '_kling_26',
   },
 
   // ── Older models — economy options ───────────────────────
@@ -219,6 +241,7 @@ const VIDEO_MODELS = {
     desc: 'T2V · Top-tier 2.1 · Cinematic visuals · 5s or 10s',
     refMode: 'none', maxRefs: 0,
     hasAudio: true, maxDur: 10, durOptions: [5, 10],
+    spendKey: '_kling_25t',
   },
   kling_25t_i2v: {
     name: 'Kling 2.1 Master I2V', type: 'kling_video',
@@ -228,6 +251,7 @@ const VIDEO_MODELS = {
     refLabel: 'Start frame',
     hasAudio: true, maxDur: 10, durOptions: [5, 10],
     imageField: 'image_url',
+    spendKey: '_kling_25t',
   },
   kling_21_t2v: {
     name: 'Kling 2.1 Standard T2V', type: 'kling_video',
@@ -235,6 +259,7 @@ const VIDEO_MODELS = {
     desc: 'T2V · Exceptional Value & Efficiency · 5s or 10s',
     refMode: 'none', maxRefs: 0,
     hasAudio: true, maxDur: 10, durOptions: [5, 10],
+    spendKey: '_kling_21_std',
   },
   kling_21_i2v: {
     name: 'Kling 2.1 Standard I2V', type: 'kling_video',
@@ -244,6 +269,7 @@ const VIDEO_MODELS = {
     refLabel: 'Start frame',
     hasAudio: true, maxDur: 10, durOptions: [5, 10],
     imageField: 'image_url',
+    spendKey: '_kling_21_std',
   },
   kling_16_t2v: {
     name: 'Kling 1.6 T2V', type: 'kling_video',
@@ -251,6 +277,7 @@ const VIDEO_MODELS = {
     desc: 'T2V · Economy · 5s or 10s',
     refMode: 'none', maxRefs: 0,
     hasAudio: false, maxDur: 10, durOptions: [5, 10],
+    spendKey: '_kling_16',
   },
   kling_16_i2v: {
     name: 'Kling 1.6 I2V', type: 'kling_video',
@@ -260,6 +287,7 @@ const VIDEO_MODELS = {
     refLabel: 'Start frame',
     hasAudio: false, maxDur: 10, durOptions: [5, 10],
     imageField: 'image_url',
+    spendKey: '_kling_16',
   },
 
   // ── Seedance 1.5 Pro — ByteDance via fal.ai ──────────────
@@ -271,6 +299,7 @@ const VIDEO_MODELS = {
     refMode: 'none', maxRefs: 0, maxDur: 12, minDur: 4, hasAudio: true,
     resolution: '720p',
     desc: 'T2V · Native audio · Up to 12s · $0.26/5s · ByteDance',
+    spendKey: '_seedance15',
   },
   seedance15_i2v: {
     name: 'Seedance 1.5 Pro', type: 'seedance_video',
@@ -281,6 +310,7 @@ const VIDEO_MODELS = {
     audioField: 'generate_audio',
     refLabel: 'Keyframes',
     desc: 'I2V · Start + End frame · Native audio · Up to 12s · $0.26/5s · ByteDance',
+    spendKey: '_seedance15',
   },
 
   // ── Seedance 2.0 — ByteDance via fal.ai ─────────────────
@@ -352,6 +382,7 @@ const VIDEO_MODELS = {
     audioField: 'audio',
     durationInt: true,
     desc: 'T2V · Native audio · Up to 16s · $0.154/s (720p) · Shengshu',
+    spendKey: '_vidu_q3',
   },
   vidu_q3_i2v: {
     name: 'Vidu Q3', type: 'vidu_video',
@@ -363,6 +394,7 @@ const VIDEO_MODELS = {
     durationInt: true,
     refLabel: 'Start frame',
     desc: 'I2V · Start frame · Native audio · Up to 16s · $0.154/s (720p) · Shengshu',
+    spendKey: '_vidu_q3',
   },
   vidu_q3_frames: {
     name: 'Vidu Q3', type: 'vidu_video',
@@ -374,6 +406,7 @@ const VIDEO_MODELS = {
     durationInt: true,
     refLabel: 'Keyframes',
     desc: 'Start + End frame · Native audio · Up to 16s · $0.154/s (720p) · Shengshu',
+    spendKey: '_vidu_q3',
   },
 
   // ── Wan 2.6 — Alibaba via fal.ai ────────────────────────
@@ -420,6 +453,7 @@ const VIDEO_MODELS = {
     refMode: 'none', maxRefs: 0, maxDur: 15, hasAudio: false,
     durOptions: [5, 10, 15],
     desc: 'T2V · Multi-shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
+    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
   wan26_t2v_single: {
     name: 'Wan 2.6', type: 'wan_video',
@@ -428,6 +462,7 @@ const VIDEO_MODELS = {
     multiShots: false,
     durOptions: [5, 10, 15],
     desc: 'T2V · Single shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
+    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
   wan26_i2v: {
     name: 'Wan 2.6', type: 'wan_video',
@@ -437,6 +472,7 @@ const VIDEO_MODELS = {
     durOptions: [5, 10, 15],
     refLabel: 'Start frame',
     desc: 'I2V · Start frame · Multi-shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
+    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
 
   // ── Wan 2.6 R2V Flash — character consistency via image refs ─
@@ -452,6 +488,7 @@ const VIDEO_MODELS = {
     durOptions: [5, 10],
     refLabel: 'Character refs (image or video)',
     desc: 'R2V Flash · Character consistency · 1-5 refs · Up to 10s · $0.05/s · Alibaba',
+    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
   // ── PixVerse C1 — via proxy (async submit → poll → download) ──
   // Camera movements: disabled for C1 (v4/v4.5 only)
@@ -745,36 +782,17 @@ const MAGNIFIC_VIDEO_MODELS = {
 
 // ── Global video state ───────────────────────────────────
 
-// Per-model spend key lookup for accurate spending tracking
-// Audio flag doubles price for Kling models that support native audio
+// Per-model spend key lookup (v206en cleanup #2).
+// Reads spendKey / spendKeyAudio fields from the VIDEO_MODELS entry — single
+// source of truth. WAN 2.6 uses a function (resolution-dependent pricing).
+// Adding a new model: just set `spendKey` (and optional `spendKeyAudio`) in
+// its VIDEO_MODELS entry. No switch to edit here.
 function _getVideoSpendKey(modelKey, hasAudio) {
-  // Kling V3
-  if (modelKey.startsWith('kling_v3_v2v')) return '_kling_mc';
-  if (modelKey.startsWith('kling_v3') && modelKey.includes('_pro')) return hasAudio ? '_kling_v3_pro_audio' : '_kling_v3_pro';
-  if (modelKey.startsWith('kling_v3')) return hasAudio ? '_kling_v3_std_audio' : '_kling_v3_std';
-  // Kling O3
-  if (modelKey.startsWith('kling_o3') && modelKey.includes('_pro')) return hasAudio ? '_kling_o3_pro_audio' : '_kling_o3_pro';
-  if (modelKey.startsWith('kling_o3')) return hasAudio ? '_kling_o3_std_audio' : '_kling_o3_std';
-  // Kling O1
-  if (modelKey === 'kling_o1_kf') return '_kling_o1';
-  // Kling 2.6
-  if (modelKey.startsWith('kling_26')) return hasAudio ? '_kling_26_audio' : '_kling_26';
-  // Kling 2.5 Turbo (labeled as 2.1 Master in GIS)
-  if (modelKey.startsWith('kling_25t')) return '_kling_25t';
-  // Kling 2.1 Standard
-  if (modelKey.startsWith('kling_21')) return '_kling_21_std';
-  // Kling 1.6
-  if (modelKey.startsWith('kling_16')) return '_kling_16';
-  // Seedance 1.5
-  if (modelKey.startsWith('seedance15')) return '_seedance15';
-  // Vidu Q3
-  if (modelKey.startsWith('vidu_q3')) return '_vidu_q3';
-  // WAN 2.6
-  if (modelKey.startsWith('wan26')) {
-    const res = document.getElementById('wanResolution')?.value || '720p';
-    return res === '1080p' ? '_wan26_1080p' : '_wan26_720p';
-  }
-  return '_fal_video'; // fallback
+  const m = VIDEO_MODELS[modelKey];
+  if (!m) return '_fal_video';
+  const key = (hasAudio && m.spendKeyAudio) ? m.spendKeyAudio : m.spendKey;
+  if (!key) return '_fal_video';
+  return typeof key === 'function' ? key() : key;
 }
 
 async function uploadVideoToFal(file, falKey) {
@@ -1419,11 +1437,11 @@ async function callVeoVideo(job) {
   updateVideoPlaceholderStatus(job, 'IN QUEUE…');
 
   const POLL_INTERVAL = 10000;
-  const deadline = Date.now() + 15 * 60 * 1000;
+  const deadline = Date.now() + VIDEO_POLL.timeoutMin.veo * 60 * 1000;
 
   await new Promise((resolve, reject) => {
     const poll = async () => {
-      if (Date.now() > deadline) { reject(new Error('Veo timeout after 15 minutes')); return; }
+      if (Date.now() > deadline) { reject(new Error(`Veo timeout after ${VIDEO_POLL.timeoutMin.veo} minutes`)); return; }
       if (job.cancelled) { reject(new Error('Cancelled')); return; }
       try {
         const pollRes = await fetch(`${BASE}/${operationName}`, { headers: { 'x-goog-api-key': googleKey } });
@@ -1529,57 +1547,49 @@ async function callLumaVideo(job) {
   job.status = 'generating';
   updateVideoPlaceholderStatus(job, 'GENERATING…');
 
-  // Poll for completion (GIS polls, Worker just does single status checks)
-  const POLL_MS = 5000;
-  const TIMEOUT = 20 * 60 * 1000; // 20 minutes
-  const deadline = Date.now() + TIMEOUT;
+  // Poll for completion via shared helper (v206en cleanup #3)
+  const status = await _videoPollLoop(job, {
+    label:      'Luma video',
+    timeoutMin: VIDEO_POLL.timeoutMin.luma,
+    pollMs:     VIDEO_POLL.defaultMs,
+    poll: async () => {
+      const statusResp = await fetch(`${proxyUrl}/luma/video/status`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ luma_key: lumaKey, generation_id }),
+      });
+      if (!statusResp.ok) {
+        const err = await statusResp.json().catch(() => ({}));
+        throw new Error(`Luma status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+      }
+      const s = await statusResp.json();
+      if (s.status === 'failed') return { status: 'failed', error: `Luma generation failed: ${s.error || 'unknown'}` };
+      if (s.status === 'done')   return { status: 'done', data: s };
+      return { status: 'running' };
+    },
+  });
 
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, POLL_MS));
+  if (!status.video_url) throw new Error('Luma: done but no video_url');
 
-    const statusResp = await fetch(`${proxyUrl}/luma/video/status`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ luma_key: lumaKey, generation_id }),
-    });
-    if (!statusResp.ok) {
-      const err = await statusResp.json().catch(() => ({}));
-      throw new Error(`Luma status ${statusResp.status}: ${err.error || statusResp.statusText}`);
-    }
-    const status = await statusResp.json();
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
 
-    if (status.status === 'failed') {
-      throw new Error(`Luma generation failed: ${status.error || 'unknown'}`);
-    }
+  // Download MP4 directly from Luma CDN (Worker never downloads video)
+  const videoRes = await fetch(status.video_url);
+  if (!videoRes.ok) throw new Error(`Luma video download failed (${videoRes.status})`);
+  const videoArrayBuffer = await videoRes.arrayBuffer();
+  const durSec = parseInt(lumaDurationSel || '5');
 
-    if (status.status === 'done') {
-      if (!status.video_url) throw new Error('Luma: done but no video_url');
-
-      job.status = 'fetching';
-      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
-
-      // Download MP4 directly from Luma CDN (Worker never downloads video)
-      const videoRes = await fetch(status.video_url);
-      if (!videoRes.ok) throw new Error(`Luma video download failed (${videoRes.status})`);
-      const videoArrayBuffer = await videoRes.arrayBuffer();
-      const durSec = parseInt(lumaDurationSel || '5');
-
-      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
-        model: model.name, modelKey, prompt,
-        params: { aspectRatio, resolution: lumaResolution, duration: lumaDurationSel, loop: lumaLoop, colorMode: lumaColorMode },
-        duration: durSec,
-        cdnUrl: status.video_url,
-        exrUrl: status.exr_url || null,
-        usedVideoRefs: videoRefsSnapshot || [],
-      }, job, ['luma', model.modelId, 1, durSec]);
-      const exrNote = status.exr_url ? ' · EXR ↓' : '';
-      toast(`Ray3 video generated · ${elapsed}s${exrNote}`, 'ok');
-      return;
-    }
-    // status === 'pending' → continue polling
-  }
-
-  throw new Error('Luma video timeout — generation did not complete within 20 minutes');
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt,
+    params: { aspectRatio, resolution: lumaResolution, duration: lumaDurationSel, loop: lumaLoop, colorMode: lumaColorMode },
+    duration: durSec,
+    cdnUrl: status.video_url,
+    exrUrl: status.exr_url || null,
+    usedVideoRefs: videoRefsSnapshot || [],
+  }, job, ['luma', model.modelId, 1, durSec]);
+  const exrNote = status.exr_url ? ' · EXR ↓' : '';
+  toast(`Ray3 video generated · ${elapsed}s${exrNote}`, 'ok');
 }
 
 // ── PixVerse C1 video generation ─────────────────────────
@@ -1749,55 +1759,51 @@ async function callPixverseVideo(job) {
   job.status = 'generating';
   updateVideoPlaceholderStatus(job, offPeak ? 'GENERATING (off-peak)…' : 'GENERATING…');
 
-  const POLL_MS = offPeak ? 15000 : 5000;
-  const TIMEOUT = (offPeak ? 120 : 20) * 60 * 1000;
-  const deadline = Date.now() + TIMEOUT;
+  // Poll via shared helper (v206en cleanup #3). PixVerse uses numeric status codes.
+  const resp = await _videoPollLoop(job, {
+    label:      `PixVerse video${offPeak ? ' (off-peak)' : ''}`,
+    timeoutMin: offPeak ? VIDEO_POLL.timeoutMin.pixverseOffPeak : VIDEO_POLL.timeoutMin.pixverse,
+    pollMs:     offPeak ? VIDEO_POLL.offPeakMs : VIDEO_POLL.defaultMs,
+    poll: async () => {
+      const statusResp = await fetch(`${proxyUrl}/pixverse/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: pixverseKey, video_id }),
+      });
+      if (!statusResp.ok) {
+        const err = await statusResp.json().catch(() => ({}));
+        throw new Error(`PixVerse status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+      }
+      const sData = await statusResp.json();
+      const r = sData.Resp || sData;
+      const st = r.status;
+      // PixVerse statuses: 1=done, 2/8=failed, 3/5=processing, 7=moderation, 9=queued
+      if (st === 2 || st === 8) return { status: 'failed', error: `PixVerse generation failed: ${r.error_message || r.err_msg || 'unknown'}` };
+      if (st === 7)             return { status: 'failed', error: 'PixVerse: content moderation failed — modify your prompt and retry' };
+      if (st === 1)             return { status: 'done',   data: r };
+      if (st === 9)             return { status: 'queued' };
+      return { status: 'running' };
+    },
+  });
 
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, POLL_MS));
+  const videoUrl = resp.url || resp.video_url;
+  if (!videoUrl) throw new Error('PixVerse: done but no video URL');
 
-    const statusResp = await fetch(`${proxyUrl}/pixverse/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey: pixverseKey, video_id }),
-    });
-    if (!statusResp.ok) {
-      const err = await statusResp.json().catch(() => ({}));
-      throw new Error(`PixVerse status ${statusResp.status}: ${err.error || statusResp.statusText}`);
-    }
-    const sData = await statusResp.json();
-    const resp = sData.Resp || sData;
-    const st = resp.status;
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
 
-    // PixVerse statuses: 1=done, 2/8=failed, 3/5=processing, 7=moderation, 9=queued
-    if (st === 2 || st === 8) throw new Error(`PixVerse generation failed: ${resp.error_message || resp.err_msg || 'unknown'}`);
-    if (st === 7) throw new Error('PixVerse: content moderation failed — modify your prompt and retry');
+  const videoRes = await fetch(videoUrl);
+  if (!videoRes.ok) throw new Error(`PixVerse video download failed (${videoRes.status})`);
+  const videoArrayBuffer = await videoRes.arrayBuffer();
 
-    if (st === 1) {
-      const videoUrl = resp.url || resp.video_url;
-      if (!videoUrl) throw new Error('PixVerse: done but no video URL');
-
-      job.status = 'fetching';
-      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
-
-      const videoRes = await fetch(videoUrl);
-      if (!videoRes.ok) throw new Error(`PixVerse video download failed (${videoRes.status})`);
-      const videoArrayBuffer = await videoRes.arrayBuffer();
-
-      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
-        model: model.name, modelKey, prompt,
-        params: { duration: durNum, aspectRatio, quality, enableAudio, multiClip, offPeak, negativePrompt: finalNeg, mode: pvMode },
-        duration: durNum,
-        cdnUrl: videoUrl,
-        usedVideoRefs: job.videoRefsSnapshot || [],
-      }, job, ['pixverse', '_pixverse_video', 1, durNum]);
-      toast(`PixVerse C1 ${pvMode.toUpperCase()} generated · ${elapsed}s`, 'ok');
-      return;
-    }
-    // st === 3, 5, 9 → continue polling
-  }
-
-  throw new Error(`PixVerse video timeout — generation did not complete within ${offPeak ? '2 hours' : '20 minutes'}`);
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt,
+    params: { duration: durNum, aspectRatio, quality, enableAudio, multiClip, offPeak, negativePrompt: finalNeg, mode: pvMode },
+    duration: durNum,
+    cdnUrl: videoUrl,
+    usedVideoRefs: job.videoRefsSnapshot || [],
+  }, job, ['pixverse', '_pixverse_video', 1, durNum]);
+  toast(`PixVerse C1 ${pvMode.toUpperCase()} generated · ${elapsed}s`, 'ok');
 }
 
 // T2V i I2V — sdílí stejnou funkci, falEndpoint rozlišuje
@@ -1885,7 +1891,7 @@ async function callWan27Video(job) {
 
   // Submit, poll, download via shared helper
   console.log('[wan27] submit →', endpoint, '| resolution:', resolution, '| duration:', duration);
-  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7', timeoutMin: 25 });
+  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7', timeoutMin: VIDEO_POLL.timeoutMin.falLong });
 
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
     model: model.name, modelKey, prompt: job.prompt,
@@ -1958,7 +1964,7 @@ async function callWan27eVideo(job) {
 
   // Submit, poll, download via shared helper
   console.log('[wan27e] submit → fal.ai | resolution:', effectiveRes, '| duration:', duration, '| audio:', audioSetting);
-  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7 Edit', timeoutMin: 30, progressLabel: 'EDITING' });
+  const { buffer: videoArrayBuffer } = await _falVideoSubmitPollDownload(falKey, endpoint, payload, job, { label: 'WAN 2.7 Edit', timeoutMin: VIDEO_POLL.timeoutMin.falEdit, progressLabel: 'EDITING' });
 
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
     model: model.name, modelKey, prompt: job.prompt,
@@ -2058,7 +2064,7 @@ async function callSeedance2Video(job) {
   console.log('[Seedance2] submit →', endpoint, JSON.stringify(logPayload));
 
   const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(
-    falKey, endpoint, payload, job, { label: model.name, timeoutMin: 25 }
+    falKey, endpoint, payload, job, { label: model.name, timeoutMin: VIDEO_POLL.timeoutMin.falLong }
   );
 
   // Price key: tier × resolution, with R2V video-refs 0.6× multiplier
@@ -2191,61 +2197,52 @@ async function callGrokVideo(job) {
   job.status = 'generating';
   updateVideoPlaceholderStatus(job, 'GENERATING…');
 
-  const POLL_MS = 5000;
-  const TIMEOUT = 15 * 60 * 1000; // 15 minutes
-  const deadline = Date.now() + TIMEOUT;
-
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, POLL_MS));
-
-    const statusResp = await fetch(`${proxyUrl}/xai/video/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ xai_key: xaiKey, request_id }),
-    });
-    if (!statusResp.ok) {
-      const err = await statusResp.json().catch(() => ({}));
-      throw new Error(`Grok Video status ${statusResp.status}: ${err.error || statusResp.statusText}`);
-    }
-    const status = await statusResp.json();
-
-    if (status.status === 'failed') {
-      throw new Error(`Grok Video failed: ${status.error || 'unknown'}`);
-    }
-    if (status.status === 'expired') {
-      throw new Error('Grok Video: request expired');
-    }
-
-    if (status.status === 'done') {
-      if (!status.video_url) throw new Error('Grok Video: done but no video_url');
-
-      // ── Download via proxy (xAI URLs lack CORS) ───────
-      job.status = 'fetching';
-      updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
-
-      const dlResp = await fetch(`${proxyUrl}/xai/video/download`, {
+  // Poll via shared helper (v206en cleanup #3)
+  const status = await _videoPollLoop(job, {
+    label:      'Grok Video',
+    timeoutMin: VIDEO_POLL.timeoutMin.grok,
+    pollMs:     VIDEO_POLL.defaultMs,
+    poll: async () => {
+      const statusResp = await fetch(`${proxyUrl}/xai/video/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_url: status.video_url }),
+        body: JSON.stringify({ xai_key: xaiKey, request_id }),
       });
-      if (!dlResp.ok) throw new Error(`Grok Video download failed (${dlResp.status})`);
-      const videoArrayBuffer = await dlResp.arrayBuffer();
+      if (!statusResp.ok) {
+        const err = await statusResp.json().catch(() => ({}));
+        throw new Error(`Grok Video status ${statusResp.status}: ${err.error || statusResp.statusText}`);
+      }
+      const s = await statusResp.json();
+      if (s.status === 'failed')  return { status: 'failed', error: `Grok Video failed: ${s.error || 'unknown'}` };
+      if (s.status === 'expired') return { status: 'failed', error: 'Grok Video: request expired' };
+      if (s.status === 'done')    return { status: 'done', data: s };
+      return { status: 'running' };
+    },
+  });
 
-      const actualDur = status.duration || duration;
-      const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
-        model: model.name, modelKey, prompt,
-        params: { mode, duration: actualDur, aspectRatio, resolution, srcVideoUrl: grokVideoSnap.srcVideoUrl || null },
-        duration: actualDur,
-        cdnUrl: status.video_url,
-        usedVideoRefs: videoRefsSnapshot || [],
-      }, job, ['xai', 'grok-imagine-video', 1, actualDur]);
-      toast(`Grok Video done · ${elapsed}s · ${mode.toUpperCase()}`, 'ok');
-      return;
-    }
-    // status === 'pending' → continue polling
-  }
+  if (!status.video_url) throw new Error('Grok Video: done but no video_url');
 
-  throw new Error('Grok Video timeout — generation did not complete within 15 minutes');
+  // ── Download via proxy (xAI URLs lack CORS) ───────
+  job.status = 'fetching';
+  updateVideoPlaceholderStatus(job, 'DOWNLOADING…');
+
+  const dlResp = await fetch(`${proxyUrl}/xai/video/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video_url: status.video_url }),
+  });
+  if (!dlResp.ok) throw new Error(`Grok Video download failed (${dlResp.status})`);
+  const videoArrayBuffer = await dlResp.arrayBuffer();
+
+  const actualDur = status.duration || duration;
+  const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
+    model: model.name, modelKey, prompt,
+    params: { mode, duration: actualDur, aspectRatio, resolution, srcVideoUrl: grokVideoSnap.srcVideoUrl || null },
+    duration: actualDur,
+    cdnUrl: status.video_url,
+    usedVideoRefs: videoRefsSnapshot || [],
+  }, job, ['xai', 'grok-imagine-video', 1, actualDur]);
+  toast(`Grok Video done · ${elapsed}s · ${mode.toUpperCase()}`, 'ok');
 }
 
 // ── Grok Video — mode change handler ────────────────────────

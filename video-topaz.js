@@ -5,34 +5,41 @@
 let topazSrcVideoId    = null;   // Topaz/Magnific: source video gallery ID
 // ── Topaz: source video management ──────────────────────
 const _topazIds = { info:'topazSrcInfo', thumb:'topazSrcThumb', img:'topazSrcImg', meta:'topazSrcMeta', clearBtn:'topazSrcClearBtn', describeBtn:'topazSrcDescribeBtn' };
-function topazClearSource() { topazSrcVideoId = null; _srcSlotClear(_topazIds); }
-async function topazDescribeSource() { _srcSlotDescribe('topazSrcImg'); }
 
-async function topazSetSource(videoId) {
-  topazSrcVideoId = videoId;
-  const { meta } = await _srcSlotSet(_topazIds, videoId);
-  const metaEl = document.getElementById('topazSrcMeta');
-  // Initial chips
-  if (metaEl && meta) _renderTopazSrcMeta(metaEl, meta, null, null);
-  // Async: load actual pixel dims + fps from video data
-  if (metaEl && meta) {
+// Register Topaz slot in the shared video-source-slot registry (v206en cleanup #1).
+// setHook does the Topaz-specific extra work: load full video blob,
+// parse dims + FPS, render chips, auto-snap the FPS select.
+VIDEO_SOURCE_SLOTS.topaz = {
+  ids: _topazIds,
+  set: (id) => { topazSrcVideoId = id; },
+  pickToast: 'Select a video, then click ✦ Topaz on it',
+  setHook: async (videoId, { meta }) => {
+    const metaEl = document.getElementById('topazSrcMeta');
+    if (!metaEl || !meta) return;
+    // Initial chips
+    _renderTopazSrcMeta(metaEl, meta, null, null);
+    // Async: load actual pixel dims + fps from video data
     const full = await dbGet('videos', videoId).catch(() => null);
-    if (full?.videoData) {
-      const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
-      const fps = _parseMp4Fps(full.videoData) || meta.params?.fps || meta.params?.topaz?.fps || null;
-      const dims = await _topazGetDims(blob).catch(() => null);
-      _renderTopazSrcMeta(metaEl, meta, dims?.w || null, dims?.h || null, fps);
-      if (fps) {
-        const fpsSel = document.getElementById('topazFps');
-        if (fpsSel) {
-          const opts = [24, 25, 30, 60, 90, 120];
-          const snapped = opts.reduce((a, b) => Math.abs(b - fps) < Math.abs(a - fps) ? b : a);
-          fpsSel.value = String(snapped);
-        }
+    if (!full?.videoData) return;
+    const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
+    const fps  = _parseMp4Fps(full.videoData) || meta.params?.fps || meta.params?.topaz?.fps || null;
+    const dims = await _topazGetDims(blob).catch(() => null);
+    _renderTopazSrcMeta(metaEl, meta, dims?.w || null, dims?.h || null, fps);
+    if (fps) {
+      const fpsSel = document.getElementById('topazFps');
+      if (fpsSel) {
+        const opts = [24, 25, 30, 60, 90, 120];
+        const snapped = opts.reduce((a, b) => Math.abs(b - fps) < Math.abs(a - fps) ? b : a);
+        fpsSel.value = String(snapped);
       }
     }
-  }
-}
+  },
+};
+
+function topazClearSource()        { videoSlotClear('topaz'); }
+async function topazSetSource(id)  { return videoSlotSet('topaz', id); }
+async function topazDescribeSource() { await videoSlotDescribe('topaz'); }
+async function topazPickFromGallery() { videoSlotPick('topaz'); }
 
 function _renderTopazSrcMeta(metaEl, meta, w, h, detectedFps) {
   const resStr = w && h ? `${w}×${h}` : (meta.outWidth && meta.outHeight ? `${meta.outWidth}×${meta.outHeight}` : (meta.params?.resolution || null));
@@ -45,11 +52,6 @@ function _renderTopazSrcMeta(metaEl, meta, w, h, detectedFps) {
     `<span class="src-chip">${c}</span>`
   ).join('');
   metaEl.style.display = chips.length ? 'flex' : 'none';
-}
-
-async function topazPickFromGallery() {
-  switchView('video');
-  toast('Select a video, then click ✦ Topaz on it', 'ok');
 }
 
 // ── WAN 2.7 Video Edit: source video management ──────────
@@ -140,16 +142,47 @@ async function _generateMagnificVideoJob(modelKey, freepikKey, proxyUrl) {
   runMagnificVideoUpscaleJob(job).catch(e => videoJobError(job, e.message || 'Magnific Video failed'));
 }
 
+// ═══════════════════════════════════════════════════════
+// Upscale shared helpers (v206en cleanup #9)
+// Used by both runTopazQueueJob and runMagnificVideoUpscaleJob.
+// ═══════════════════════════════════════════════════════
+
+// Load source video from gallery → base64. Throws if not found.
+// Updates the job placeholder to "encoding…" during the encode step.
+async function _loadAndEncodeSourceVideo(job) {
+  const rec = await dbGet('videos', job.srcId).catch(() => null);
+  if (!rec?.videoData) throw new Error('Source video not found in gallery');
+  updateVideoPlaceholderStatus(job, 'encoding…');
+  return _arrayBufferToBase64(rec.videoData);
+}
+
+// Download upscaled video with chunked progress updates.
+// `dlResp` = in-progress fetch Response. Returns ArrayBuffer.
+// Caller should set "downloading…" status before the fetch if desired.
+async function _downloadUpscaledVideo(dlResp, job) {
+  if (!dlResp.ok) {
+    const e = await dlResp.json().catch(() => ({}));
+    throw new Error(`Download failed ${dlResp.status}: ${e.error || dlResp.statusText}`);
+  }
+  const totalBytes = parseInt(dlResp.headers.get('Content-Length') || '0');
+  const reader = dlResp.body.getReader();
+  const chunks = []; let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); received += value.length;
+    const mb  = (received / 1024 / 1024).toFixed(1);
+    const tot = totalBytes ? `/${(totalBytes / 1024 / 1024).toFixed(0)}` : '';
+    updateVideoPlaceholderStatus(job, `↓ ${mb}${tot}MB`);
+  }
+  return await new Blob(chunks).arrayBuffer();
+}
+
 async function runMagnificVideoUpscaleJob(job) {
   updateVideoPlaceholderStatus(job, 'loading…');
   renderVideoQueue();
 
-  const rec = await dbGet('videos', job.srcId).catch(() => null);
-  if (!rec?.videoData) throw new Error('Source video not found in gallery');
-
-  // Base64 encode video
-  updateVideoPlaceholderStatus(job, 'encoding…');
-  const videoB64 = _arrayBufferToBase64(rec.videoData);
+  const videoB64 = await _loadAndEncodeSourceVideo(job);
 
   // Submit to proxy
   updateVideoPlaceholderStatus(job, 'uploading…');
@@ -177,8 +210,8 @@ async function runMagnificVideoUpscaleJob(job) {
   // Poll
   job.status = 'running';
   const upscalerType = job.magnificMode === 'precision' ? 'video_upscale_prec' : 'video_upscale';
-  const POLL  = 10_000;
-  const LIMIT = 48 * 60_000;
+  const POLL  = 10_000;   // Slow poll — upscale jobs run in minutes
+  const LIMIT = VIDEO_POLL.timeoutMin.magnific * 60_000;
   const stop  = Date.now() + LIMIT;
   let elapsed = 0;
 
@@ -287,12 +320,7 @@ async function runTopazQueueJob(job) {
   updateVideoPlaceholderStatus(job, 'loading…');
   renderVideoQueue();
 
-  const rec = await dbGet('videos', job.srcId).catch(() => null);
-  if (!rec?.videoData) throw new Error('Source video not found in gallery');
-
-  // Base64 encode video
-  updateVideoPlaceholderStatus(job, 'encoding…');
-  const videoB64 = _arrayBufferToBase64(rec.videoData);
+  const videoB64 = await _loadAndEncodeSourceVideo(job);
 
   updateVideoPlaceholderStatus(job, 'uploading…');
   renderVideoQueue();
@@ -338,8 +366,8 @@ async function runTopazQueueJob(job) {
 
   // Poll
   job.status = 'running';
-  const POLL   = 15_000;
-  const LIMIT  = 30 * 60_000;
+  const POLL   = 15_000;  // Slow poll — Topaz upscale is minutes-long
+  const LIMIT  = VIDEO_POLL.timeoutMin.topaz * 60_000;
   const stop   = Date.now() + LIMIT;
   let   count  = 0;
 
@@ -373,22 +401,7 @@ async function runTopazQueueJob(job) {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ output_url }),
       });
-      if (!dlResp.ok) {
-        const e = await dlResp.json().catch(() => ({}));
-        throw new Error(`Download failed ${dlResp.status}: ${e.error || dlResp.statusText}`);
-      }
-      const totalBytes = parseInt(dlResp.headers.get('Content-Length') || '0');
-      const reader = dlResp.body.getReader();
-      const chunks = []; let received = 0;
-      while (true) {
-        const { done: d, value } = await reader.read();
-        if (d) break;
-        chunks.push(value); received += value.length;
-        const mb  = (received/1024/1024).toFixed(1);
-        const tot = totalBytes ? `/${(totalBytes/1024/1024).toFixed(0)}` : '';
-        updateVideoPlaceholderStatus(job, `↓ ${mb}${tot}MB`);
-      }
-      const videoArrayBuffer = await new Blob(chunks).arrayBuffer();
+      const videoArrayBuffer = await _downloadUpscaledVideo(dlResp, job);
       const modelLabel = `✦ Topaz ${TOPAZ_MODEL_NAMES[job.topazModel] || job.topazModel}`;
       const spendKey = { 'slp-2.5':'_topaz_slp25','slp-2':'_topaz_slp2','slp-1':'_topaz_slp1','slhq':'_topaz_slhq','slm':'_topaz_slm' }[job.topazModel] || '_topaz_slp25';
 

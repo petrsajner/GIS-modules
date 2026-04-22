@@ -1,224 +1,122 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v205en
-## Příští verze: v206en
+## Aktuální verze: v206en
+## Příští verze: v207en
 ## Datum: 2026-04-22
 ## Worker verze: 2026-16 (beze změny)
 
 ---
 
-## Co je v v205en (oproti v204en)
+## Co je v v206en (oproti v205en)
 
-### GPT Image 1.5 & 2 — OpenAI image rodina přes fal.ai
+### Video subsystem cleanup (8 items z CLEANUP_ANALYSIS.md)
 
-Fal.ai 21. 4. 2026 spustil `openai/gpt-image-2` + `/edit` endpointy (den po OpenAI release). GIS integruje kompletní rodinu: 4 nové modely (T2I + Edit × 2 generace). Modely sedí v normálním Generate flow (ne v inpaint modulu), mask se řeší přes existující annotation layer z paint toolu.
+Čistě interní refactoring — žádná funkční změna, žádný nový model, žádný API payload dotčený. Cíl: sjednotit chaos který vznikl postupným přidáváním modelů (11 video providerů + Topaz + Magnific), zredukovat duplicitu, vytvořit single-source-of-truth pro rekurentní koncepty (spend key, timeouty, source sloty, polling).
 
-#### Změny
+| # | Oblast | Impl | Modul(y) |
+|---|---|---|---|
+| 7 | Dead comment "rubber-band" | -1 ř | video-gallery |
+| 4 | `videoMention*` globály → `videoMention` objekt (19 call-sites) | +1 ř | video-gallery |
+| 11 | Error handling guideline + generalized timeout regex | +10 ř | video-utils, video-queue |
+| 8 | Centrální `VIDEO_POLL` konstanty (10 timeout keys, 2 poll interval) | +25 ř | video-utils (všechny handlery) |
+| 2 | `spendKey`/`spendKeyAudio` do 28 VIDEO_MODELS entries, funkce 28→7 ř | +15 ř | video-models |
+| 1 | `VIDEO_SOURCE_SLOTS` registry (7 slotů) + generic API | +60 ř | video-gallery, video-topaz |
+| 9 | `_loadAndEncodeSourceVideo` + `_downloadUpscaledVideo` helpery | +15 ř | video-topaz |
+| 3 | `_videoPollLoop` — refactor Luma, Grok, PixVerse | +24 ř | video-queue, video-models |
 
-**1. Nový modul `gpt-edit.js`** (~380 řádků) — pozice v MODULES: hned po `fal.js`
+**Předpokládané úspory dle CLEANUP_ANALYSIS byly ~530 ř, realita +150 ř.** Rozdíl není chyba analýzy — je to záměrné rozhodnutí zachovat existující wrappery jako 1-line forwardy místo přepisování všech 50 call-sites v template.html a video-*.js. Wrapper-preserving variant: nízké riziko, žádný HTML audit potřeba, architektonické wins stejné.
 
-Obsah:
-- `callGptImage()` — main caller, kompatibilní signature s ostatními fal callery
-- `_gpt2SizeFromAspect()` — vypočítá `{width, height}` honorující OpenAI constraints (násobky 16, max 3840px, 655k–8.29M pixelů, AR ≤ 3:1)
-- `_gpt15SizeFromAspect()` — snap na 3 fixed sizes (1024², 1024×1536, 1536×1024)
-- `_annotAssetToGptMask()` — konverze annotation asset (white bg + color strokes) → RGBA PNG s alpha=0 na painted pixelech (edit region) a alpha=255 na unpainted (keep)
-- `_resizeGptMaskToMatch()` — nearest-neighbor resize masky na dimenzi target imageu
-- `_partitionGptRefs()` — split refs podle `ref.role === 'mask'` na image refs + mask
-- `_falStreamEdit()` — SSE stream handler (code retained pro budoucnost; aktuálně vypnuto)
-- `_pickGptPriceKey()` — routing na 29 price keys dle model/quality/size/resolution
-- Dual mask field handling: `mask_url` (GPT 2) vs `mask_image_url` (GPT 1.5)
+### Architektonické wins
 
-**2. 4 nové modely v `models.js`** (pozice: hned pod `i4ultra`)
+1. **Adding new video model = 1 místo pro spend key**: přidat `spendKey: '_xyz'` (a volitelně `spendKeyAudio: '_xyz_audio'`) do entry. Žádný switch na úpravu.
+2. **Central timeout tuning**: měnit poll interval nebo provider timeout = jedno místo (`VIDEO_POLL` v video-utils.js).
+3. **Adding new source slot = 1 entry do registru**: `VIDEO_SOURCE_SLOTS.xyz = { ids, set, pickToast, setHook? }`.
+4. **New provider s pollingem** = jen adapter s `poll()` callbackem, `_videoPollLoop` se postará o timeout + elapsed time + queued/running handling.
+5. **Konzistentní error UX**: všechny handlery throw raw technical error, `videoJobError` je jediný entry-point pro friendly-ifikaci.
+6. **Konzistentní upscale download**: Topaz i Magnific používají `_downloadUpscaledVideo` s chunked progress + error handling.
 
-| Key | Endpoint | Refs | Quality tier | Resolutions |
-|---|---|---|---|---|
-| `gptimg2_t2i` | `openai/gpt-image-2` | — | low/med/high | 1K, 2K, 4K |
-| `gptimg2_edit` | `openai/gpt-image-2/edit` | 1–8 | low/med/high | 1K, 2K, 4K |
-| `gptimg15_t2i` | `fal-ai/gpt-image-1.5` | — | low/med/high | 1K |
-| `gptimg15_edit` | `fal-ai/gpt-image-1.5/edit` | 1–8 | low/med/high | 1K |
+### Poznámky k implementaci
 
-Model UI flags: `upRes` (s custom dims), `upCount4` (1–4), **`upQuality`** (nový unified flag). `'gpt'` přidán do `_UNIFIED_TYPES`.
+- `_getVideoSpendKey` teď čte `spendKey`/`spendKeyAudio` z VIDEO_MODELS entry. WAN 2.6 má funkční spendKey (resolution-dependent `'_wan26_1080p' | '_wan26_720p'`).
+- Veo NENÍ v `_videoPollLoop` — používá rekurzivní `setTimeout` pattern s `operations/xyz` endpointem, refactor by byl throw-away před Session 2.
+- `friendlyVideoError`: timeout regex generalizován z `25 min|30 min|10 min` na `\d+\s*(min|hour)` — pokrývá všechny varianty včetně PixVerse off-peak 2 hours.
+- Build order beze změny — 25 modulů, stejné pořadí jako v205en.
 
-**3. Unified panel — nový flag `upQuality`**
+### Build stats
 
-Template.html: nový `#upQualityRow` s `.toggle-row` patternem (stejné stylování jako Resolution), 3 zlaté buttony Low / Medium / High, default Medium, pozice přímo nad Generate. Reusable — budoucí modely s quality tiers (FLUX.2-flex apod) dostanou zdarma.
-
-**4. Maska přes annotation layer (workflow B)**
-
-- User otevře paint na obrázku → anotace barevnými tahy → Export mode B → 2 assety do refs (orig + annotation)
-- Druhý ref **automaticky dostane `role: 'mask'`** (paint.js)
-- Thumbnail s mask role má růžový 🎭 MASK badge (refs.js + CSS)
-- Hover nad thumbnailem (při aktivním GPT Edit modelu) zobrazí tlumený 🎭 → klik flipne roli manuálně (`toggleRefMaskRole`)
-- Při Generate: ref s `role='mask'` se konvertuje přes `_annotAssetToGptMask()` a pošle jako `mask_url`/`mask_image_url`
-
-**5. 1K = custom dims (ne preset enum)**
-
-Původně jsem poslal preset `landscape_16_9` — fal vrací ~1088×608, **příliš malé pro produkci**. Přepsáno: 1K tier posílá `{width: 1536, height: calc}` jako custom dims, stejný mechanismus jako 2K/4K. Long side: 1K=1536, 2K=2048, 4K=3840. Vše s area cap 8.29M a min floor 655k pro extrémní AR. `updateUnifiedResInfo` (info text vpravo) používá totožný výpočet → co uživatel vidí = co model dostane.
-
-**6. Pricing — 29 price keys ve spending.js**
-
-GPT 2 per-quality × per-size (9) + tier-based 2K/4K (6) = 15 keys. GPT 1.5 per-quality × per-size (8). Low tier má collapsed key pro non-square GPT 1.5. `priceKey` atribut v result objektu → `trackSpend('fal', priceKey)` v runJob.
-
-**7. Streaming — VYPNUTO (code ready)**
-
-fal `/stream` endpoint aktuálně (duben 2026) pro GPT 1.5 i 2 edit **posílá jen 1 event s final data URI** (~3MB base64), žádné progressive frames. Stream = queue s víc komplexity, žádný reálný benefit. `streaming: false` na obou edit modelech → jedou přes `_falQueue` (stejně jako FLUX/SeeDream/atd).
-
-Stream code (`_falStreamEdit`, `updatePlaceholderPartial`) zachován pro budoucnost — jakmile fal přidá progressive diffusion preview, flip `streaming: true`.
-
-**8. UI detaily opravené během session**
-
-- Quality selektor přepracován z hnusného `.chk-row` na `.toggle-row` pattern (3 zlaté buttony, stejný vzhled jako Resolution)
-- Dropdown `#modelSelect` v template.html rozšířen o 4 nové `<option>` entry (hardcoded!) — gotcha potvrzena z memory
-- "Max 2048px" hláška pro ref input skryta pro `m.type === 'gpt'` (GPT modely nemají velikostní limit, `_gptEditGetRefB64()` čte raw imageData bez volání `_refAsJpeg`)
-- Resolution info text vpravo (yellow) pro GPT 2: exact `W×H` z aspect + tier, pro GPT 1.5: snap na 3 fixed sizes
-- `updatePlaceholderPartial` přesunutý z `cardEl` do `.ph-body` (mělo overflow do `#center` = fullscreen bug)
-- Output render/save podpora `result.type === 'gpt'` v `output-placeholder.js`, `db.js`, `gallery.js`
-
-#### Build stats
-- 27 972 řádků (JS 22 949 + HTML/CSS 5 074)
-- 25 modulů (24 → 25 kvůli `gpt-edit.js`)
-- HTML div balance OK (778 pairs)
+- **25 modulů** (gpt-edit.js + 6 video-*.js + 18 core)
+- **23 096 JS řádků** (v205en: 22 946 — Δ +150)
+- **28 181 total lines** (HTML + JS + CSS)
+- `✓ HTML div balance: OK (779 pairs)`
+- Extracted script `node --check` → OK
 
 ---
 
-## Otevřené TODO
+## Kde jsme přestali
 
-**Prioritní:**
+v206en je hotová cleanup session — všechny kandidáti z `CLEANUP_ANALYSIS.md` (items #1, #2, #3, #4, #7, #8, #9, #11) implementovány. Items #5, #6, #10 zůstávají pro **Session 2 (unified video panel)**, která je teď další v pořadí.
 
-1. **Cleanup session video subsystému** (1–2 hodiny) — po splitu v203en. Viz `CLEANUP_ANALYSIS.md`.
-2. **Session 2 — Unified video panel** (analogie v200en) — 13 video modelů má legacy HTML bloky.
-3. **Style Library "My Presets"** — persisted user-defined style combos.
-4. **Claid.ai integrace** — research + implementace.
-5. **Hailuo 2.3** — upgrade z 2.0.
-6. **Use V2V** — Seedance 2.0 R2V endpoint.
-7. **Runway Gen-4** — research only zatím (CORS nejistý).
-
-**Research-only (bez implementace):**
-
-- Runway API rodina: `gen4_image`, `gen4_aleph`, `gen4_turbo`, `gen4.5`, `veo3/3.1`. CORS pravděpodobně blokuje browser calls → Worker proxy nutný.
-
-**Monitorovat:**
-
-- **GPT Image 2 stream progressive** — fal momentálně posílá jen final event. Jakmile zapnou progressive diffusion preview, flip `streaming: true` v `models.js` (code v `gpt-edit.js` už to handluje).
-- **GPT Image 2 performance** — v den release byl občas overloaded. P50 medium = 3 s per obrázek dle fal blog. Pokud timeouty přetrvají týdny, přidat shortcut "skip queue, use sync endpoint".
+**Kritický bug TODO z v205en memory** (Seedance 2.0 I2V universal prompt block) zatím neadresován — vyžaduje F12 log + Network response od Petra, čeká na real session data.
 
 ---
 
-## Zafixované bugy (v205en)
+## TODO (prioritní pořadí)
 
-- **Dropdown v template.html je hardcoded** — při přidávání modelu musí se editovat 2 místa (models.js entry + `<option>` v template.html). Tato gotcha je zdokumentovaná v memory, ale v této session jsem na ni spadl při prvním buildu. Napraveno druhým buildem.
-- **CSS absolute positioning escape** — `position:absolute; inset:0` v `.img-card` (který nemá `position:relative`) → overflow přes celý `#center` wrapper. Fix: injection do `.ph-body` (ta má `position:relative + aspect-ratio:16/9`).
-- **Preset enum vs production quality** — fal `landscape_16_9` preset generuje ~1088×608, příliš malé. Fix: custom dims pro všechny tiers (1K/2K/4K).
-- **Streaming SSE žádný progressive** — diagnóza z console logu ukázala, že fal posílá jen 1 event s finálním data URI pro oba modely. Fix: vypnout streaming, použít queue.
+1. **Session 2 — Unified video panel** (analogicky v200en pro images). Scope: `_applyVideoModel` decomposition (#5), `generateVideo` decomposition (#6), prompt rewriting refactor (#10), template.html per-model panely → jeden unified panel.
+2. **Seedance 2.0 I2V universal prompt block** — F12 log + Network response od Petra.
+3. Style Library "My Presets".
+4. Claid.ai via proxy.
+5. Hailuo 2.3 upgrade.
+6. Use V2V (Seedance R2V).
+7. Runway Gen-4 (research only).
+8. Recraft V4 / Z-Image LoRA / Ideogram V3.
 
 ---
 
-## Architektonické kontexty
+## Změněné moduly (v206en)
 
-### Build module order (v205en, 25 modulů)
-```
-models → styles → setup → spending → model-select → assets → refs
-→ generate → fal → gpt-edit → output-placeholder → proxy → gemini
-→ output-render → db → gallery → toast → paint → ai-prompt
-→ video-utils → video-models → video-queue → video-gallery → video-topaz → video-archive
-```
-
-### Gallery layout — "two windows" pattern
-Wrapper (flex column) → `.lib-toolbar` (flex-shrink:0) → `.lib-bulk.show` → scroll container (flex:1).
-
-### Paint engine — 3 parallel canvases
-```
-eng.canvas (display)     = base + strokes composite
-eng.history[0]           = clean original (invariant)
-_annotateMaskCanvas      = white strokes for inpaint mask
-_annotateAnnotCanvas     = color strokes, transparent bg
-```
-
-### Z-Image endpoints
-| Model | Endpoint |
-|---|---|
-| `zimage_base` | `fal-ai/z-image/base` |
-| `zimage_turbo` | `fal-ai/z-image/turbo` |
-| `zimage_turbo_i2i` | `fal-ai/z-image/turbo/image-to-image` |
-
-### GPT Image endpoints (v205en)
-| Model | Endpoint | Mask field |
+| Modul | Status | Popis |
 |---|---|---|
-| `gptimg2_t2i` | `openai/gpt-image-2` | — |
-| `gptimg2_edit` | `openai/gpt-image-2/edit` | `mask_url` |
-| `gptimg15_t2i` | `fal-ai/gpt-image-1.5` | — |
-| `gptimg15_edit` | `fal-ai/gpt-image-1.5/edit` | `mask_image_url` |
+| `video-utils.js` | upraven | +VIDEO_POLL konstanty, friendlyVideoError guideline |
+| `video-models.js` | upraven | +spendKey/spendKeyAudio do 28 entries, _getVideoSpendKey simplified, Luma/Grok/PixVerse přes _videoPollLoop |
+| `video-queue.js` | upraven | +_videoPollLoop, VIDEO_POLL defaults, videoJobError komentář |
+| `video-gallery.js` | upraven | +VIDEO_SOURCE_SLOTS registry + generic API, 6 slotů přes registry, videoMention encapsulated, dead comment removed |
+| `video-topaz.js` | upraven | +Topaz registry entry s setHook, +shared upscale helpers |
+| `build.js` | beze změny | (předchozí update v v205en — gpt-edit.js) |
 
-### Unified Image Panel (od v200en, rozšířen v v205en)
-Pokrývá: Gemini, Imagen, FLUX, SeeDream, Kling, Z-Image, WAN 2.7, Qwen 2, Grok, **GPT** (nové). Element IDs: `upRes`, `upCount4/10`, `upSteps`, `upGuidance`, `upSeed`, `upNeg`, `upAccel`, `upSafetySlider/Chk`, `upStrength`, `upGrounding`, `upRetry`, `upThinkRadio/Chk`, **`upQuality`** (nové). Helper: `isUnifiedModel(m)`.
-
-### WAN 2.7 Image routing (od v195en)
-Přes Segmind (synchronous binary PNG). Size preset strings "1K"/"2K"/"4K" s asterisk notation.
-
-### PixVerse C1 (od v192–v193)
-T2V/I2V/Transition/Fusion. 4 VIDEO_MODELS, passthrough Worker. Gotchas: I2V endpoint `/video/img/generate` (ne `/image/`); `multi_clip_switch` API INVERTED; `ref_name` alphanumeric only.
-
-### Inpainting (aktivní modely)
-FLUX Pro Fill, FLUX General, FLUX Dev, FLUX Krea. Worker handler: `fal-inpaint.js` (NE `fal.js`).
-
-**Pozn:** GPT Image Edit modely mají mask-based inpainting, ale NEJEDOU přes inpaint modul — jdou přes normální Generate flow s annotation layer assetem jako mask ref. Jde o "soft mask global regeneration", ne pixel-exact replacement.
-
-### Performance: meta vs full data (v202en)
-Pravidlo: pro listing/thumbnail/lookup operace vždy meta store. Plná data jen single-item akce.
-
-### Video subsystem (od v203en)
-6 submodulů. Cross-module calls povolené (globální scope). Build order kritický: utils → models → queue → gallery → topaz → archive.
+**Ostatní moduly beze změny.**
 
 ---
 
 ## Pravidla a principy
 
-- **⚠ `/mnt/project/` je VŽDY stale.** Session start: STAV.md z GitHubu → fetch moduly → edit v `/home/claude/src/` → `node build.js NNNen → dist/`
-- **Syntax check po buildu**: extract script → `node --input-type=module`. OK = "window is not defined"
-- **HTML validation**: `build.js` zobrazuje `✓ HTML div balance: OK (N pairs)`
-- **NIKDY neodstraňovat modely/endpointy/funkce bez explicitního souhlasu**
-- **⚠ Model dropdown je hardcoded v `template.html`** — při přidávání modelu EDITOVAT 2 MÍSTA: `models.js` entry + `<option>` v `#modelSelect` dropdown v template.html
-- **REST API param names**: Vertex AI naming (`sampleImageSize`, `sampleCount`) pro Google REST
-- **Worker free tier**: 30 s wall-clock — nikdy nepollovat v Workeru
-- **Snap count v `addToQueue`**: každý nový model svůj count field. Rerun force=1 (od v202en)
-- **xAI concurrency limit**: max 2 concurrent requesty
-- **Ref prefix**: ODSTRANĚN v v200en
-- **OpenRouter (Claude Sonnet 4.6)** = PRIMARY agent pro tool features. Gemini Flash jen fallback
-- **Paint engine invariant**: `history[0]` = čistý originál, nikdy přepsán
-- **Grid/Flex nesting gotcha**: `.gal-grid` (display:grid) MUSÍ být normal block child
-- **Listing operace**: vždy meta store. Plná data jen single-item
-- **Video subsystem (v203en+)**: cross-module calls OK, build order kritický
-- **Seedance 2.0 pricing (v204en+)**: per-resolution keys, R2V video refs 0.6×, Fast nemá 1080p
-- **GPT Image (v205en+)**:
-  - 1K = custom dims (NE fal preset enum, ten generuje 1088×608)
-  - Mask format: RGBA PNG, alpha=0 edit / alpha=255 keep
-  - `mask_url` (GPT 2) vs `mask_image_url` (GPT 1.5) — pole se liší
-  - Streaming fal zatím nedává progressive frames — queue preferovaný
-  - Constraints: multiples of 16, max edge 3840, pixels 655k–8.29M, AR ≤ 3:1
-- **CSS absolute positioning**: ALWAYS zkontrolovat že nejbližší `position:relative` předek je ten co má být (image-card NEMÁ, ph-body MÁ)
-- **Rozhodnutí nedělat za Petra** — složitější věci prezentovat jako options
+- **⚠ CRITICAL — `/mnt/project/` je VŽDY stale. NIKDY ho nepoužívat.** Session start: (1) `STAV.md` z GitHubu, (2) fetch klíčové moduly, (3) editovat v `/home/claude/src/`, (4) `node build.js NNNen → dist/`.
+- **Syntax check po buildu**: extract script z builtu → `node --check /tmp/check.mjs`. OK = žádný výstup. `node --input-type=module < /tmp/check.mjs 2>&1 | head -3` vypíše `ReferenceError: window is not defined`.
+- **HTML validation** — build.js zobrazuje `✓ HTML div balance: OK (N pairs)`.
+- **NIKDY neodstraňovat modely, endpointy ani funkce bez explicitního souhlasu uživatele.**
+- **Video cleanup (v206en)** — wrappers preserved pattern: pokud refactor vyžaduje přepsání desítek call-sites v HTML+JS, udělej wrappers `function oldName() { newApi('key'); }` místo rename. Risk << savings.
+- **VIDEO_MODELS entries** = single source of truth pro spend keys (`spendKey`, `spendKeyAudio`). WAN 2.6 má funkční spendKey (resolution-dependent).
+- **VIDEO_POLL** v video-utils.js = central tuning pro všechny video timeouty + poll intervaly. Měnit tady, aplikuje se automaticky.
+- **VIDEO_SOURCE_SLOTS** registry v video-gallery.js = single registry pro všechny source-video UI panely. Topaz entry v video-topaz.js (push pattern, protože setHook vyžaduje Topaz-specific FPS detection).
+- **_videoPollLoop** v video-queue.js — generic polling adapter pro Luma/Grok/PixVerse. Veo + fal modely mají vlastní shape, nepoužívají ho.
+- **Handler error guideline**: handlery throw RAW technické errory; `videoJobError` je single entry-point pro friendly-ifikaci přes `friendlyVideoError`. Viz guideline komentář nad funkcí.
+- **Decisions belong to Petr** — u složitějších refactorů prezentovat options předem.
+- **NE `/mnt/project/` stale** — nestěžovat si Petrovi, je to infrastructure problém. Řešení = upload do chatu/project files.
 
 ---
 
 ## Runtime Philosophy
 
-- **Single-file HTML** na file:// v Chrome
-- **NO CDN** pro libraries/code (inline). CDN pro UI fonts OK
-- **User data vždy lokální** (IndexedDB)
-- **No silent operations** — všechny async akce visible progress
-- **File System Access API flaky na file://** → `_IS_FILE_PROTOCOL` bypass
-- **Tauri migrace později** — až hard limit
-- **Petr needituje kód přímo** — vše jako ready-to-deploy files
-- **Dev/prod separation**: localhost:7800 prázdná DB, prod file:// žije dál
+Beze změny od v205en. Single-file HTML na file:// v Chrome, NO CDN pro libraries, local-first IndexedDB, Tauri migrace později.
 
 ---
 
 ## Nástroje a resources
 
-- **Kódová báze:** `petrsajner/GIS-modules` na GitHubu
+- **Kódová báze:** `petrsajner/GIS-modules` na GitHubu (synced to Claude project knowledge)
 - **Proxy:** `gis-proxy.petr-gis.workers.dev`; R2 bucket `gis-magnific-videos`
-- **AI provideři:** fal.ai, Segmind, Google, Replicate, Luma, Kling, PixVerse, Topaz, Magnific/Freepik, xAI, OpenRouter, **OpenAI (přes fal)**
-- **Build modul order (v205en, 25 modulů)**: models → styles → setup → spending → model-select → assets → refs → generate → fal → gpt-edit → output-placeholder → proxy → gemini → output-render → db → gallery → toast → paint → ai-prompt → video-utils → video-models → video-queue → video-gallery → video-topaz → video-archive
+- **AI provideři:** fal.ai, Segmind, Google, Replicate, Luma, Kling, PixVerse, Topaz, Magnific/Freepik, xAI, OpenRouter, OpenAI (přes fal)
+- **Build modul order (v206en, 25 modulů)**: models → styles → setup → spending → model-select → assets → refs → generate → fal → gpt-edit → output-placeholder → proxy → gemini → output-render → db → gallery → toast → paint → ai-prompt → video-utils → video-models → video-queue → video-gallery → video-topaz → video-archive
 - **Dev server**: `node build.js --dev` (port 7800)
 - **Proxy deploy** (Windows): `cd C:\Users\Petr\Documents\gis-proxy` → `npm run deploy`
 - **Kontakt**: info.genimagestudio@gmail.com

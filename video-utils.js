@@ -2,6 +2,28 @@
 // VIDEO — utilities (pure helpers, no state, no DOM)
 // ═══════════════════════════════════════════════════════
 
+// Central polling & timeout constants (v206en cleanup #8).
+// Used by all video handlers — central place for tuning API latency response.
+const VIDEO_POLL = Object.freeze({
+  // Default poll interval (ms) between status checks
+  defaultMs:  5000,
+  // Off-peak slow mode (PixVerse off-peak processing)
+  offPeakMs:  15000,
+  // Total timeout per provider, in minutes
+  timeoutMin: Object.freeze({
+    fal:              20,   // Default fal video (Kling, Vidu, Hailuo)
+    falLong:          25,   // Longer-format fal (WAN 2.7, Seedance 2.0 — up to 15s)
+    falEdit:          30,   // Edit/V2V fal (WAN 2.7 Edit — longer processing)
+    veo:              15,   // Google Veo (predictLongRunning)
+    luma:             20,   // Luma Ray
+    grok:             15,   // xAI Grok Video
+    pixverse:         20,   // PixVerse C1 (standard)
+    pixverseOffPeak:  120,  // PixVerse off-peak = 2 hours
+    topaz:            30,   // Topaz video upscale
+    magnific:         48,   // Magnific video upscale (slower — high-res refinement)
+  }),
+});
+
 // ── Shared: extract video URL from fal.ai response object ──
 function _extractFalVideoUrl(obj) {
   return obj?.output?.video?.url || obj?.output?.url || obj?.video?.url || obj?.data?.video?.url || null;
@@ -86,7 +108,13 @@ function _videoDateStr(ts) {
   return new Date(ts).toLocaleDateString('en');
 }
 
-// Builds friendly error message — video-specific + delegates to image friendlyError
+// Builds friendly error message — video-specific + delegates to image friendlyError.
+//
+// Guideline (v206en cleanup #11):
+//   - Handlery (callVeoVideo, callLumaVideo, ...) throw RAW technical errors
+//     (e.g. "Luma submit 400: bad request", "Veo result fetch failed: 500").
+//   - videoJobError() is the single entry point that friendly-ifies via this fn.
+//   - Do NOT pre-format friendly messages in handlers — that defeats the mapping.
 function friendlyVideoError(raw) {
   if (!raw) return 'Video generation failed. Please try again.';
   const m = raw.toString();
@@ -103,7 +131,8 @@ function friendlyVideoError(raw) {
   if (/submit.*422/i.test(m))                           return 'Server rejected request (422) — check model settings';
   if (/luma submit 400/i.test(m))                       return m.replace(/^Luma submit \d+:\s*/, '');
   if (/download.*404|video.*404/i.test(m))              return 'Video download failed — result may have expired';
-  if (/timeout.*25 min|timeout.*30 min|timeout.*10 min/i.test(m)) return 'No result after timeout — server is slow, try Rerun';
+  // Generic timeout matcher — covers 10/15/20/25/30 min + "2 hours" (PixVerse off-peak)
+  if (/timeout.*\d+\s*(min|hour)|deadline/i.test(m))    return 'No result after timeout — server is slow, try Rerun';
   if (/cancelled/i.test(m))                             return 'Cancelled';
 
   // Delegate to image friendlyError for generic API/network errors

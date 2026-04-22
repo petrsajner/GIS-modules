@@ -64,7 +64,7 @@ async function _saveVideoResult(videoArrayBuffer, recordFields, job, spendArgs) 
 // Returns: videoArrayBuffer (ArrayBuffer)
 // opts: { label, timeoutMin, pollMs, progressLabel }
 async function _falVideoSubmitPollDownload(falKey, endpoint, payload, job, opts = {}) {
-  const { label = 'Video', timeoutMin = 20, pollMs = 5000, progressLabel = 'GENERATING' } = opts;
+  const { label = 'Video', timeoutMin = VIDEO_POLL.timeoutMin.fal, pollMs = VIDEO_POLL.defaultMs, progressLabel = 'GENERATING' } = opts;
   const queueUrl = `https://queue.fal.run/${endpoint}`;
 
   // Submit
@@ -134,6 +134,43 @@ async function _falVideoSubmitPollDownload(falKey, endpoint, payload, job, opts 
   if (!videoRes.ok) throw new Error(`${label} video download ${videoRes.status}`);
   const buffer = await videoRes.arrayBuffer();
   return { buffer, cdnUrl: videoUrl };
+}
+
+// ═══════════════════════════════════════════════════════
+// Generic video polling loop (v206en cleanup #3)
+// Used by: callLumaVideo, callGrokVideo, callPixverseVideo
+// (Veo + Kling/Seedance/WAN have different shapes — not used there.)
+//
+// adapter = {
+//   label:          string              // error prefix, e.g. "Luma video"
+//   timeoutMin:     number              // minutes until timeout
+//   pollMs:         number              // interval between status checks
+//   progressLabel?: string              // default "GENERATING"
+//   poll:           async () => result
+// }
+//
+// Poll result shape:
+//   { status: 'queued' }                → placeholder: "IN QUEUE · Ns"
+//   { status: 'running', progressText? }→ placeholder: progressText or "GENERATING · Ns"
+//   { status: 'done',    data }         → returns data
+//   { status: 'failed',  error? }       → throws
+//
+// Throws on timeout or job.cancelled.
+// ═══════════════════════════════════════════════════════
+async function _videoPollLoop(job, adapter) {
+  const { label, timeoutMin, pollMs, progressLabel = 'GENERATING', poll } = adapter;
+  const deadline = Date.now() + timeoutMin * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, pollMs));
+    if (job.cancelled) throw new Error('Cancelled');
+    const result = await poll();
+    const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+    if (result.status === 'done')    return result.data;
+    if (result.status === 'failed')  throw new Error(result.error || `${label} failed`);
+    if (result.status === 'queued')  updateVideoPlaceholderStatus(job, `IN QUEUE · ${elapsed}s`);
+    else /* running */               updateVideoPlaceholderStatus(job, result.progressText || `${progressLabel} · ${elapsed}s`);
+  }
+  throw new Error(`${label} timeout — generation did not complete within ${timeoutMin} minutes`);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -478,7 +515,7 @@ async function runVideoJob(job) {
     if (logPayload[k]) logPayload[k] = logPayload[k].slice(0, 40) + '…';
   });
   console.log('[GIS Video] Submitting payload:', JSON.stringify(logPayload));
-  const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(falKey, model.endpoint, payload, job, { label: model.name, timeoutMin: 20 });
+  const { buffer: videoArrayBuffer, cdnUrl: videoUrl } = await _falVideoSubmitPollDownload(falKey, model.endpoint, payload, job, { label: model.name });
 
   // Determine per-model spend key — no more generic $0.04 fallback
   const spendKey = _getVideoSpendKey(job.modelKey, !!job.enableAudio);
@@ -599,6 +636,9 @@ function renderVideoResultCard(rec, thumbData, placeholderEl) {
 }
 
 // ── Video error ──────────────────────────────────────────
+// Single entry point for all video job failures. Handlers throw RAW technical
+// errors; this fn friendly-ifies via friendlyVideoError() and renders the
+// error card + toast. See friendlyVideoError docstring for the guideline.
 function videoJobError(job, msg) {
   job.status = 'error';
   job.errorMsg = msg;
