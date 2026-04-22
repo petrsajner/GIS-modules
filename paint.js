@@ -886,7 +886,7 @@ async function pExportAnnotate() {
     const assetAnnot = await createAsset(annotB64, 'image/png', 'generated');
     const assetOrig  = await createAsset(origB64,  'image/png', 'generated');
     refs.push({ assetId: assetOrig.id, autoName: assetOrig.autoName, userLabel: '', mimeType: 'image/png', thumb: assetOrig.thumb || null, dims: assetOrig.dims || null });
-    refs.push({ assetId: assetAnnot.id, autoName: assetAnnot.autoName, userLabel: '', mimeType: 'image/png', thumb: assetAnnot.thumb || null, dims: assetAnnot.dims || null });
+    refs.push({ assetId: assetAnnot.id, autoName: assetAnnot.autoName, userLabel: '', mimeType: 'image/png', thumb: assetAnnot.thumb || null, dims: assetAnnot.dims || null, role: 'mask' });
     renderRefThumbs();
     document.getElementById('refSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     toast(`Added 2 references (original + strokes) [${refs.length}/14]`, 'ok');

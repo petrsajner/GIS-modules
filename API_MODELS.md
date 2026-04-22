@@ -1,4 +1,135 @@
 # GIS — API MODELS
+*Aktualizace po v205en · 22. 4. 2026*
+
+---
+
+## AKTUALIZACE v205en (22. 4. 2026)
+
+---
+
+### GPT Image 1.5 & 2 — OpenAI rodina přes fal.ai
+
+OpenAI 21. 4. 2026 vydal **ChatGPT Images 2.0** (GPT Image 2), fal.ai spustil endpointy ve stejný den. Integrováno 4 modely do GIS.
+
+| Endpoint | Type | GIS key | Status |
+|----------|------|---------|--------|
+| `openai/gpt-image-2` | T2I | `gptimg2_t2i` | ✅ |
+| `openai/gpt-image-2/edit` | I2I + mask | `gptimg2_edit` | ✅ |
+| `fal-ai/gpt-image-1.5` | T2I | `gptimg15_t2i` | ✅ |
+| `fal-ai/gpt-image-1.5/edit` | I2I + mask | `gptimg15_edit` | ✅ |
+
+**Auth:** `Authorization: Key {falKey}` (stejný pattern jako ostatní fal). NE BYOK — fal účtuje přímo. (Alternativní namespace `fal-ai/gpt-image-2` vyžaduje `openai_api_key` v payloadu = BYOK, nezvoleno.)
+
+**Queue URL:** `https://queue.fal.run/{endpoint}` — stejný path jako FLUX, SeeDream, atd.
+
+#### Schema srovnání
+
+| Param | GPT 2 T2I | GPT 2 Edit | GPT 1.5 T2I | GPT 1.5 Edit |
+|---|---|---|---|---|
+| `prompt` | ✅ required | ✅ | ✅ | ✅ |
+| `image_urls` | — | ✅ required (plural) | — | ✅ required |
+| `mask_url` | — | ✅ optional | — | — |
+| `mask_image_url` | — | — | — | ✅ optional |
+| `image_size` | preset/custom | auto/preset/custom | 3 fixed | auto/fixed |
+| `quality` | low/med/high | low/med/high | low/med/high | low/med/high |
+| `num_images` | 1–4 | 1–4 | 1–4 | 1–4 |
+| `output_format` | png/jpg/webp | png/jpg/webp | png/jpg/webp | png/jpg/webp |
+| `input_fidelity` | — | — | — | low/high (default high) |
+| `background` | — | — | auto/transparent/opaque | — |
+| `sync_mode` | bool | bool | bool | bool |
+
+#### Size constraints (GPT 2)
+
+OpenAI enforcement:
+- Multiples of 16
+- Max edge 3840 px
+- Pixel count 655 000 – 8 290 000
+- Aspect ratio ≤ 3:1
+
+**GIS implementace:** vždy custom `{width, height}` (NE preset enum — ten vrací ~1088×608). Long side per tier:
+- 1K → 1536
+- 2K → 2048
+- 4K → 3840
+
+Auto-scaledown pokud area > 8.29M. Auto-scaleup pokud area < 655k (extrémní AR).
+
+#### Size constraints (GPT 1.5)
+
+**Jen 3 fixed sizes:** `1024x1024`, `1024x1536`, `1536x1024`. Žádné custom dims ani tiers.
+
+Snap logic podle aspect ratio v GIS:
+- r > 1.15 → `1536x1024` (landscape)
+- r < 0.85 → `1024x1536` (portrait)
+- else → `1024x1024` (square)
+
+#### Mask format (kritický)
+
+**Oba modely — PNG s alpha channel:**
+- `alpha = 0` → **edit this region**
+- `alpha = 255` → **keep unchanged**
+- Musí match input image dimensions
+- RGB kanály irelevantní — model čte jen alpha
+- < 50 MB
+
+**GIS converter `_annotAssetToGptMask()`:**
+- Input: annotation asset (color strokes on white bg, z paint.js Export mode B)
+- Output: RGBA PNG kde painted=alpha0 (edit), unpainted=alpha255 (keep)
+- Near-white threshold 245 (forgives JPEG compression noise)
+
+**GPT "soft mask" chování:** Na rozdíl od FLUX Fill (pixel-exact replacement) GPT **regeneruje celý obrázek s mask guidance**. V praxi: i při malé označené ploše se barvy/světla okolo mohou mírně změnit. Inherent model behavior, nelze obejít.
+
+#### Pricing (fal, per-image)
+
+**GPT Image 2 — 1K presets:**
+
+| Size | Low | Medium | High |
+|------|-----|--------|------|
+| 1024×1024 | $0.006 | $0.053 | $0.211 |
+| 1024×1536 | $0.005 | $0.041 | $0.165 |
+| 1536×1024 | $0.005 | $0.041 | $0.165 |
+
+**GPT Image 2 — 2K/4K tier (ballpark z extremes):**
+
+| Tier | Low | Medium | High |
+|------|-----|--------|------|
+| 2K | $0.012 | $0.100 | $0.300 |
+| 4K | $0.025 | $0.200 | $0.410 |
+
+**GPT Image 1.5:**
+
+| Size | Low | Medium | High |
+|------|-----|--------|------|
+| 1024×1024 | $0.009 | $0.034 | $0.133 |
+| 1024×1536 | $0.013 | $0.051 | $0.200 |
+| 1536×1024 | $0.013 | $0.050 | $0.199 |
+
+**Base token rates (pro reference):**
+- Text: $5/M input, $10/M output, $1.25/M cached
+- Image: $8/M input, $30/M output, $2/M cached
+
+**Cost spread:** 1K low → 1K high = ~35×. 1K → 4K high = ~2×. Plán cenové strategie: user volí explicitně.
+
+#### Limitations (GA v1, duben 2026)
+
+- ❌ Transparent backgrounds (GPT 2) — není v GA. GPT 1.5 má.
+- ❌ `input_fidelity` parametr (GPT 2) — disabled, vždy auto high.
+- ❌ Seed — neexponováno
+- ❌ Negative prompt, steps, guidance — neexistuje koncept
+- ❌ Streaming progressive frames — fal momentálně posílá jen 1 final event, žádné postupné. (Code ready, flip `streaming: true` jakmile fal aktivuje.)
+
+#### Performance
+
+Z fal blog (21. 4. 2026):
+- **GPT 2 medium quality:** p50 ~3 s per image
+- **GPT 2 high quality 4K:** 8–12 s per image
+- Den po release občas overloaded → timeouty. Queue polling robustnější než SSE stream.
+
+#### Worker requirement
+
+**Žádný.** fal endpointy mají CORS otevřené pro browser calls. `Authorization: Key` header jde přímo z `file://` protocol.
+
+---
+
 *Aktualizace po v201en · 16. 4. 2026*
 
 ---

@@ -138,6 +138,16 @@ function selectModel(key) {
 
     // Persistent retry (Google)
     document.getElementById('upRetryRow').style.display = m.persistRetry ? '' : 'none';
+
+    // GPT quality tier (low / medium / high) — GPT Image 1.5 & 2
+    const qRow = document.getElementById('upQualityRow');
+    if (qRow) {
+      qRow.style.display = m.quality ? '' : 'none';
+      if (m.quality) {
+        const qMed = document.getElementById('upQ-med');
+        if (qMed) qMed.checked = true; // reset to medium on model switch
+      }
+    }
   }
 
   // ── Reference section ──
@@ -159,11 +169,16 @@ function selectModel(key) {
     : 'Reference images';
   if (refI2INote) {
     if (isEdit) {
-      const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to ' + (m.maxRefs||3) + ' images · Instructions in prompt'
-                 : m.type === 'wan27r' ? 'Max 4096px · Larger images auto-resized · Instructions in prompt'
-                 :                       'Max 2048px · Larger images auto-resized · Instructions in prompt';
-      refI2INote.textContent = info;
-      refI2INote.style.display = '';
+      if (m.type === 'gpt') {
+        // GPT modely nemají velikostní omezení referenci (žádný auto-resize)
+        refI2INote.style.display = 'none';
+      } else {
+        const info = m.type === 'qwen2'  ? 'Max 4 MP · Auto-resized · up to ' + (m.maxRefs||3) + ' images · Instructions in prompt'
+                   : m.type === 'wan27r' ? 'Max 4096px · Larger images auto-resized · Instructions in prompt'
+                   :                       'Max 2048px · Larger images auto-resized · Instructions in prompt';
+        refI2INote.textContent = info;
+        refI2INote.style.display = '';
+      }
     } else if (isI2I) {
       const info = m.type === 'proxy_xai'
         ? 'Add ref images for editing (up to ' + (m.maxRefs||5) + ').\nSingle ref = aspect from input · Multi-ref = aspect from setting · auto ratio lets model decide.'

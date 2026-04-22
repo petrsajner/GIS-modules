@@ -18,33 +18,47 @@ Standalone HTML single-file app. Žádný server, žádná instalace. Otevírá 
 
 ---
 
-## Build struktura (v90+)
+## Build struktura (v205en)
 
 ```
 src/
 ├── template.html          ← HTML + CSS + placeholder // __GIS_JS__
-├── models.js              ← MODELS, MODEL_DESCS, FAL_PRESETS, helpers, GIS_COPYRIGHT, getActiveRefs()
+├── models.js              ← MODELS, MODEL_DESCS, FAL_PRESETS, helpers, GIS_COPYRIGHT, getActiveRefs(), _MODEL_LONG_SIDES, updateUnifiedResInfo()
 ├── styles.js              ← STYLES systém, 80+ stylů
 ├── setup.js               ← API klíče, getProxyUrl(), _arrayBufferToBase64() utilities
-├── spending.js            ← SPEND_PRICES, trackSpend, spending UI
-├── model-select.js        ← selectModel(), switchView(), setGenMode(), rewritePromptForModel()
+├── spending.js            ← SPEND_PRICES, trackSpend, spending UI (29 GPT keys + Seedance + ostatní)
+├── model-select.js        ← selectModel(), switchView(), setGenMode(), rewritePromptForModel(), unified panel flag toggles
 ├── assets.js              ← asset library, pillarbox thumbs, assetFilters
-├── refs.js                ← refs management, @mention (live rewriting), describe modal, ref dimming
-├── generate.js            ← generate(), queue, runJob dispatch, withRetry
-├── fal.js                 ← FLUX/Kling Image/SeeDream/ZImage/Qwen2, _runSimpleInpaint, inpaint, _refAsJpeg(maxArea)
-├── output-placeholder.js  ← placeholder karty, error karty (Reuse + Rerun)
+├── refs.js                ← refs management, @mention, describe modal, ref dimming, toggleRefMaskRole() (v205en)
+├── generate.js            ← generate(), queue, runJob dispatch (incl. 'gpt' branch), withRetry
+├── fal.js                 ← FLUX/Kling Image/SeeDream/ZImage/Qwen2, _runSimpleInpaint, _falQueue helper
+├── gpt-edit.js            ← (v205en) GPT Image 1.5/2 T2I+Edit, mask converter, SSE streaming (ready), price picker
+├── output-placeholder.js  ← placeholder karty, error karty (Reuse + Rerun), updatePlaceholderPartial()
 ├── proxy.js               ← xAI + Luma Photon + Replicate WAN 2.7 image
 ├── gemini.js              ← Gemini SSE streaming, Imagen, streamAccepted timeout
-├── output-render.js       ← renderOutput(), result renderers, upscale dialog (Creative + Precision), _toJpeg(), pre-flight checks
-├── db.js                  ← IndexedDB (obrazky + videa + assets)
-├── gallery.js             ← image gallery, filtry, rubber band, drag-to-folder
+├── output-render.js       ← renderOutput(), result renderers, upscale dialog, _toJpeg(), pre-flight checks
+├── db.js                  ← IndexedDB (obrazky + videa + assets) — result.type='gpt' branch
+├── gallery.js             ← image gallery, filtry, rubber band, drag-to-folder, quality reuse for GPT
 ├── toast.js               ← notifikace
-├── paint.js               ← Paint + Annotate + Inpaint (queue, models, composite)
+├── paint.js               ← Paint + Annotate + Inpaint (queue, models, composite, role:'mask' tagging)
 ├── ai-prompt.js           ← AI Prompt Tool — Claude Sonnet (OR) primární, Gemini 3.1 Pro fallback
-└── video.js               ← Video modely, fronta, galerie, Topaz, Magnific, Grok Video, @mention rewriting
+├── video-utils.js         ← (v203en) pure helpers pro video
+├── video-models.js        ← (v203en) VIDEO_MODELS, handlery, model UI switching
+├── video-queue.js         ← (v203en) videoJobs state, _saveVideoResult, runVideoJob
+├── video-gallery.js       ← (v203en) gallery UI, refs, mention, lightbox, source slots
+├── video-topaz.js         ← (v203en) Topaz + Magnific upscale
+└── video-archive.js       ← (v203en) export/import
 ```
 
-Build: `node build.js 199en` → `dist/gis_v199en.html`
+Build: `node build.js 205en` → `dist/gis_v205en.html` (~28 000 řádků, 25 modulů)
+
+Build module order pro JS concatenation (strict):
+```
+models → styles → setup → spending → model-select → assets → refs
+→ generate → fal → gpt-edit → output-placeholder → proxy → gemini
+→ output-render → db → gallery → toast → paint → ai-prompt
+→ video-utils → video-models → video-queue → video-gallery → video-topaz → video-archive
+```
 
 ---
 

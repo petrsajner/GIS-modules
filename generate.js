@@ -133,6 +133,19 @@ async function generate() {
     };
     addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, qwen2Snap, qwen2Count: upCount });
 
+  } else if (m.type === 'gpt') {
+    const falKey = document.getElementById('fluxApiKey').value.trim();
+    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'GPT Image models run through fal.ai. Add a fal.ai API key in the Setup tab.'); return; }
+    const quality = document.querySelector('input[name="upQuality"]:checked')?.value || 'medium';
+    const gptSnap = {
+      quality,
+      resolution:   resLabel,
+      aspectRatio:  aspect,
+      stream:       !!m.streaming,   // /edit endpoints only
+      targetFolder: folder,
+    };
+    addToQueue({ apiKey: falKey, prompt: styledPrompt, rawPrompt, model: m, modelKey: currentModel, refsCopy, gptSnap, gptCount: upCount });
+
   } else if (m.type === 'wan27r') {
     const replicateKey = (localStorage.getItem('gis_replicate_apikey') || '').trim();
     const proxyUrl     = (localStorage.getItem('gis_proxy_url') || '').trim().replace(/\/$/, '');
@@ -251,6 +264,7 @@ function addToQueue(jobData) {
     jobData.klingCount  = 1;
     jobData.zimageCount = 1;
     jobData.qwen2Count  = 1;
+    jobData.gptCount    = 1;
     if (jobData.xaiSnap)    jobData.xaiSnap.grokCount      = 1;
     if (jobData.imagenSnap) jobData.imagenSnap.sampleCount  = 1;
     if (jobData.wan27Snap)  jobData.wan27Snap.count         = 1;
@@ -275,7 +289,7 @@ function addToQueue(jobData) {
   // Okamžitě vytvoř placeholder karty — i pro joby waitingcí ve frontě
   if (!job.isUpscale) {
     const count = job.geminiCount || job.fluxCount || job.sdCount || job.klingCount
-                || job.zimageCount || job.qwen2Count
+                || job.zimageCount || job.qwen2Count || job.gptCount
                 || job.wan27Snap?.count
                 || job.mysticSnap?.count
                 || job.xaiSnap?.grokCount
@@ -606,6 +620,43 @@ async function runJob(job) {
           const galId = await saveToGallery(r.value, job.prompt, job.qwen2Snap?.targetFolder, job.refsCopy, job.rawPrompt, job);
           await replacePlaceholder(cardEl, r.value, job.prompt, galId);
           trackSpend('fal', job.model.id);
+        } else {
+          showErrorPlaceholder(cardEl, job, r.reason?.message || String(r.reason));
+        }
+      }
+
+    } else if (job.model.type === 'gpt') {
+      // GPT Image 1.5 & 2 via fal.ai — N paralelních callů s optional SSE streaming
+      // Streaming: /edit endpointy podporují SSE; onPartial aktualizuje placeholder náhledem
+      document.getElementById('emptyState').style.display = 'none';
+      const count = job.gptCount || 1;
+      const cards = job.pendingCards || [createPlaceholderCard(job, 0)];
+      const settled = await Promise.allSettled(
+        cards.map((cardEl, i) => withRetry(async () => {
+          const tw = cardEl.querySelector('.ph-think-wrap');
+          const tb = cardEl.querySelector('.ph-think-body');
+          if (tw) tw.classList.remove('visible');
+          if (tb) tb.textContent = '';
+          const snapForCall = { ...job.gptSnap };
+          // Partial-image callback: updatePlaceholderPartial shows live preview if available
+          const onPartial = (evt) => {
+            if (typeof updatePlaceholderPartial === 'function') {
+              try { updatePlaceholderPartial(cardEl, evt); } catch (_) {}
+            }
+          };
+          return callGptImage(job.apiKey, job.prompt, job.model, job.refsCopy, snapForCall,
+            (s) => updatePlaceholderThinking(cardEl, s),
+            onPartial);
+        }, job))
+      );
+      for (let i = 0; i < settled.length; i++) {
+        const r = settled[i];
+        const cardEl = cards[i];
+        if (r.status === 'fulfilled') {
+          const galId = await saveToGallery(r.value, job.prompt, job.gptSnap?.targetFolder, job.refsCopy, job.rawPrompt, job);
+          await replacePlaceholder(cardEl, r.value, job.prompt, galId);
+          // GPT has per-quality/size pricing — trackSpend reads priceKey attached to result
+          if (r.value?.priceKey) trackSpend('fal', r.value.priceKey);
         } else {
           showErrorPlaceholder(cardEl, job, r.reason?.message || String(r.reason));
         }

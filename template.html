@@ -38,6 +38,15 @@ body { background:var(--bg); color:var(--text); font-family:'IBM Plex Mono',mono
 }
 .brand { font-family:'Syne',sans-serif; font-weight:800; font-size:16px; letter-spacing:-0.3px; white-space:nowrap; }
 .brand em { color:var(--accent); font-style:normal; }
+.app-version {
+  font-family:'Syne',sans-serif; font-weight:700; font-size:11px;
+  letter-spacing:.12em; color:var(--accent);
+  padding:3px 9px; border:1px solid rgba(212,160,23,.35);
+  border-radius:2px; background:rgba(212,160,23,.04);
+  text-transform:uppercase; white-space:nowrap; cursor:default;
+  transition:background .15s, border-color .15s;
+}
+.app-version:hover { background:rgba(212,160,23,.12); border-color:rgba(212,160,23,.6); }
 .hflex { flex:1; }
 
 /* Nav tabs */
@@ -535,6 +544,22 @@ input[type=file] { display:none; }
 .rth2.ref-dimmed { opacity:0.35; filter:grayscale(0.6); pointer-events:auto; }
 .rth2.ref-dimmed .rth2-img { border-color:rgba(255,80,80,.35); }
 .rth2.ref-dimmed .rth2-label { color:var(--dim2); font-style:italic; }
+
+/* Mask role badge (GPT Edit) */
+.rth2 .rth2-mask-badge {
+  position:absolute; top:2px; left:2px;
+  background:rgba(200,80,200,.92); color:#fff;
+  font-size:9px; padding:2px 5px; border-radius:2px;
+  cursor:pointer; border:1px solid rgba(255,150,255,.4);
+  font-weight:700; letter-spacing:.03em; z-index:2;
+}
+.rth2 .rth2-mask-badge.mask-off {
+  background:rgba(20,20,30,.6); color:rgba(255,255,255,.45);
+  border-color:rgba(255,255,255,.12); opacity:0;
+  transition:opacity .15s;
+}
+.rth2:hover .rth2-mask-badge.mask-off { opacity:1; }
+.rth2.ref-is-mask .rth2-img { border-color:rgba(220,100,220,.65); }
 
 /* Describe modal */
 #describeModal {
@@ -2168,6 +2193,8 @@ select.inpaint-num option { background:#fff; color:#111; }
   <div class="hflex"></div>
   <div class="hctrls">
 
+    <div class="app-version" title="Generative Image Studio version">__GIS_VERSION__</div>
+
     <div class="hfield">
       <span class="hlabel">Google Key</span>
       <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off">
@@ -2211,6 +2238,11 @@ select.inpaint-num option { background:#fff; color:#111; }
           <option value="i4">Imagen 4 — imagen-4.0-generate-001</option>
           <option value="i4fast">Imagen 4 Fast — imagen-4.0-fast-generate-001</option>
           <option value="i4ultra">Imagen 4 Ultra — imagen-4.0-ultra-generate-001</option>
+          <option disabled>──────────────────</option>
+          <option value="gptimg2_t2i">GPT Image 2 — fal.ai · OpenAI · quality tiers · up to 4K</option>
+          <option value="gptimg2_edit">GPT Image 2 Edit — fal.ai · OpenAI · streaming · ref + mask</option>
+          <option value="gptimg15_t2i">GPT Image 1.5 — fal.ai · OpenAI · quality tiers</option>
+          <option value="gptimg15_edit">GPT Image 1.5 Edit — fal.ai · OpenAI · streaming · ref + mask</option>
           <option disabled>──────────────────</option>
           <option value="flux2_pro">FLUX.2 Pro — fal.ai · $0.03/MP</option>
           <option value="flux2_flex">FLUX.2 Flex — fal.ai · $0.06/MP · steps + guidance</option>
@@ -2476,6 +2508,16 @@ select.inpaint-num option { background:#fff; color:#111; }
               <div class="chk-box"></div>
               Persistent retry on 503 <span style="font-size:9px;color:var(--dim2);margin-left:4px;">(10\u00d7 / ~10 min backoff)</span>
             </label>
+          </div>
+
+          <!-- GPT quality tier (low / medium / high) -->
+          <div class="ctrl" id="upQualityRow" style="display:none">
+            <div class="ctrl-label">Quality</div>
+            <div class="toggle-row">
+              <input type="radio" name="upQuality" id="upQ-low"  value="low"><label for="upQ-low">Low</label>
+              <input type="radio" name="upQuality" id="upQ-med"  value="medium" checked><label for="upQ-med">Medium</label>
+              <input type="radio" name="upQuality" id="upQ-high" value="high"><label for="upQ-high">High</label>
+            </div>
           </div>
 
         </div><!-- /upParams -->

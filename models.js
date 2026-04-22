@@ -87,6 +87,74 @@ const MODELS = {
     persistRetry: true,
   },
 
+  // ── OpenAI GPT Image family — via fal.ai ──
+  // GPT Image 2 (Apr 21, 2026): quality-first, pixel-perfect text, up to 4K
+  // GPT Image 1.5: prior gen, supports background=transparent
+  // Both expose quality tiers (low/medium/high) with 30×+ cost spread.
+  gptimg2_t2i: {
+    id: 'openai/gpt-image-2',
+    name: 'GPT Image 2',
+    type: 'gpt',
+    provider: 'fal',
+    thinking: false,
+    refs: false,         // T2I has no reference inputs (edit variant handles refs)
+    maxRefs: 0,
+    seed: false,
+    quality: true,       // enables upQuality radio
+    gptSizeMode: 'gpt2', // full 6-preset enum, aspect-driven
+    resolutions: ['1K', '2K', '4K'],
+    maxCount: 4,
+  },
+  gptimg2_edit: {
+    id: 'openai/gpt-image-2/edit',
+    name: 'GPT Image 2 Edit',
+    type: 'gpt',
+    provider: 'fal',
+    thinking: false,
+    refs: true,
+    maxRefs: 8,          // first = target, rest = context (fal plural image_urls)
+    editModel: true,
+    seed: false,
+    quality: true,
+    gptSizeMode: 'gpt2',
+    resolutions: ['1K', '2K', '4K'],
+    maxCount: 4,
+    // streaming disabled: fal currently sends only a single final-data-URI event
+    // for both GPT 2 and 1.5 edit endpoints — no progressive frames. Queue is
+    // simpler and equivalent. Re-enable if fal adds true progressive diffusion preview.
+    streaming: false,
+  },
+  gptimg15_t2i: {
+    id: 'fal-ai/gpt-image-1.5',
+    name: 'GPT Image 1.5',
+    type: 'gpt',
+    provider: 'fal',
+    thinking: false,
+    refs: false,
+    maxRefs: 0,
+    seed: false,
+    quality: true,
+    gptSizeMode: 'gpt15', // only 1024² / 1024×1536 / 1536×1024
+    resolutions: ['1K'],
+    maxCount: 4,
+  },
+  gptimg15_edit: {
+    id: 'fal-ai/gpt-image-1.5/edit',
+    name: 'GPT Image 1.5 Edit',
+    type: 'gpt',
+    provider: 'fal',
+    thinking: false,
+    refs: true,
+    maxRefs: 8,
+    editModel: true,
+    seed: false,
+    quality: true,
+    gptSizeMode: 'gpt15',
+    resolutions: ['1K'],
+    maxCount: 4,
+    streaming: false, // see note on gptimg2_edit
+  },
+
   // ── FLUX.2 family — fal.ai ──
   flux2_pro: {
     id: 'fal-ai/flux-2-pro',
@@ -503,7 +571,7 @@ const MODELS = {
 };
 
 // ── Unified panel types — models using the unified control panel ──
-const _UNIFIED_TYPES = new Set(['gemini','imagen','flux','seedream','kling','zimage','wan27r','qwen2','proxy_xai']);
+const _UNIFIED_TYPES = new Set(['gemini','imagen','flux','seedream','kling','zimage','wan27r','qwen2','proxy_xai','gpt']);
 function isUnifiedModel(m) { return _UNIFIED_TYPES.has(m?.type); }
 
 // ── Helper: model key z model objektu ──
@@ -618,6 +686,12 @@ const _MODEL_LONG_SIDES = {
   // Grok
   grok_imagine:     { '1K': 1408, '2K': 2816 },
   grok_imagine_pro: { '1K': 1408, '2K': 2816 },
+  // GPT Image 2: preset at 1K, custom dims for 2K/4K (multiples of 16, max 3840, ≤8.29M px)
+  gptimg2_t2i:  { '1K': 1536, '2K': 2048, '4K': 3840 },
+  gptimg2_edit: { '1K': 1536, '2K': 2048, '4K': 3840 },
+  // GPT Image 1.5: only 3 fixed sizes, all ~1K class
+  gptimg15_t2i:  { '1K': 1536 },
+  gptimg15_edit: { '1K': 1536 },
   // WAN 2.7 — uses pixel whitelist (handled separately)
 };
 
@@ -656,6 +730,43 @@ function updateUnifiedResInfo() {
     if (m.editModel) infoEl.textContent = label + ' (from input)';
     else if (px) infoEl.textContent = px.replace('*', '\u00d7');
     else infoEl.textContent = label + ' (square \u2014 ' + aspect + ' n/a)';
+  } else if (m.type === 'gpt') {
+    // GPT Image: compute exact dims honoring OpenAI constraints
+    // GPT 2: always custom dims (presets produce too-small outputs)
+    // GPT 1.5: fixed 3 sizes only
+    const longSide = _MODEL_LONG_SIDES[currentModel]?.[label];
+    if (!longSide) { infoEl.textContent = ''; return; }
+    if (m.gptSizeMode === 'gpt15') {
+      const parts = aspect.split(':').map(Number);
+      const [aw, ah] = parts.length === 2 ? parts : [1, 1];
+      const r = aw / ah;
+      if (r > 1.15)      infoEl.textContent = '1536\u00d71024';
+      else if (r < 0.85) infoEl.textContent = '1024\u00d71536';
+      else               infoEl.textContent = '1024\u00d71024';
+    } else {
+      // GPT 2 — calc matches _gpt2SizeFromAspect in gpt-edit.js
+      const parts = aspect.split(':').map(Number);
+      const [aw, ah] = parts.length === 2 ? parts : [16, 9];
+      let w, h;
+      if (aw >= ah) { w = longSide; h = Math.round(longSide * ah / aw); }
+      else          { h = longSide; w = Math.round(longSide * aw / ah); }
+      w = Math.round(w / 16) * 16;
+      h = Math.round(h / 16) * 16;
+      // Min floor 655k px
+      if (w * h < 655000) {
+        const k = Math.sqrt(655000 / (w * h));
+        w = Math.ceil(w * k / 16) * 16;
+        h = Math.ceil(h * k / 16) * 16;
+      }
+      // Area cap 8.29M px
+      const area = w * h;
+      if (area > 8290000) {
+        const k = Math.sqrt(8290000 / area);
+        w = Math.floor(w * k / 16) * 16;
+        h = Math.floor(h * k / 16) * 16;
+      }
+      infoEl.textContent = w + '\u00d7' + h;
+    }
   } else {
     // All other models: use empirical long-side lookup
     const ls = _MODEL_LONG_SIDES[currentModel]?.[label];

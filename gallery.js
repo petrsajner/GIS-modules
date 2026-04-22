@@ -1220,7 +1220,7 @@ function reuseJob(result, prompt) {
   if (result.params?.ratio) {
     setAspectRatioSafe(result.params.ratio);
   }
-  if (result.type === 'flux' || result.type === 'seedream' || result.type === 'kling' || result.type === 'zimage' || result.type === 'qwen2') {
+  if (result.type === 'flux' || result.type === 'seedream' || result.type === 'kling' || result.type === 'zimage' || result.type === 'qwen2' || result.type === 'gpt') {
     const seedVal = result.seed;
     const seedEl = document.getElementById('upSeed');
     if (seedEl) seedEl.value = (seedVal && seedVal !== '—') ? seedVal : '';
@@ -1255,6 +1255,11 @@ function reuseJob(result, prompt) {
         const rEl = document.querySelector(`input[name="upAccel"][value="${result.acceleration}"]`);
         if (rEl) rEl.checked = true;
       }
+    } else if (result.type === 'gpt') {
+      // Restore quality tier radio
+      const q = result.quality || result.params?.quality || 'medium';
+      const qEl = document.querySelector(`input[name="upQuality"][value="${q}"]`);
+      if (qEl) qEl.checked = true;
     }
   }
 

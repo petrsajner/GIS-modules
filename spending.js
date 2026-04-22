@@ -46,6 +46,36 @@ const SPEND_PRICES = {
   'fal-ai/qwen-image-2/edit':              0.020,
   'fal-ai/qwen-image-2/pro/edit':          0.035,
 
+  // ── OpenAI GPT Image — per-image pricing from fal (Apr 21, 2026) ────
+  // Routing: pickGptPriceKey(modelKey, quality, image_size) returns correct key.
+  // GPT Image 2 (openai/gpt-image-2 + /edit) — same pricing for T2I & edit
+  '_gptimg2_low_1024sq':        0.006,   // 1024x1024
+  '_gptimg2_low_1024x1536':     0.005,   // portrait
+  '_gptimg2_low_1536x1024':     0.005,   // landscape
+  '_gptimg2_med_1024sq':        0.053,
+  '_gptimg2_med_1024x1536':     0.041,
+  '_gptimg2_med_1536x1024':     0.041,
+  '_gptimg2_high_1024sq':       0.211,
+  '_gptimg2_high_1024x1536':    0.165,
+  '_gptimg2_high_1536x1024':    0.165,
+  // GPT Image 2 — 2K/4K tier (custom dims; ballpark: ~2× per tier step)
+  // Extremes confirmed: High 4K landscape ≈ $0.41 → doubling pattern
+  '_gptimg2_low_2K':            0.012,
+  '_gptimg2_med_2K':            0.100,
+  '_gptimg2_high_2K':           0.300,
+  '_gptimg2_low_4K':            0.025,
+  '_gptimg2_med_4K':            0.200,
+  '_gptimg2_high_4K':           0.410,
+  // GPT Image 1.5 (fal-ai/gpt-image-1.5 + /edit)
+  '_gptimg15_low_1024sq':       0.009,   // 1024x1024
+  '_gptimg15_low_other':        0.013,   // any non-square (fal docs collapse both into 0.013)
+  '_gptimg15_med_1024sq':       0.034,
+  '_gptimg15_med_1024x1536':    0.051,
+  '_gptimg15_med_1536x1024':    0.050,
+  '_gptimg15_high_1024sq':      0.133,
+  '_gptimg15_high_1024x1536':   0.200,
+  '_gptimg15_high_1536x1024':   0.199,
+
   // ── fal.ai — upscale (per operation) ────────────────
   '_upscale_clarity':   0.040,   // Clarity Upscaler (rough)
   '_upscale_seedvr':    0.030,   // SeedVR2

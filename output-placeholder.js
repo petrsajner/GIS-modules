@@ -73,6 +73,54 @@ function updatePlaceholderThinking(cardEl, text) {
   body.scrollTop = body.scrollHeight;
 }
 
+// Progressive preview during streaming (GPT Image edit endpoints)
+// Event shape: { images: [{ url, content_type, ... }] }
+// Preview is injected INSIDE .ph-body (which has position:relative + aspect-ratio:16/9),
+// NOT into the outer .img-card which has no positioning — that would escape to #center
+// (the whole right-half wrapper) and fill the screen.
+//
+// Smart detection of FINAL vs PROGRESSIVE events:
+// - Fal sometimes sends the entire final image as a single data URI event (typical for
+//   GPT Image 2 in current fal release). In that case the placeholder will be replaced
+//   by the real result card within milliseconds — showing a preview would just flash
+//   briefly and get replaced. Skip it.
+// - True progressive frames are small (lower-res previews during diffusion) or short
+//   HTTP URLs pointing to partial renders. Those we want to show.
+// Heuristic: data URI > ~400KB of base64 ≈ 300KB image = too big to be an intermediate
+// preview, treat as final and skip rendering.
+function updatePlaceholderPartial(cardEl, evt) {
+  if (!cardEl || !evt || !evt.images || !evt.images.length) return;
+  const img0 = evt.images[0];
+  const url = img0?.url;
+  if (!url) return;
+
+  // Detect final-event data URI and skip (see heuristic above)
+  if (url.startsWith('data:') && url.length > 400_000) return;
+
+  // Container is .ph-body — it has position:relative + aspect-ratio, so absolute fills it.
+  const body = cardEl.querySelector('.ph-body');
+  if (!body) return;
+
+  let preview = body.querySelector('.ph-stream-preview');
+  if (!preview) {
+    preview = document.createElement('img');
+    preview.className = 'ph-stream-preview';
+    preview.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:1;';
+    preview.onerror = () => {
+      // Partial URL sometimes expires/unauthorized — hide preview rather than showing broken icon
+      preview.style.display = 'none';
+    };
+    preview.onload = () => {
+      preview.style.display = '';
+      // Lift overlay above preview so text stays readable
+      const overlay = body.querySelector('.ph-overlay');
+      if (overlay) overlay.style.zIndex = '2';
+    };
+    body.appendChild(preview);
+  }
+  preview.src = url;
+}
+
 // Nahradí placeholder skutečnou kartou výsledku
 async function replacePlaceholder(cardEl, result, prompt, galId) {
   if (!cardEl) return;
@@ -82,7 +130,7 @@ async function replacePlaceholder(cardEl, result, prompt, galId) {
   const temp = document.createElement('div');
   if (result.type === 'gemini') {
     await renderGeminiOutput(temp, result, prompt, galId);
-  } else if (result.type === 'flux' || result.type === 'seedream' || result.type === 'kling' || result.type === 'zimage') {
+  } else if (result.type === 'flux' || result.type === 'seedream' || result.type === 'kling' || result.type === 'zimage' || result.type === 'gpt') {
     await renderImagenOutput(temp, result, prompt, galId);
   } else {
     await renderImagenOutput(temp, result, prompt, galId);

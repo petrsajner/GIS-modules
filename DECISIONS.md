@@ -1,5 +1,121 @@
 # GIS — ROZHODNUTÍ & ARCHITEKTURA
 
+*Aktualizováno 22. 4. 2026 · v205en GPT Image 1.5 & 2 integrace*
+
+---
+
+## GPT Image 1.5 & 2 — OpenAI rodina přes fal.ai (22. 4. 2026, v205en)
+
+**Kontext:** 21. 4. 2026 fal.ai (den po OpenAI release) spustil `openai/gpt-image-2` + `/edit` endpointy. Current (15+ models in dropdown) + rozsah schopností (pixel-perfect text rendering, až 4K, mask-based edits) → nutná integrace **hned**. Spolu s tím nabídka pro GPT Image 1.5 (`fal-ai/gpt-image-1.5`) — prior gen s `input_fidelity` a `background=transparent` supportem (neintegrováno).
+
+### Rozhodnutí 1: Integrovat oba modely (1.5 + 2) paralelně
+
+Technicky pro GPT 2 je uvedeno že nahrazuje 1.5, ale 1.5 má dvě capabilities co 2.0 nemá: `background=transparent` support a `input_fidelity` parametr. Pro budoucí use cases (produktové compositing s alpha transparency) je užitečné mít oba. Navíc marginal cost: GPT 1.5 přidává jen variantu v `models.js` + 8 price keys, vše ostatní sdílí s GPT 2 (unified panel, mask handling, streaming infrastruktura).
+
+### Rozhodnutí 2: Split T2I / Edit jako separátní modely (4 entries)
+
+Zvažované varianty:
+- **A1. Two separate modely** (T2I + Edit jako samostatné záznamy) ✅ zvoleno
+- **A2. One model, auto-switch** (routing podle přítomnosti ref images)
+
+Zvoleno A1 protože:
+- Z-Image už má stejný pattern (Turbo vs Turbo I2I)
+- Explicit user intent — vybere "GPT Image 2 Edit" když chce edit, ne když omylem necháš ref v refs
+- Pricing se liší (edit má image input tokens)
+- Edit endpoint používá `image_urls[]` (plural) — jiný UX model než GIS single-ref I2I
+
+### Rozhodnutí 3: Unified panel + nový `upQuality` flag
+
+Varianty:
+- **B1. Unified flag `upQuality`** (radio low/med/high) ✅ zvoleno
+- **B2. Custom legacy panel** (jako Mystic/Photon)
+
+Zvoleno B1 protože:
+- V v200en právě probíhal refactor z 9 legacy panelů na unified
+- Quality tier není GPT-specific — FLUX.2-flex, potenciálně další budou mít taky. Reusable flag = rozšíření zdarma
+- Jen +1 flag v unified template, +1 toggle v `model-select.js`
+
+Styling: **`.toggle-row` pattern** (stejný jako Resolution) — 3 zlaté buttony, 30× cost spread mezi tiers. Pozice: **přímo nad Generate tlačítkem** (UX flow: nastavuj → generuj).
+
+### Rozhodnutí 4: Mask přes annotation layer (varianta B)
+
+Zvažované varianty:
+- **A. Mask button na každém thumbnail** (paint modal per-ref)
+- **B. Auto z annotation layer assetu** ✅ zvoleno
+- **C. Pre-made mask upload se speciálním tagem** (odmítnuto — pracné)
+
+Zvoleno B protože:
+- Využívá existující "annotate → save asset" flow z paint toolu
+- Zero new UI concepts — jen annotation tool dostane druhou funkci
+- Paint.js už generuje `_annotateAnnotCanvas` s color strokes + transparent bg — přesně to co potřebujeme
+- User workflow: paint obrázku → anotace → Export mode B → GIS vloží 2 refs (orig + annotation), druhý automaticky dostane `role: 'mask'`
+
+Technické detaily:
+- OpenAI mask format: **RGBA PNG s alpha channel** (alpha=0 edit, alpha=255 keep), musí match input image dims
+- Converter `_annotAssetToGptMask()`: detekce near-white pixelů (threshold 245) → alpha=255, ostatní → alpha=0
+- Resize `_resizeGptMaskToMatch()`: pokud user anotoval na jiný resolution než target → nearest-neighbor resize (alpha sharp)
+- Thumbnail UI: růžový 🎭 MASK badge + `.ref-is-mask` border tint. Hover na non-mask refs (při aktivním GPT Edit modelu) zobrazí tlumený 🎭 → manual toggle
+- Dual field name: `mask_url` (GPT 2) vs `mask_image_url` (GPT 1.5) — routing v `_buildGptPayload`
+
+### Rozhodnutí 5: 1K = custom dims, NE preset enum (kritický fix)
+
+**První implementace** posílala pro 1K tier fal preset enum (`landscape_16_9`, `square_hd` apod). Výsledek: user dostal 1088×608 — fal "economy preset", **příliš malé pro produkci**.
+
+**Oprava:** vždy posílat custom `{width, height}` objekt. Long side podle tier:
+- 1K → **1536** (square 1536², 16:9 = 1536×864)
+- 2K → 2048
+- 4K → 3840
+
+Constraints enforced v `_gpt2SizeFromAspect()`:
+- Multiples of 16
+- Max edge 3840 px
+- Pixel count 655k–8.29M (area cap s auto-scaledown)
+- Min floor 655k s auto-scaleup pro extrémní AR
+
+**Důsledek pro `updateUnifiedResInfo`** (info text vpravo): totožný výpočet jako payload builder → co user vidí yellow text = co model dostane. Jediný source of truth.
+
+### Rozhodnutí 6: Streaming VYPNUTO (code retained)
+
+**Pokus:** zapnout SSE streaming pro `/edit` endpointy (fal blog tvrdí "progressive diffusion preview").
+
+**Diagnóza z user testů:**
+- GPT 2 edit: 1 event, data URI 2.7MB = finální obrázek
+- GPT 1.5 edit: 1 event, data URI 3MB = finální obrázek
+- Žádné progressive frames pro ani jeden model
+
+**Závěr:** fal aktuálně (duben 2026) implementuje `/stream` endpoint pro GPT modely jako **"stream end = final event"** — funkčně identické s queue, jen přes SSE místo pollingu. Žádný user-visible benefit, naopak víc komplexity (SSE parsing, data URI detection, fallback logic).
+
+**Rozhodnutí:** `streaming: false` na obou edit modelech. Použít `_falQueue` (stejný path jako FLUX/SeeDream/etc). Stream code (`_falStreamEdit`, `updatePlaceholderPartial`) zachován — flip 1 boolean na `true` až fal přidá progressive.
+
+**Gotcha pro budoucí stream re-enable:** preview overlay MUSÍ jít do `.ph-body` (má `position:relative + aspect-ratio`), ne do `.img-card` (bez positioning → overflow do `#center` wrapperu = fullscreen bug).
+
+### Rozhodnutí 7: `ref.role = 'mask'` jako první role metadata
+
+Na rozdíl od `role: 'style' / 'character'` (které fungují per-model jinak v existing code), `role: 'mask'` je **structural** — nejen tag, ale mění *jak se ref sends to API*. Partition function `_partitionGptRefs()` to rozděluje:
+- `role === 'mask'` → mask field
+- ostatní → `image_urls[]` (plural)
+
+Pouze jeden mask na refs v daném momentě (OpenAI aplikuje mask na image #1). Toggle handling: když user flipne role na nový ref, starý mask role se clear.
+
+### Pricing architecture
+
+29 price keys celkem:
+- GPT 2: 9 per-size (low/med/high × 1024sq/1024×1536/1536×1024) + 6 tier-based (low/med/high × 2K/4K)
+- GPT 1.5: 8 (low má collapsed `_gptimg15_low_other` pro non-square)
+
+`_pickGptPriceKey()` picker routes podle model/quality/size/resolution. Result objekt carry `priceKey` → `trackSpend('fal', priceKey)` v runJob.
+
+**Ballpark pro 2K/4K:** fal nepublikuje explicit ceny; odvozeno z published extremes (4K high = $0.41/img, 1K high = $0.211/img → ~2× scaling per tier step).
+
+### Naučené gotchas (do memory)
+
+1. **Model dropdown je hardcoded v `template.html`** — v této session jsem na to spadl při prvním buildu. Přidávání modelu = EDIT 2 MÍSTA: `models.js` entry + `<option>` v `#modelSelect`.
+2. **CSS absolute escape** — `position:absolute` se váže na nejbližší `position:relative` předka. V GIS je to `#center` pro elementy přímo v `.img-card`. Preview element MUSÍ jít do `.ph-body`.
+3. **Fal preset enum ≠ production quality** — preset enum jsou "economy" sizes pro GPT (~1088×608). Custom dims vždy pro produkci.
+4. **Fal streaming for GPT (duben 2026)** — neprodukuje progressive frames. Používat queue.
+
+---
+
 *Aktualizováno 21. 4. 2026 · v204en Seedance 2.0 1080p + pricing refactor*
 
 ---

@@ -646,6 +646,13 @@ async function saveToGallery(result, prompt, targetFolder, refsCopy, rawPrompt, 
       thinking:  !!snap.thinking,
       negPrompt: snap.negPrompt || '',
     });
+  } else if (result.type === 'gpt') {
+    Object.assign(params, {
+      size:        result.size,
+      ratio:       result.ratio,
+      aspectRatio: snap.aspectRatio || result.ratio || null,
+      quality:     result.quality || snap.quality || 'medium',
+    });
   } else if (result.type === 'proxy_xai') {
     Object.assign(params, {
       seed:        result.seed,

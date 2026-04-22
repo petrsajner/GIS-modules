@@ -164,12 +164,20 @@ function renderRefThumbs() {
   if (maxEl) maxEl.textContent = max;
 
   // Rebuild obsahu (zachovat ref-add-tile na konci)
+  const activeM = MODELS[currentModel];
+  const gptEditActive = activeM?.type === 'gpt' && activeM?.editModel;
   const tiles = refs.map((r, i) => {
     const label = r.userLabel || r.autoName || `ref ${i + 1}`;
     const hasName = !!(r.userLabel);
     const dimmed = i >= max;
+    const isMask = r.role === 'mask';
+    const maskBadge = isMask
+      ? `<div class="rth2-mask-badge" onclick="event.stopPropagation();toggleRefMaskRole(${i})" title="Mask role — click to remove">🎭 MASK</div>`
+      : (gptEditActive
+          ? `<div class="rth2-mask-badge mask-off" onclick="event.stopPropagation();toggleRefMaskRole(${i})" title="Use as mask for GPT edit">🎭</div>`
+          : '');
     return `
-    <div class="rth2${dimmed ? ' ref-dimmed' : ''}" data-idx="${i}" draggable="true"
+    <div class="rth2${dimmed ? ' ref-dimmed' : ''}${isMask ? ' ref-is-mask' : ''}" data-idx="${i}" draggable="true"
          ondragstart="refDragStart(event,${i})"
          ondragend="refDragEnd(event)"
          ondragover="refDragOver(event,${i})"
@@ -178,6 +186,7 @@ function renderRefThumbs() {
       <img class="rth2-img" src="data:${r.mimeType||'image/png'};base64,${r.thumb}" alt="${label}" onclick="openRefLightbox2(event,${i})" title="${dimmed ? 'Over limit — not sent to model' : 'Preview'}">
       <div class="del-ref2" onclick="event.stopPropagation();removeRef(${i})" title="Remove">×</div>
       ${!dimmed ? `<div class="rth2-describe" onclick="event.stopPropagation();describeRefImage(${i})" title="Describe image">✦ Describe</div>` : ''}
+      ${maskBadge}
       <div class="rth2-label ${hasName ? 'has-name' : ''}" title="${dimmed ? '⊘ Over limit' : label}" ondblclick="startImageRefRename(${i}, this)">${escHtml(label)}</div>
     </div>`;
   }).join('');
@@ -195,6 +204,26 @@ function renderRefThumbs() {
   if (typeof rewritePromptForModel === 'function' && m) {
     rewritePromptForModel(m.type, m.type);  // same model, but refs changed
   }
+}
+
+// ── Toggle mask role on a ref (GPT Edit models) ──
+// Click on 🎭 badge → flip role=mask vs role=undefined.
+// Only one ref can have role=mask at a time (OpenAI applies mask to image #1).
+function toggleRefMaskRole(idx) {
+  const r = refs[idx];
+  if (!r) return;
+  if (r.role === 'mask') {
+    delete r.role;
+    toast(`Ref ${idx + 1}: mask role removed`, 'ok');
+  } else {
+    // Clear any existing mask role first
+    for (const other of refs) {
+      if (other.role === 'mask') delete other.role;
+    }
+    r.role = 'mask';
+    toast(`Ref ${idx + 1}: now mask (edit region)`, 'ok');
+  }
+  renderRefThumbs();
 }
 
 // ── Drag & drop reordering v ref panelu ──
