@@ -1,162 +1,139 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v207en (WIP — Session 2 Fáze 1-3 hotové)
-## Příští verze: v208en (Session 2 Fáze 4-8: aktivace unified panelu)
+## Aktuální verze: v208en (WIP — Session 2 Fáze 4-7 hotové, Fáze 8 cleanup pending)
+## Příští verze: v209en (cleanup + smoke test result fixes)
 ## Datum: 2026-04-22
 ## Worker verze: 2026-16 (beze změny)
 
 ---
 
-## 🔴 STARTING SESSION 2 — ČTI NEJDŘÍV
+## ⚠ v208en STATUS
 
-Pokud jsi Claude začínající novou chat session a pokračuješ Session 2:
+v208en obsahuje **aktivovaný unified video panel**. Stará per-model UI je skrytá přes `_hideLegacyVideoPanels()`. Generate + Reuse teď jedou přes unified params schema. **Generate videa by mělo fungovat** (Fáze 4+5+6+7 kompletní), ale **není smoke-tested** — teprve Fáze 8 ověří každou model-family.
 
-1. **`SESSION_2_HANDOFF.md`** v GitHub repo `petrsajner/GIS-modules` obsahuje **KOMPLETNÍ BRIEFING** — rozhodnutí, specifikace, plán Fáze 4-8, gotchas, odhady, moduly k fetch. Stáhni přes `web_fetch` raw URL.
-2. **Tento STAV.md** je jen shrnutí — detaily jsou v HANDOFF.
-3. Stáhni moduly z GitHubu (NE `/mnt/project/` — **VŽDY stale**): `template.html`, `video-models.js`, `video-queue.js`, `video-gallery.js`, `video-topaz.js`, `video-utils.js`, `build.js`.
-4. Edit v `/home/claude/src/`, build v `/home/claude/`, output v `/mnt/user-data/outputs/`.
+Bezpečné nasazení: ⚠ TESTOVAT PŘED PRODUKČNÍM NASAZENÍM. Velké struktury změn (bridge layer + runtime DOM redirect) — potřeba smoke test per model family.
 
 ---
 
-## ⚠ v207en je WORK-IN-PROGRESS
+## Co je v v208en (oproti v207en)
 
-v207en obsahuje **skrytou infrastrukturu** pro unified video panel (Session 2), ale **neaktivuje** ji. Produkce funguje jako v v206en — stará per-model UI je beze změny. Unified panel je `display:none`, čeká na Fázi 4-8 v další session.
+### ✅ Fáze 4: `_applyVideoModel` refactor (flag-driven)
 
-**Bezpečné nasazení:** v207en lze nasadit okamžitě — nic se nerozbije. Jen o ~700 řádků HTML/JS větší soubor (skrytá infrastruktura).
+**Modul:** video-models.js (+544 ř., na konci souboru).
 
----
+- Nový **flag-driven** `_applyVideoModel(key)` čte `getVideoUi(key)` a aplikuje flags přes `_setRow` pattern — z 374 ř. switche na ~100 ř. deklarativního kódu.
+- **Stará `_applyVideoModel` (ř. 1293-1666) zůstává jako dead code** — přepsána druhou deklarací (JS vítězí poslední). Odstraní se v Fázi 8.
+- **Helpers** (8): `_hideLegacyVideoPanels`, `_vpApplyModeSelect`, `_populateVpCameraMove`, `_updateVpRefsLabel`, `_vpRenderRefWeights`, `_populateVpResolution`, `_populateVpAspect`, `_configureVpDuration`, `_vpResLabel`.
+- **Onclick handlery** (7): `onVpModeChange`, `vpToggleNegPrompt`, `vpAiPrompt`, `vpRefsFileSelected`, `vpPickSourceVideo`, `vpDescribeSourceVideo`, `vpClearSourceVideo` — delegují na existující legacy fce podle `ui.sourceSlot`.
+- **Výstup `updateVpResInfo()`** — pixel rozlišení derived z `vpResolution` + `vpAspect`.
 
-## Co je v v207en (oproti v206en) — Session 2 Fáze 1-3
+### ✅ Fáze 5: `buildVideoParams()` + `generateVideo` refactor
 
-### ✅ Fáze 1: Reorder modelů
+**Modul:** video-queue.js (+464 ř., na konci souboru).
 
-**Status: Už hotové.** Petrovo požadované pořadí (Veo → Kling → PixVerse → Seedance → Grok → Luma → Vidu → WAN → Topaz → Magnific) v `videoModelSelect` HTML options už přesně odpovídalo. Pouze ověřeno. Žádná změna.
+- **`buildVideoParams()`** — čte VŠECHNA `vpXxx` IDs → unified `params` schema (viz SESSION_2_HANDOFF § 3).
+- **11 reader helperů**: `_readVpResolution`, `_readVpDuration`, `_readVpSeed`, `_readVpMode`, `_readVpSourceVideoId`, `_readVpAudioUrls`, `_readVpTopazParams`, `_readVpMagnificParams`, `_readVpPixverseParams`, `_readVpLumaParams`.
+- **`_buildLegacySnaps(modelKey, model, params)`** — bridge layer vytvoří legacy-shape objekty (`wan27vSnap`, `wan27eSnap`, `sd2Snap`, `grokVideoSnap`, `veoResolution` atd.) z `params`. **Handlery zůstávají beze změny ve Fázi 5+6** — čtou je z job.*.
+- **Nový `generateVideo()`** — čte z vpXxx, validuje, sestavuje jobs obsahující JAK legacy bridge fields (kompat s handlery), TAK nové `job.params` (Fáze 7+ bude preferred).
+- **🔑 BONUS:** Runtime `Object.defineProperty` redirect `#videoPrompt.value ↔ #vpPrompt.value` (v `_ensureVideoPromptRedirect`, volán v `_applyVideoModel`). Zachovává VŠECHNY callsites (AI prompt, style/camera tags, `rewriteVideoPromptForModel`) bez refactoringu.
+- **`_syncVpToLegacyTopaz()`** + **`_syncVpToLegacyMagnific()`** — volané před `_generateTopazJob`/`_generateMagnificVideoJob` (handlery čtou přímo z legacy DOM IDs v `magnificVidOpts`/`topazSrcRow` panelech, které jsou hidden; sync zajistí že obsahují aktuální user-set values z `vpTopaz*`/`vpMagnific*`).
 
-### ✅ Fáze 2: `getVideoUi(modelKey)` helper (central UI flags)
+### ✅ Fáze 6: `loadVideoJobParamsToForm()` + `reuseVideoJob` refactor
 
-**Modul:** video-models.js (+200 ř, za MAGNIFIC_VIDEO_MODELS).
+**Modul:** video-gallery.js (+195 ř., na konci souboru + přepsaná `reuseVideoJob`).
 
-Místo injekce `ui: {...}` do ~60 entries (duplikát, chyba-prone), **jeden central helper** derivuje UI flags z:
-1. Model type (`veo`, `kling`, `luma_video`, `seedance`, `vidu`, `wan27`, `wan26`, `pixverse`, `grok`)
-2. Varianta (T2V, I2V, R2V, V2V, Keyframe, Transition, Fusion)
-3. Family-specific override pro edge case
+- **`_isOldVideoParamsShape(params)`** — detekuje pre-v208en meta shape (chybí `variantKey`).
+- **`_migrateOldVideoParams(meta, modelKey)`** — best-effort mapping starých meta polí → nový schema (fallback na model defaults).
+- **`loadVideoJobParamsToForm(params, modelKey)`** — jedna funkce píše **všechny** `vpXxx` IDs z params (inverzní k buildVideoParams). Včetně duration sync přes slider/select/radio, negative prompt collapsible state, per-family advanced (Topaz, Magnific, Pixverse, Luma), source audio URLs, Kling sub-variant selection.
+- **Helpers** (6): `_vpSetValue`, `_vpSetChecked`, `_applyVpTopazParams`, `_applyVpMagnificParams`, `_applyVpPixverseParams`, `_applyVpLumaParams`, `_applyVpLumaRefWeights` (deferred — spustí se po render refs).
+- **Přepsaná `reuseVideoJob(id)`** — detekuje shape, migruje pokud staré, nastaví model (Kling groups handled), zavolá `loadVideoJobParamsToForm`. **Oprava Seedance 2.0 reuse bug jako systémový side effect.**
 
-**Vrací frozen objekt se všemi UI flags:** core visibility, refs, source slot, sub-select, advanced group, camera move, bottom toggles (Multiclip/Multi-shots/Off-peak/Audio).
+### ✅ Fáze 7 CORE PATCH: `_saveVideoResult` params merge
 
-**Princip:** Kling group "parent" entries (`kling_v3`, `seedance2` apod.) delegují na svůj default variant. To znamená `getVideoUi('seedance2')` vrátí UI pro `seedance2_t2v`.
-
-### ✅ Fáze 3: Unified HTML panel `#vpParams`
-
-**Modul:** template.html (+321 ř, hned za videoModelDesc, před klingVersionRow).
-
-**Uspořádání podle Petrova pořadí:**
-1. Mode sub-select
-2. Prompt + styles/camera tags + **Model camera move menu** + **Negative prompt** (collapsible)
-3. Reference images + dynamicky zobrazené per-ref weight slidery (Luma)
-4. Source video (hned pod refs) → Source audio (Seedance 2.0)
-5. Core: Resolution, Aspect, CFG, Duration, Seed
-6. Individual advanced (Luma/PixVerse/Topaz/Magnific — zachováno jak jsou)
-7. Count
-8. Bottom toggles: Multiclip, Multi-shots, Off-peak, Audio
-
-**Všechny IDs pattern `vpXxx`** (analogicky `upXxx` pro images). ID počet v #vpParams: ~60 unikátních.
-
-**⚠ Panel je `display:none`.** Nikdo ho neaktivuje — čeká na `_applyVideoModel` rewrite.
-
-### Build stats (v207en)
-
-- **25 modulů** (beze změny)
-- **23 497 JS řádků** (+401 vs. v206en — getVideoUi helper)
-- **28 910 total lines** (+729 vs. v206en — unified HTML panel)
-- `✓ HTML div balance: OK (866 pairs)` (+87 pairs)
-- Extracted script `node --check` → OK
-
----
-
-## Kde jsme přestali — Session 2 Fáze 4-8 (další session)
-
-### Fáze 4: Refactor `_applyVideoModel(modelKey)` — flag-driven
-
-Z 364 řádků switche → ~40 ř helperu. Čte `getVideoUi(modelKey)` a aplikuje flags přes `_setRow(id, show)` pattern.
-
-### Fáze 5: `buildVideoParams()` + `generateVideo` refactor
-
-Jedna fce čte všechny `vpXxx` IDs → `params` objekt (unified schema). `generateVideo` přestane mít 30× `getElementById`.
-
-### Fáze 6: `loadVideoJobParamsToForm()` + reuseVideoJob refactor
-
-Jedna fce píše `params.*` do `vpXxx` IDs. Opravuje bug: Seedance 2.0 reuse (aktuálně prázdné model pole). Backward compat pro stará videa.
-
-### Fáze 7: Handler refactor
-
-10+ video handlerů akceptuje `params` obj místo syrových IDs. Uloží konzistentní `params` shape do video_meta.
-
-### Fáze 8: Testování + odstranění starých panelů
-
-Smoke test per model. Odstranit z template.html: `lumaVideoParams`, `grokVideoParams`, `topazSrcRow`, `pixverseParams`, `magnificVidOpts`, `veoRefModeRow`, `lumaHdrRow`, `lumaCharRefRow`, `lumaResRow`, `veoResRow`, `wanResRow`, `topazResRow`, `topazFactorRow`, `topazFpsRow`, `topazSlowmoRow`, `topazCreativityRow`, `videoAspectRow`, `videoCfgRow`, `videoDurRow`, `videoAudioCtrl`, `videoCountRow`, `videoResInfoRow`, `videoRefSection`.
-
----
-
-## Unified metadata schema (designováno, implementace Fáze 6-7)
+**Modul:** video-queue.js (surgical 5-řádkový patch v `_saveVideoResult`).
 
 ```js
-params: {
-  // Core (všechny modely):
-  resolution, aspectRatio, duration, cfgScale, seed, enableAudio, count, negativePrompt,
-  // Mode sub-select:
-  modeValue,    // pro Grok/Veo/PixVerse
-  variantKey,   // pro Kling groups (pomáhá restore v reuse)
-  // Source video slot:
-  sourceVideoId,
-  // Source audio (Seedance 2.0):
-  audioUrls: [],
-  // Per-family advanced (jen pokud model patří):
-  topaz:    { factor, fps, slowmo, creativity } | null,
-  magnific: { mode, resolution, fps_boost, sharpen, grain, prompt, creativity, flavor, strength } | null,
-  pixverse: { quality, cameraMove, multiClip, offPeak } | null,
-  luma:     { loop, colorMode, refWeights: [] } | null,
-  wan:      { multiShots } | null,
-  grok:     { mode } | null,
-  veo:      { refMode } | null,
-}
+const params = {
+  ...(job.params || {}),      // unified schema z buildVideoParams
+  ...(recordFields.params || {}),  // handler-specific overrides
+};
 ```
 
-Po Fázi 6-7 bude KAŽDÉ video ukládat plný schema. Stará videa se budou reuse-ovat přes backward compat mapping.
+**Důsledek:** Každý video save teď ukládá plný unified `params` do DB meta (`video_meta` store). Tím:
+1. Reuse v208en+ videí obnoví kompletní stav (Fáze 6 detekuje new shape, nesahá na migrace)
+2. Handlery NEMUSÍ být individually refactorovány — bridge snaps + job.params coexist
+3. Staré meta (pre-v208en) stále fungují přes `_migrateOldVideoParams`
 
----
+### Build stats (v208en)
 
-## Ostatní TODO
+- **25 modulů** (beze změny oproti v207en)
+- **24 710 JS řádků** (+1 213 vs. v207en: Fáze 4 +544 + Fáze 5 +464 + Fáze 6 +195 + Fáze 7 +7 v video-queue.js, ale dual-write jen +7 efektivních)
+- **30 123 total lines** (+1 213 vs. v207en)
+- `✓ HTML div balance: OK (866 pairs)` (beze změny — Fáze 4 nic neprotidělala HTML)
+- Extracted script `node --check` → OK
 
-1. **Session 2 Fáze 4-8** ← **NEXT**
-2. Seedance 2.0 I2V universal prompt block (vyžaduje F12 log)
-3. Style Library "My Presets"
-4. Claid.ai via proxy
-5. Hailuo 2.3 upgrade
-6. Use V2V (Seedance R2V)
-7. Runway Gen-4 (research only)
-
----
-
-## Změněné moduly (v207en vs. v206en)
+### Změněné moduly (v208en vs. v207en)
 
 | Modul | Status | Popis |
 |---|---|---|
-| `video-models.js` | upraven | +getVideoUi() helper (+200 ř) |
-| `template.html` | upraven | +#vpParams unified panel (+321 ř, hidden) |
-| **Ostatní** | beze změny | |
+| `video-models.js` | upraven | +544 ř.: 8 helpers, 7 onclick handlers, nové flag-driven `_applyVideoModel`, `_ensureVideoPromptRedirect` (stará funkce zůstává jako dead code) |
+| `video-queue.js` | upraven | +464 ř.: `buildVideoParams`, 11 readerů, `_buildLegacySnaps`, nové `generateVideo`, `_syncVpToLegacyTopaz/Magnific`, `_saveVideoResult` patch |
+| `video-gallery.js` | upraven | +195 ř.: `loadVideoJobParamsToForm`, shape detect + migrate, 6 per-family apply helpers, nová `reuseVideoJob` |
+| **Ostatní** | beze změny | Včetně `template.html`, `video-topaz.js`, `xai-video.js`, `video-utils.js`, `video-models` (beyond the append) |
+
+---
+
+## ⚠ Fáze 8 — DO NEXT SESSION
+
+### Smoke test per model family (z handoff § 8.1)
+
+- [ ] **Veo 3.1** — T2V / I2V (1 ref) / Frames / Ingredients (3 refs)
+- [ ] **Kling V3 Pro** — T2V / I2V / V2V (source video)
+- [ ] **Kling O3 Pro** — I2V s 7 refs
+- [ ] **Seedance 2.0** — T2V / I2V / R2V (4 refs) / Fast; **audio URLs** (3 inputy); **⚠ explicit test reuse** (pův. bug)
+- [ ] **Grok Video** — T2V / I2V / Ref2V / Edit / Extend
+- [ ] **Luma Ray2/3** — T2V / I2V / loop / HDR modes; 1/2/3 refs → 1/2/3 weight sliders dynamicky
+- [ ] **Vidu Q3** — T2V / I2V / Frames
+- [ ] **WAN 2.7** — T2V / I2V / R2V / V2V
+- [ ] **WAN 2.6** — T2V Multi-shot / I2V / R2V Flash
+- [ ] **PixVerse C1** — T2V / I2V / Transition / Fusion (7 refs)
+- [ ] **PixVerse V6** — Multi-clip / Off-peak
+- [ ] **Topaz Precise 2.5** — source video / factor / fps / slowmo / creativity
+- [ ] **Magnific Creative** — source video / sharpen / grain / prompt / creativity / flavor
+- [ ] **Magnific Precision** — source video / strength
+
+### Reuse test (per family)
+- Vygenerovat 1 video z každé family → Gallery → Reuse → **VŠECHNY params obnoveny** vč. model selection
+- **Explicitní test Seedance 2.0 reuse** (původní bug — model pole musí populate se Seedance 2.0 + správná varianta)
+
+### Cleanup po úspěšném testování
+1. **Odstranit starou `_applyVideoModel`** z `video-models.js` ř. 1293-1666 (~374 ř. dead code)
+2. **Odstranit starý `generateVideo`** z `video-queue.js` ř. 182-400 (~220 ř. dead code)
+3. **Odstranit legacy panely** z `template.html`:
+   - `lumaVideoParams`, `grokVideoParams`, `topazSrcRow`, `pixverseParams`, `magnificVidOpts`, `veoRefModeRow`, `lumaHdrRow`, `lumaCharRefRow`, `lumaResRow`, `veoResRow`, `wanResRow`, `topazResRow`, `topazFactorRow`, `topazFpsRow`, `topazSlowmoRow`, `topazCreativityRow`, `videoAspectRow`, `videoCfgRow`, `videoDurRow`, `videoAudioCtrl`, `videoCountRow`, `videoResInfoRow`, `videoRefSection`, `videoTagsRow`, `videoPromptSec`, `klingVersionRow`, `wan27vParams`, `wan27vExtendRow`, `wan27eSrcRow`, `wan27eParams`, `seedance2Params`, `sd2R2VSection`, `sd2Res1080Wrap`, `videoV2VSection`, `magnificVidCreativeOpts`, `magnificVidPrecisionOpts`
+   - Odhad ~2000+ ř. odstraněných
+4. **Odstranit sync layers** po handler refactoru (pokud uděláno): `_syncVpToLegacyTopaz`, `_syncVpToLegacyMagnific`, `_buildLegacySnaps`, redirect `_ensureVideoPromptRedirect` (pokud všichni píšou přímo do vpPrompt)
+5. **Upravit handlery** v `video-topaz.js`/`xai-video.js`/`video-models.js` aby četli přímo z `job.params.*` místo legacy bridge fields — finální cleanup
+
+### Známé limitace v208en (pre-test)
+
+1. **Source video pick/clear handlers** — delegují na legacy funkce (`pickTopazSourceVideo`, `pickWan27SrcVideo`, atd.) přes `window[fn]` lookup. Pokud některá neexistuje, padne na `toast('not wired for slot: X')`. Ve smoke testu dořešit skutečné názvy funkcí.
+2. **Luma per-ref weight sliders** — renderují se přes `_vpRenderRefWeights(ui)` v `_applyVideoModel`. Při reuse se apply-ujou deferred (setTimeout 50ms po `renderVideoRefPanel`). Při prvním kliknutí na ref upload se zobrazí správně? TESTOVAT.
+3. **Video target folder** — legacy field `videoTargetFolder` je stále v DOM (mimo legacy panely), generate to čte přímo. ✓ funkční.
+4. **Veo mode sub-select** — `_vpApplyModeSelect('veoRefMode', modelKey)` nastaví 4 options (t2v/i2v/frames/ingredients), sync s legacy `veoRefMode` select přes `onVpModeChange`.
 
 ---
 
 ## Runtime Philosophy
 
-Beze změny od v206en.
+Beze změny. Browser sandbox přes file://, no CDN for JS libs, full local user data.
 
 ---
 
 ## Nástroje a resources
 
 - **Kódová báze:** `petrsajner/GIS-modules` na GitHubu
-- **Proxy:** `gis-proxy.petr-gis.workers.dev`
-- **Build modul order (v207en, 25 modulů, beze změny)**
+- **Proxy:** `gis-proxy.petr-gis.workers.dev` (v2026-16, beze změny)
+- **Build modul order (v208en, 25 modulů, beze změny):** models → styles → setup → spending → model-select → assets → refs → generate → fal → output-placeholder → proxy → gemini → output-render → db → gallery → toast → paint → ai-prompt → gpt-edit → video-utils → video-models → video-queue → video-gallery → video-topaz → video-archive + xai-video
 - **Dev server**: `node build.js --dev` (port 7800)
 - **Kontakt**: info.genimagestudio@gmail.com

@@ -2839,3 +2839,548 @@ function rewriteVideoPromptForModel(prevM, newM) {
     ta.selectionStart = ta.selectionEnd = Math.min(pos, newPrompt.length);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION 2 · FÁZE 4 — Unified Video Panel (#vpParams) activation
+// ---------------------------------------------------------------------------
+// Helpers + flag-driven `_applyVideoModel`.  The function definition below
+// REPLACES the legacy switch-based `_applyVideoModel` (earlier in this file)
+// because JavaScript function declarations at the same scope take the last
+// definition — the legacy block is dead code pending Fáze 8 cleanup.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Hide all legacy per-model panels & rows.  Called by every `_applyVideoModel`
+// run so unified panel is the single source of truth visually.
+function _hideLegacyVideoPanels() {
+  const ids = [
+    // Legacy prompt / tags / refs (taken over by vp-equivalents):
+    'videoPromptSec', 'videoTagsRow', 'videoRefSection',
+    // Kling version row (replaced by vpModeSection):
+    'klingVersionRow',
+    // Veo:
+    'veoRefModeRow', 'veoResRow',
+    // Luma:
+    'lumaVideoParams', 'lumaHdrRow', 'lumaCharRefRow', 'lumaResRow',
+    // Grok:
+    'grokVideoParams',
+    // WAN 2.7:
+    'wanResRow', 'wan27vParams', 'wan27vExtendRow', 'wan27eSrcRow', 'wan27eParams',
+    // Pixverse:
+    'pixverseParams',
+    // Seedance 2.0:
+    'seedance2Params', 'sd2R2VSection', 'sd2Res1080Wrap',
+    // V2V motion control:
+    'videoV2VSection',
+    // Topaz source row (also reused by Magnific video):
+    'topazSrcRow', 'topazResRow', 'topazFactorRow', 'topazFpsRow',
+    'topazSlowmoRow', 'topazCreativityRow',
+    // Magnific video:
+    'magnificVidOpts', 'magnificVidCreativeOpts', 'magnificVidPrecisionOpts',
+    // Generic rows replaced by vp-equivalents:
+    'videoResInfoRow', 'videoAspectRow', 'videoAudioCtrl',
+    'videoDurRow', 'videoDurSliderRow', 'videoDurRadioRow',
+    'videoCfgRow', 'videoCountRow',
+  ];
+  for (const id of ids) _setRow(id, false);
+}
+
+// Populate vpModeSelect based on mode select type.
+function _vpApplyModeSelect(modeSelectKey, modelKey) {
+  const sec = document.getElementById('vpModeSection');
+  const sel = document.getElementById('vpModeSelect');
+  const lbl = document.getElementById('vpModeLabel');
+  const note = document.getElementById('vpModeNote');
+  if (!sec || !sel || !lbl) return;
+
+  if (!modeSelectKey) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  if (note) note.style.display = 'none';
+
+  if (modeSelectKey === 'klingVersion' || modeSelectKey === 'pixverseMode') {
+    const gk = Object.keys(KLING_GROUPS).find(g =>
+      KLING_GROUPS[g].variants.some(v => v.key === modelKey)
+    );
+    if (gk) {
+      lbl.textContent = (modeSelectKey === 'klingVersion') ? 'Version of model' : 'Mode';
+      const group = KLING_GROUPS[gk];
+      sel.innerHTML = group.variants.map(v =>
+        `<option value="${v.key}">${v.label}</option>`
+      ).join('');
+      sel.value = modelKey;
+    } else {
+      sec.style.display = 'none';
+    }
+  } else if (modeSelectKey === 'veoRefMode') {
+    lbl.textContent = 'Reference mode';
+    sel.innerHTML = `
+      <option value="t2v">Text-to-video (no refs)</option>
+      <option value="i2v">Image-to-video (start frame)</option>
+      <option value="frames">Keyframes (start + end)</option>
+      <option value="ingredients">Ingredients (up to 3 refs)</option>
+    `;
+    const cur = document.getElementById('veoRefMode')?.value || 't2v';
+    sel.value = cur;
+  } else if (modeSelectKey === 'grokMode') {
+    lbl.textContent = 'Mode';
+    sel.innerHTML = `
+      <option value="t2v">Text → Video (no refs)</option>
+      <option value="i2v">Image → Video (single ref)</option>
+      <option value="ref2v">Refs → Video (up to 7 refs)</option>
+      <option value="edit">Edit existing video</option>
+      <option value="extend">Extend video</option>
+    `;
+    const cur = document.getElementById('grokVideoMode')?.value || 't2v';
+    sel.value = cur;
+  }
+}
+
+// Camera move options — Pixverse v4/v4.5 (endpoint 400017).
+function _populateVpCameraMove(ui) {
+  const sel = document.getElementById('vpCameraMove');
+  if (!sel) return;
+  if (!ui.showCameraMove) {
+    sel.innerHTML = '<option value="">None</option>';
+    return;
+  }
+  const moves = [
+    '', 'Zoom in', 'Zoom out', 'Pan left', 'Pan right',
+    'Tilt up', 'Tilt down', 'Orbit left', 'Orbit right',
+    'Crane up', 'Crane down', 'Dolly in', 'Dolly out',
+    'Whip pan left', 'Whip pan right',
+  ];
+  const cur = sel.value;
+  sel.innerHTML = moves.map(m =>
+    `<option value="${m}">${m || 'None'}</option>`
+  ).join('');
+  if (moves.includes(cur)) sel.value = cur;
+}
+
+// Update refs section label (max count shown in header).
+function _updateVpRefsLabel(ui) {
+  const cnt = document.getElementById('vpRefsCount');
+  const note = document.getElementById('vpRefsNote');
+  const refsLen = (typeof videoRefs !== 'undefined') ? videoRefs.length : 0;
+  if (cnt) cnt.textContent = `${refsLen} / ${ui.refMaxCount || 0}`;
+  if (note) note.style.display = 'none';
+}
+
+// Render per-ref weight sliders (Luma only — weights control ref influence).
+function _vpRenderRefWeights(ui) {
+  const cont = document.getElementById('vpRefWeights');
+  if (!cont) return;
+  const refsLen = (typeof videoRefs !== 'undefined') ? videoRefs.length : 0;
+  if (!ui.showRefWeights || refsLen === 0) {
+    cont.style.display = 'none';
+    cont.innerHTML = '';
+    return;
+  }
+  cont.style.display = '';
+  cont.innerHTML = videoRefs.map((r, i) => {
+    const name = r.userLabel || r.autoName || `Ref ${i + 1}`;
+    const w = (typeof r.weight === 'number' ? r.weight : 0.85).toFixed(2);
+    return `
+      <div class="ctrl" style="margin-top:4px;padding:0 14px;">
+        <div class="ctrl-label" style="font-size:10px;color:var(--dim);">Weight: ${name} <span class="cv" id="vpRefWeight${i}Val">${w}</span></div>
+        <input type="range" id="vpRefWeight${i}" min="0" max="1" step="0.05" value="${w}"
+          oninput="document.getElementById('vpRefWeight${i}Val').textContent = parseFloat(this.value).toFixed(2);">
+      </div>
+    `;
+  }).join('');
+}
+
+// Populate Resolution select from ui.resolutions.
+function _populateVpResolution(ui) {
+  const sel = document.getElementById('vpResolution');
+  if (!sel) return;
+  if (!ui.showResolution || !(ui.resolutions && ui.resolutions.length)) return;
+  const cur = sel.value;
+  sel.innerHTML = ui.resolutions.map(r =>
+    `<option value="${r}">${_vpResLabel(r)}</option>`
+  ).join('');
+  sel.value = ui.resolutions.includes(cur) ? cur : ui.resolutions[0];
+}
+
+function _vpResLabel(r) {
+  const labels = {
+    '360p':  '360p',
+    '480p':  '480p',
+    '540p':  '540p',
+    '720p':  '720p — HD',
+    '1080p': '1080p — Full HD',
+    '4k':    '4K — Ultra HD',
+  };
+  return labels[r] || r;
+}
+
+// Populate Aspect ratio select.
+function _populateVpAspect(ui) {
+  const sel = document.getElementById('vpAspect');
+  if (!sel) return;
+  if (!ui.showAspect || !(ui.aspectRatios && ui.aspectRatios.length)) return;
+  const cur = sel.value;
+  sel.innerHTML = ui.aspectRatios.map(a =>
+    `<option value="${a}">${a}</option>`
+  ).join('');
+  sel.value = ui.aspectRatios.includes(cur) ? cur : ui.aspectRatios[0];
+}
+
+// Configure duration row — slider / select / radio based on ui.durationType.
+function _configureVpDuration(ui) {
+  const slider     = document.getElementById('vpDuration');
+  const sliderWrap = document.getElementById('vpDurationSliderWrap');
+  const select     = document.getElementById('vpDurationSelect');
+  const radios     = document.getElementById('vpDurationRadios');
+  const valEl      = document.getElementById('vpDurationVal');
+  const note       = document.getElementById('vpDurationNote');
+  if (!slider || !sliderWrap || !select || !radios) return;
+
+  // Reset
+  sliderWrap.style.display = 'none';
+  select.style.display     = 'none';
+  radios.style.display     = 'none';
+  if (note) note.style.display = 'none';
+
+  if (!ui.showDuration) return;
+
+  if (ui.durationType === 'select') {
+    select.style.display = '';
+    const opts = (ui.durationOptions && ui.durationOptions.length) ? ui.durationOptions : [5];
+    const cur = parseInt(select.value) || opts[0];
+    select.innerHTML = opts.map(d => `<option value="${d}">${d}s</option>`).join('');
+    select.value = opts.includes(cur) ? cur : opts[0];
+    if (valEl) valEl.textContent = select.value + 's';
+    select.onchange = () => {
+      if (valEl) valEl.textContent = select.value + 's';
+      if (slider) slider.value = select.value;
+    };
+    if (note) { note.style.display = ''; note.textContent = `Options: ${opts.join('s / ')}s`; }
+    if (slider) slider.value = select.value;
+  } else if (ui.durationType === 'radio') {
+    radios.style.display = '';
+    const opts = (ui.durationOptions && ui.durationOptions.length) ? ui.durationOptions : [5, 10];
+    const cur = parseInt(slider.value) || opts[0];
+    const checked = opts.includes(cur) ? cur : opts[0];
+    radios.innerHTML = opts.map(d => `
+      <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:10px;font-size:11px;color:var(--dim);">
+        <input type="radio" name="vpDurationRadio" value="${d}" ${d === checked ? 'checked' : ''}
+          onchange="document.getElementById('vpDuration').value=this.value;document.getElementById('vpDurationVal').textContent=this.value+'s';">
+        ${d}s
+      </label>
+    `).join('');
+    slider.value = checked;
+    if (valEl) valEl.textContent = checked + 's';
+    if (note) { note.style.display = ''; note.textContent = `Fixed: ${opts.join('s / ')}s`; }
+  } else {
+    // slider (continuous)
+    sliderWrap.style.display = '';
+    slider.min = ui.durationMin || 3;
+    slider.max = ui.durationMax || 15;
+    let cur = parseInt(slider.value);
+    if (!cur || cur < slider.min) cur = slider.min;
+    if (cur > slider.max) cur = slider.max;
+    slider.value = cur;
+    if (valEl) valEl.textContent = cur + 's';
+  }
+}
+
+// Update res info display (pixel resolution derived from res + aspect).
+function updateVpResInfo() {
+  const noteEl = document.getElementById('vpResolutionNote');
+  if (!noteEl) return;
+  const resSel = document.getElementById('vpResolution');
+  const aspSel = document.getElementById('vpAspect');
+  if (!resSel || resSel.offsetParent === null) { noteEl.style.display = 'none'; return; }
+  const res = resSel.value;
+  const resMap = { '360p': 360, '480p': 480, '540p': 540, '720p': 720, '1080p': 1080, '4k': 2160 };
+  const h = resMap[res] || 0;
+  if (!h) { noteEl.style.display = 'none'; return; }
+  let w = h;
+  const asp = aspSel && aspSel.offsetParent !== null ? aspSel.value : '16:9';
+  if (asp && asp.includes(':')) {
+    const [aw, ah] = asp.split(':').map(Number);
+    if (aw && ah) w = Math.round((h * aw) / ah);
+  }
+  noteEl.style.display = '';
+  noteEl.textContent = `${w} × ${h}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// One-time redirect of legacy #videoPrompt.value → #vpPrompt.value.
+// Keeps all existing callsites (AI prompt, style/camera tags,
+// rewriteVideoPromptForModel, etc.) working transparently — they all
+// continue to read/write #videoPrompt, which now proxies to #vpPrompt.
+// Installed on first `_applyVideoModel` call (after DOM is ready).
+// ─────────────────────────────────────────────────────────────
+let _videoPromptRedirected = false;
+function _ensureVideoPromptRedirect() {
+  if (_videoPromptRedirected) return;
+  const legacyEl  = document.getElementById('videoPrompt');
+  const unifiedEl = document.getElementById('vpPrompt');
+  if (!legacyEl || !unifiedEl) return;
+  try {
+    // Copy any existing content from legacy → unified (migration on first switch).
+    if (legacyEl.value && !unifiedEl.value) unifiedEl.value = legacyEl.value;
+    Object.defineProperty(legacyEl, 'value', {
+      get() { return unifiedEl.value; },
+      set(val) { unifiedEl.value = val; },
+      configurable: true,
+    });
+    _videoPromptRedirected = true;
+  } catch (e) {
+    console.warn('[GIS] videoPrompt redirect failed:', e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// NEW _applyVideoModel — flag-driven unified panel (Fáze 4)
+// Replaces the legacy 374-line switch block earlier in this file.
+// JS allows re-declaring `function` at top level — the last definition wins.
+// ─────────────────────────────────────────────────────────────
+function _applyVideoModel(key) {
+  if (!key) return;
+  const ui = getVideoUi(key);
+  const m  = VIDEO_MODELS[key] || TOPAZ_MODELS[key] || MAGNIFIC_VIDEO_MODELS[key];
+  if (!m) return;
+
+  // 0. Install one-time #videoPrompt.value → #vpPrompt.value redirect.
+  _ensureVideoPromptRedirect();
+
+  // 1. Activate unified panel, hide legacy panels.
+  const vp = document.getElementById('vpParams');
+  if (vp) vp.style.display = 'flex';
+  _hideLegacyVideoPanels();
+
+  // 2. Model description.
+  const desc = document.getElementById('videoModelDesc');
+  if (desc) desc.textContent = m.desc || '';
+
+  // 3. Mode sub-select (Kling version / Veo refMode / Grok mode / Pixverse mode).
+  _vpApplyModeSelect(ui.modeSelect, key);
+
+  // 4. Tags + model camera move.
+  _setRow('vpTagsRow',        true);
+  _setRow('vpCameraMoveRow',  ui.showCameraMove);
+  _populateVpCameraMove(ui);
+
+  // 5. Negative prompt collapsible.
+  _setRow('vpNegPromptSection', ui.showNegPrompt);
+
+  // 6. References section + per-ref weight sliders (Luma).
+  _setRow('vpRefsSection',   ui.showRefs);
+  _updateVpRefsLabel(ui);
+  _vpRenderRefWeights(ui);
+
+  // 7. Source video slot (Topaz / WAN / V2V / Seedance2 / Grok / Magnific).
+  _setRow('vpSourceVideoSection', !!ui.sourceSlot);
+
+  // 8. Source audio (Seedance 2.0 only).
+  _setRow('vpSourceAudioSection', !!ui.showAudioSources);
+
+  // 9. Core params.
+  _setRow('vpResolutionRow', ui.showResolution);
+  _populateVpResolution(ui);
+  _setRow('vpAspectRow',     ui.showAspect);
+  _populateVpAspect(ui);
+  _setRow('vpCfgRow',        ui.showCfg);
+  _setRow('vpDurationRow',   ui.showDuration);
+  _configureVpDuration(ui);
+  _setRow('vpSeedRow',       ui.showSeed);
+
+  // 10. Advanced groups (only one at a time).
+  _setRow('vpLumaAdvanced',     ui.advancedGroup === 'luma');
+  _setRow('vpPixverseAdvanced', ui.advancedGroup === 'pixverse');
+  _setRow('vpTopazAdvanced',    ui.advancedGroup === 'topaz');
+  _setRow('vpMagnificAdvanced', ui.advancedGroup === 'magnific');
+
+  // Topaz advanced: factor / creativity rows + slowmo limit per model.
+  if (ui.advancedGroup === 'topaz') {
+    const tm = TOPAZ_MODELS[key];
+    if (tm) {
+      _setRow('vpTopazFactorRow',     !!tm.hasFactor);
+      _setRow('vpTopazCreativityRow', !!tm.hasCreativity);
+      const slowmoSel = document.getElementById('vpTopazSlowmo');
+      if (slowmoSel) {
+        const maxSlow = tm.maxSlowmo || 16;
+        Array.from(slowmoSel.options).forEach(opt => {
+          const v = parseInt(opt.value);
+          opt.disabled = v > maxSlow;
+          if (opt.disabled && opt.selected) slowmoSel.value = '1';
+        });
+      }
+    }
+  }
+
+  // Magnific advanced: creative vs precision sub-options.
+  if (ui.advancedGroup === 'magnific') {
+    const mvm = MAGNIFIC_VIDEO_MODELS[key];
+    if (mvm) {
+      const isCreative = mvm.mode === 'creative';
+      _setRow('vpMagnificCreativeOpts',  isCreative);
+      _setRow('vpMagnificPrecisionOpts', !isCreative);
+    }
+  }
+
+  // 11. Count.
+  _setRow('vpCountRow', ui.showCount);
+
+  // 12. Bottom toggles.
+  _setRow('vpMultiClipRow',  ui.showMultiClip);
+  _setRow('vpMultiShotsRow', ui.showMultiShots);
+  _setRow('vpOffPeakRow',    ui.showOffPeak);
+  _setRow('vpAudioRow',      ui.showAudio);
+
+  // Sync audio checkbox state (Audio toggle pref persistence).
+  if (ui.showAudio) {
+    const vpAudioEl = document.getElementById('vpAudio');
+    const legacyAudio = document.getElementById('videoEnableAudio');
+    if (vpAudioEl && legacyAudio) vpAudioEl.checked = legacyAudio.checked;
+  }
+
+  // 13. Button label + time hint.
+  const lbl = document.getElementById('videoGenBtnLabel');
+  const hint = document.getElementById('videoGenTimeHint');
+  if (ui.advancedGroup === 'topaz') {
+    if (lbl) lbl.textContent = '▶ Upscale Video';
+    if (hint) hint.textContent = 'Upscale takes 5–15 min';
+  } else if (ui.advancedGroup === 'magnific') {
+    if (lbl) lbl.textContent = '▶ Upscale Video';
+    if (hint) hint.textContent = 'Upscale takes 2–8 min';
+  } else {
+    if (lbl) lbl.textContent = '▶ Generate Video';
+    if (hint) hint.textContent = 'Generation takes 1–5 min';
+  }
+
+  // 14. Update res info display.
+  updateVpResInfo();
+
+  // 15. Legacy compat: renderVideoRefPanel still paints ref thumbnails
+  // until refs DOM migrates to vpRefsPanelScroll (Fáze 5/6).
+  if (typeof renderVideoRefPanel === 'function') renderVideoRefPanel();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Onclick handlers for #vpParams (Fáze 4 stubs — delegate to legacy where
+// possible; full wiring comes in Fáze 5-7).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Mode sub-select change — dispatches to legacy handler based on current UI flags.
+function onVpModeChange(value) {
+  const curModelKey = getActiveVideoModelKey();
+  const curUi = getVideoUi(curModelKey);
+  const modeSelectKey = curUi.modeSelect;
+  if (!modeSelectKey) return;
+
+  if (modeSelectKey === 'klingVersion' || modeSelectKey === 'pixverseMode') {
+    // Value is the specific variant key (e.g. 'kling_v3_t2v_pro')
+    const verSel = document.getElementById('klingVersionSelect');
+    if (verSel) verSel.value = value;
+    onKlingVersionChange(value);
+  } else if (modeSelectKey === 'veoRefMode') {
+    const veoSel = document.getElementById('veoRefMode');
+    if (veoSel) veoSel.value = value;
+    if (typeof onVeoRefModeChange === 'function') onVeoRefModeChange(value);
+    // Re-apply to refresh ref section + panel
+    _applyVideoModel(curModelKey);
+  } else if (modeSelectKey === 'grokMode') {
+    const grokSel = document.getElementById('grokVideoMode');
+    if (grokSel) grokSel.value = value;
+    if (typeof onGrokVideoModeChange === 'function') onGrokVideoModeChange(value);
+    _applyVideoModel(curModelKey);
+  }
+}
+
+// Negative prompt toggle (1-line collapsible, mirrors upNeg pattern).
+function vpToggleNegPrompt() {
+  const caret = document.getElementById('vpNegPromptCaret');
+  const body  = document.getElementById('vpNegPromptBody');
+  const status = document.getElementById('vpNegPromptStatus');
+  const input = document.getElementById('vpNegPrompt');
+  if (!caret || !body) return;
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  caret.textContent  = open ? '▾' : '▸';
+  if (status && input) {
+    status.style.display = (input.value.trim() && !open) ? '' : 'none';
+  }
+}
+
+// AI prompt for video (Fáze 4 stub — Fáze 5 will wire full flow).
+function vpAiPrompt() {
+  // Delegate to existing AI prompt handler. Note: it currently reads
+  // from #videoPrompt; we mirror into vpPrompt so the user sees the result.
+  if (typeof aiGeneratePromptForVideo === 'function') {
+    // Sync vpPrompt → videoPrompt so AI has context, then back-sync after.
+    const vp = document.getElementById('vpPrompt');
+    const lp = document.getElementById('videoPrompt');
+    if (vp && lp) lp.value = vp.value;
+    const result = aiGeneratePromptForVideo();
+    // Attempt back-sync if AI returns synchronously
+    Promise.resolve(result).finally(() => {
+      if (vp && lp) vp.value = lp.value;
+    });
+  } else if (typeof toast === 'function') {
+    toast('AI prompt not yet wired to unified panel', 'info');
+  }
+}
+
+// Refs file upload (Fáze 4 — delegate to existing video ref handler).
+function vpRefsFileSelected(files) {
+  if (typeof onVideoRefFilesChosen === 'function') return onVideoRefFilesChosen(files);
+  if (typeof onVideoRefFileSelected === 'function') return onVideoRefFileSelected(files);
+  if (typeof handleVideoRefFiles === 'function') return handleVideoRefFiles(files);
+  // Fallback: try to use the legacy input directly
+  const legacy = document.getElementById('videoRefInput');
+  if (legacy) {
+    try { legacy.files = files; legacy.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+  }
+}
+
+// Source video picker — dispatch by sourceSlot to legacy handler.
+function vpPickSourceVideo() {
+  const slot = getVideoUi(getActiveVideoModelKey()).sourceSlot;
+  if (!slot) return;
+  // Prefer exact-match legacy handler; fall back to sensible substitutes.
+  const fnMap = {
+    topaz:    ['pickTopazSourceVideo', 'pickTopazSrcVideo', 'onTopazPickSrc'],
+    magnific: ['pickTopazSourceVideo', 'pickTopazSrcVideo'], // Magnific reuses Topaz slot
+    wan27v:   ['pickWan27SrcVideo', 'pickWan27vSrcVideo'],
+    wan27e:   ['pickWan27eSrcVideo'],
+    v2v:      ['pickV2VSourceVideo', 'pickV2VSrcVideo'],
+    sd2Vid:   ['pickSd2VidSource'],
+    grok:     ['pickGrokVideoSource', 'pickGrokVideoSrc'],
+  };
+  const candidates = fnMap[slot] || [];
+  for (const fn of candidates) {
+    if (typeof window[fn] === 'function') return window[fn]();
+  }
+  if (typeof toast === 'function') toast('Source video picker not wired for slot: ' + slot, 'info');
+}
+
+// Describe source video (OpenRouter/Gemini analysis).
+function vpDescribeSourceVideo() {
+  const slot = getVideoUi(getActiveVideoModelKey()).sourceSlot;
+  const candidates = ['describeSourceVideo', 'describeTopazSourceVideo', 'describeWan27SrcVideo'];
+  for (const fn of candidates) {
+    if (typeof window[fn] === 'function') return window[fn]();
+  }
+  if (typeof toast === 'function') toast('Describe not wired for slot: ' + slot, 'info');
+}
+
+// Clear source video.
+function vpClearSourceVideo() {
+  const slot = getVideoUi(getActiveVideoModelKey()).sourceSlot;
+  if (!slot) return;
+  const fnMap = {
+    topaz:    ['clearTopazSourceVideo', 'clearTopazSrcVideo'],
+    magnific: ['clearTopazSourceVideo', 'clearTopazSrcVideo'],
+    wan27v:   ['clearWan27SrcVideo', 'clearWan27vSrcVideo'],
+    wan27e:   ['clearWan27eSrcVideo'],
+    v2v:      ['clearV2VSourceVideo', 'clearV2VSrcVideo'],
+    sd2Vid:   ['clearSd2VidSource'],
+    grok:     ['clearGrokVideoSource', 'clearGrokVideoSrc'],
+  };
+  const candidates = fnMap[slot] || [];
+  for (const fn of candidates) {
+    if (typeof window[fn] === 'function') return window[fn]();
+  }
+}
