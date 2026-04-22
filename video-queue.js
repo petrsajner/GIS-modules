@@ -22,10 +22,10 @@ async function _saveVideoResult(videoArrayBuffer, recordFields, job, spendArgs) 
   job.elapsed = `${elapsed}s`;
 
   // Auto-merge fps into params if detected
-  // Fáze 7: unified schema from job.params (set by buildVideoParams) is the
-  // base; handler-supplied recordFields.params override any field.  This
-  // guarantees reuse sees a complete params object regardless of whether
-  // the handler has been individually refactored.
+  // Metadata unification: unified schema from job.params (set by buildVideoParams
+  // in generateVideo) is the base; handler-supplied recordFields.params override
+  // any field. Each save thus stores a complete unified params object regardless
+  // of which handler produced the video — reuse reads this back.
   const params = {
     ...(job.params || {}),
     ...(recordFields.params || {}),
@@ -380,6 +380,17 @@ async function generateVideo() {
     }
     return snap;
   }));
+  // Build unified params once (same values as job fields above — this is the
+  // canonical metadata schema stored in DB for reliable reuse). All models
+  // share the same params shape; per-model snap objects remain for handler
+  // compatibility (unchanged).
+  const unifiedParams = _buildUnifiedVideoParams(modelKey, model, {
+    prompt: rawVideoPrompt, duration, aspectRatio, cfgScale,
+    enableAudio, negativePrompt: null,
+    veoResolution, veoRefMode, lumaResolution, lumaLoop, lumaColorMode,
+    wan27vSnap, wan27eSnap, sd2Snap, grokVideoSnap,
+  });
+
   for (let i = 0; i < count; i++) {
     const jobId = `vid_${Date.now()}_${i}_${Math.random().toString(36).substr(2,4)}`;
     const job = {
@@ -393,6 +404,7 @@ async function generateVideo() {
       status: 'pending', startedAt: Date.now(),
       motionVideoUrl,
       videoRefsSnapshot: videoRefsAtSubmit,
+      params: unifiedParams,  // Unified schema — saved by _saveVideoResult for reuse
     };
     videoJobs.push(job);
     videoShowPlaceholder(job);
@@ -854,466 +866,114 @@ function videoCancelAllPending() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SESSION 2 · FÁZE 5 — buildVideoParams() + generateVideo refactor
-// ---------------------------------------------------------------------------
-// Generate now reads from #vpXxx IDs via buildVideoParams().  Handlers in
-// Fáze 7 will consume `job.params` directly; for Fáze 5 we still construct
-// legacy snap objects (wan27vSnap, sd2Snap, etc.) so runVideoJob keeps
-// working unchanged until Fáze 7 refactors each handler.
-// The new `generateVideo` below replaces the legacy implementation earlier
-// in this file — last function definition wins at script load.
+// METADATA UNIFICATION — v209en
+// Central helper that assembles unified `params` from per-model legacy inputs.
+// This is called once per generateVideo run and stored in each job so
+// _saveVideoResult can persist a complete schema to DB regardless of which
+// handler produced the video.  UI remains 100% legacy — this is purely
+// a data-layer enhancement that fixes reuse for all model types.
 // ═══════════════════════════════════════════════════════════════════════════
+function _buildUnifiedVideoParams(modelKey, model, bag) {
+  const p = {
+    // Core (every model)
+    variantKey:     modelKey,
+    resolution:     _deriveResolution(model, bag),
+    aspectRatio:    bag.aspectRatio || '16:9',
+    duration:       bag.duration || 5,
+    cfgScale:       typeof bag.cfgScale === 'number' ? bag.cfgScale : 0.5,
+    enableAudio:    !!bag.enableAudio,
+    seed:           _deriveSeed(model, bag),
+    negativePrompt: _deriveNegPrompt(model),
 
-// Read Resolution from unified panel (or advanced-group-specific widget).
-function _readVpResolution(ui) {
-  if (ui.advancedGroup === 'topaz')    return document.getElementById('vpTopazResolution')?.value || '4K';
-  if (ui.advancedGroup === 'magnific') return document.getElementById('vpMagnificResolution')?.value || '2k';
-  if (ui.advancedGroup === 'pixverse') return document.getElementById('vpPixverseQuality')?.value || '720p';
-  return document.getElementById('vpResolution')?.value || '';
+    // Source videos (model-specific; null if not used)
+    sourceVideoId:  _deriveSourceVideoId(model),
+
+    // Reference images (already stored per-job as videoRefsSnapshot; here just
+    // labels for convenient reuse restoration, if useful)
+    refLabels:      (typeof videoRefs !== 'undefined' ? videoRefs : []).map(r => ({
+      autoName:  r.autoName || '',
+      userLabel: r.userLabel || '',
+    })),
+
+    // Per-family advanced (null when N/A)
+    veo:      model.type === 'veo' ? {
+      refMode:    bag.veoRefMode || 't2v',
+      resolution: bag.veoResolution || '1080p',
+    } : null,
+
+    luma:     model.type === 'luma_video' ? {
+      resolution: bag.lumaResolution || '1080p',
+      loop:       !!bag.lumaLoop,
+      colorMode:  bag.lumaColorMode || 'sdr',
+    } : null,
+
+    wan27v:   model.type === 'wan27_video' ? _cloneSnap(bag.wan27vSnap) : null,
+    wan27e:   model.type === 'wan27e_video' ? _cloneSnap(bag.wan27eSnap) : null,
+    seedance2: model.type === 'seedance2_video' ? _cloneSnap(bag.sd2Snap) : null,
+
+    pixverse: model.type === 'pixverse_video' ? {
+      quality:    document.getElementById('pixverseQuality')?.value || '720p',
+      cameraMove: document.getElementById('pixverseCameraMove')?.value || '',
+      multiClip:  document.getElementById('pixverseMultiClip')?.checked || false,
+      offPeak:    document.getElementById('pixverseOffPeak')?.checked || false,
+    } : null,
+
+    grok:     model.type === 'grok_video' ? _cloneSnap(bag.grokVideoSnap) : null,
+
+    wan26:    model.type === 'wan_video' ? {
+      resolution: document.getElementById('wanResolution')?.value || '1080p',
+      multiShot:  modelKey === 'wan26_t2v' ? (document.querySelector('input[name="videoCount"]:checked')?.value ? false : false) : false,
+    } : null,
+
+    kling:    model.type === 'kling_video' ? {
+      variantKey: modelKey,
+    } : null,
+  };
+  return p;
 }
 
-// Read Duration as number (seconds) from slider/select/radio.
-function _readVpDuration(ui) {
-  if (ui.durationType === 'select') {
-    const sel = document.getElementById('vpDurationSelect');
-    if (sel && sel.offsetParent !== null) {
-      const n = parseInt(sel.value);
-      if (!isNaN(n) && n > 0) return n;
-    }
-  } else if (ui.durationType === 'radio') {
-    const r = document.querySelector('input[name="vpDurationRadio"]:checked');
-    if (r) {
-      const n = parseInt(r.value);
-      if (!isNaN(n) && n > 0) return n;
-    }
-  }
-  const n = parseInt(document.getElementById('vpDuration')?.value);
-  return (!isNaN(n) && n > 0) ? n : 5;
+function _deriveResolution(model, bag) {
+  // Each model family reports its own resolution source — preserve original value.
+  if (model.type === 'veo')             return bag.veoResolution || '1080p';
+  if (model.type === 'luma_video')      return bag.lumaResolution || '1080p';
+  if (model.type === 'wan27_video')     return bag.wan27vSnap?.resolution || '1080p';
+  if (model.type === 'wan27e_video')    return bag.wan27eSnap?.resolution || '1080p';
+  if (model.type === 'seedance2_video') return bag.sd2Snap?.resolution || '720p';
+  if (model.type === 'pixverse_video')  return document.getElementById('pixverseQuality')?.value || '720p';
+  if (model.type === 'grok_video')      return bag.grokVideoSnap?.resolution || '720p';
+  if (model.type === 'wan_video')       return document.getElementById('wanResolution')?.value || '1080p';
+  return '';
 }
 
-// Read seed (null = random).
-function _readVpSeed() {
-  const v = document.getElementById('vpSeed')?.value?.trim();
-  if (!v) return null;
-  const n = parseInt(v);
-  return (!isNaN(n) && n >= 0) ? n : null;
+function _deriveSeed(model, bag) {
+  // Per-family seed inputs
+  const seedEl =
+    (model.type === 'wan27_video'     && document.getElementById('wan27vSeed'))   ||
+    (model.type === 'wan27e_video'    && document.getElementById('wan27eSeed'))   ||
+    (model.type === 'seedance2_video' && document.getElementById('sd2Seed'))      ||
+    (model.type === 'pixverse_video'  && document.getElementById('pixverseSeed')) || null;
+  const raw = seedEl?.value?.trim();
+  if (!raw) return null;
+  const n = parseInt(raw);
+  return isNaN(n) ? null : n;
 }
 
-// Read mode sub-select value (dependent on modeSelect type).
-function _readVpMode(ui) {
-  if (!ui.modeSelect) return null;
-  return document.getElementById('vpModeSelect')?.value || null;
+function _deriveNegPrompt(model) {
+  if (model.type === 'wan27_video')    return document.getElementById('wan27vNegPrompt')?.value?.trim() || '';
+  if (model.type === 'pixverse_video') return document.getElementById('pixverseNegPrompt')?.value?.trim() || '';
+  return '';
 }
 
-// Read source video asset ID for current slot (reads from legacy globals,
-// which are still populated by delegated pick handlers).
-function _readVpSourceVideoId(ui) {
-  const slot = ui.sourceSlot;
-  if (!slot) return null;
-  if (slot === 'topaz'    && typeof topazSrcVideoId    !== 'undefined') return topazSrcVideoId    || null;
-  if (slot === 'magnific' && typeof topazSrcVideoId    !== 'undefined') return topazSrcVideoId    || null; // reuses Topaz slot
-  if (slot === 'wan27v'   && typeof wan27vSrcVideoId   !== 'undefined') return wan27vSrcVideoId   || null;
-  if (slot === 'wan27e'   && typeof wan27eSrcVideoId   !== 'undefined') return wan27eSrcVideoId   || null;
-  if (slot === 'v2v'      && typeof videoMotionVideoId !== 'undefined') return videoMotionVideoId || null;
-  if (slot === 'grok'     && typeof _grokVideoSrcId    !== 'undefined') return _grokVideoSrcId    || null;
-  if (slot === 'sd2Vid'   && typeof sd2VidSrc          !== 'undefined') return (sd2VidSrc && sd2VidSrc[0]) || null;
+function _deriveSourceVideoId(model) {
+  if (model.type === 'wan27e_video'    && typeof wan27eSrcVideoId    !== 'undefined') return wan27eSrcVideoId || null;
+  if (model.type === 'wan27_video'     && typeof wan27vSrcVideoId    !== 'undefined') return wan27vSrcVideoId || null;
+  if (model.type === 'grok_video'      && typeof _grokVideoSrcId      !== 'undefined') return _grokVideoSrcId || null;
+  // Seedance 2.0 uses multi-slot sd2VidSrc array — do not serialize (session-local)
   return null;
 }
 
-// Read audio URLs (Seedance 2.0: up to 3).
-function _readVpAudioUrls(ui) {
-  if (!ui.showAudioSources) return [];
-  return [
-    document.getElementById('vpSourceAudio1')?.value?.trim() || '',
-    document.getElementById('vpSourceAudio2')?.value?.trim() || '',
-    document.getElementById('vpSourceAudio3')?.value?.trim() || '',
-  ].filter(Boolean);
-}
-
-// Per-family advanced param readers.
-function _readVpTopazParams() {
-  return {
-    resolution: document.getElementById('vpTopazResolution')?.value || '4K',
-    factor:     parseInt(document.getElementById('vpTopazFactor')?.value || '2'),
-    fps:        document.getElementById('vpTopazFps')?.value || '',
-    slowmo:     parseInt(document.getElementById('vpTopazSlowmo')?.value || '1'),
-    creativity: parseInt(document.getElementById('vpTopazCreativity')?.value || '2'),
-  };
-}
-function _readVpMagnificParams() {
-  const flavor = document.querySelector('input[name="vpMagnificFlavor"]:checked')?.value || 'vivid';
-  return {
-    resolution: document.getElementById('vpMagnificResolution')?.value || '2k',
-    fpsBoost:   document.getElementById('vpMagnificFps')?.checked || false,
-    sharpen:    parseInt(document.getElementById('vpMagnificSharpen')?.value || '0'),
-    grain:      parseInt(document.getElementById('vpMagnificGrain')?.value || '0'),
-    prompt:     document.getElementById('vpMagnificPrompt')?.value?.trim() || '',
-    creativity: parseInt(document.getElementById('vpMagnificCreativity')?.value || '50'),
-    flavor:     flavor,
-    strength:   parseInt(document.getElementById('vpMagnificStrength')?.value || '60'),
-  };
-}
-function _readVpPixverseParams() {
-  return {
-    quality:    document.getElementById('vpPixverseQuality')?.value || '720p',
-    cameraMove: document.getElementById('vpCameraMove')?.value || '',
-    multiClip:  document.getElementById('vpMultiClip')?.checked || false,
-    offPeak:    document.getElementById('vpOffPeak')?.checked || false,
-  };
-}
-function _readVpLumaParams() {
-  // Per-ref weights (array aligned with videoRefs order).
-  const refsLen = (typeof videoRefs !== 'undefined') ? videoRefs.length : 0;
-  const refWeights = [];
-  for (let i = 0; i < refsLen; i++) {
-    const el = document.getElementById(`vpRefWeight${i}`);
-    const v = el ? parseFloat(el.value) : 0.85;
-    refWeights.push(isNaN(v) ? 0.85 : v);
-  }
-  return {
-    loop:       document.getElementById('vpLumaLoop')?.checked || false,
-    colorMode:  document.getElementById('vpLumaColorMode')?.value || 'sdr',
-    refWeights: refWeights,
-  };
-}
-
-// Main unified params reader.  Returns an object matching the Session 2
-// metadata schema (see SESSION_2_HANDOFF.md § 3).
-function buildVideoParams() {
-  const modelKey = getActiveVideoModelKey();
-  const ui = getVideoUi(modelKey);
-
-  return {
-    // Core (always present):
-    resolution:     _readVpResolution(ui),
-    aspectRatio:    document.getElementById('vpAspect')?.value || '16:9',
-    duration:       _readVpDuration(ui),
-    cfgScale:       parseFloat(document.getElementById('vpCfg')?.value || '0.5'),
-    seed:           _readVpSeed(),
-    enableAudio:    document.getElementById('vpAudio')?.checked ?? true,
-    count:          Math.max(1, Math.min(4, parseInt(document.getElementById('vpCount')?.value || '1') || 1)),
-    negativePrompt: document.getElementById('vpNegPrompt')?.value?.trim() || '',
-
-    // Sub-select:
-    modeValue:      _readVpMode(ui),
-    variantKey:     modelKey,
-
-    // Source:
-    sourceVideoId:  _readVpSourceVideoId(ui),
-    audioUrls:      _readVpAudioUrls(ui),
-
-    // Per-family advanced (null when model not in family):
-    topaz:    ui.advancedGroup === 'topaz'    ? _readVpTopazParams()    : null,
-    magnific: ui.advancedGroup === 'magnific' ? _readVpMagnificParams() : null,
-    pixverse: ui.advancedGroup === 'pixverse' ? _readVpPixverseParams() : null,
-    luma:     ui.advancedGroup === 'luma'     ? _readVpLumaParams()     : null,
-    wan:      (modelKey === 'wan26_t2v') ? { multiShots: document.getElementById('vpMultiShots')?.checked || false } : null,
-    grok:     ui.modeSelect === 'grokMode'   ? { mode: _readVpMode(ui) || 't2v' } : null,
-    veo:      ui.modeSelect === 'veoRefMode' ? { refMode: _readVpMode(ui) || 't2v' } : null,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
-// Build legacy-shaped snap objects from unified params.  Bridge
-// layer: keeps Fáze 7 handler refactor decoupled from Fáze 5.
-// ─────────────────────────────────────────────────────────────
-function _buildLegacySnaps(modelKey, model, params) {
-  // Veo
-  const veoResolution = (params.veo && params.resolution) ? params.resolution : (params.resolution || '720p');
-  const veoRefMode    = params.veo?.refMode || 't2v';
-  const veoDuration   = params.duration;
-
-  // Luma
-  const lumaResolution = (model.type === 'luma_video') ? (params.resolution || '1080p') : '1080p';
-  const lumaDurationSel = (model.type === 'luma_video') ? `${params.duration}s` : null;
-  const lumaLoop       = params.luma?.loop || false;
-  const lumaColorMode  = params.luma?.colorMode || 'sdr';
-  const lumaCharRefAssetId = null; // Deprecated in unified panel (integrated into refs)
-
-  // WAN 2.7 video (T2V / I2V / R2V — type='wan27_video')
-  const wan27vSnap = (model.type === 'wan27_video') ? {
-    resolution:    params.resolution || '1080p',
-    duration:      params.duration || 5,
-    negPrompt:     params.negativePrompt || '',
-    promptExpand:  true,   // default on — UI toggle removed in unified panel
-    safety:        true,
-    seed:          params.seed !== null ? String(params.seed) : null,
-    audioUrl:      null,   // Removed from unified panel
-    extendVideoId: (typeof wan27vSrcVideoId !== 'undefined' ? wan27vSrcVideoId : null) || null,
-  } : null;
-
-  // WAN 2.7 Video Edit
-  const wan27eSnap = (model.type === 'wan27e_video') ? {
-    srcVideoId:   (typeof wan27eSrcVideoId !== 'undefined' ? wan27eSrcVideoId : null),
-    resolution:   params.resolution || '1080p',
-    duration:     String(params.duration || 0),
-    aspectRatio:  params.aspectRatio || 'auto',
-    audioSetting: 'auto',
-    safety:       true,
-    seed:         params.seed !== null ? String(params.seed) : null,
-  } : null;
-
-  // Seedance 2.0
-  const sd2Snap = (model.type === 'seedance2_video') ? {
-    duration:     String(params.duration || 5),
-    autoDuration: false,
-    resolution:   params.resolution || '720p',
-    seed:         params.seed !== null ? String(params.seed) : null,
-    vidSrcIds:    (typeof sd2VidSrc !== 'undefined' && Array.isArray(sd2VidSrc)) ? [...sd2VidSrc] : [],
-    audioUrls:    params.audioUrls || [],
-  } : null;
-
-  // Grok Video
-  const grokVideoSnap = (model.type === 'grok_video') ? {
-    mode:       params.grok?.mode || 't2v',
-    duration:   params.duration || 8,
-    resolution: params.resolution || '720p',
-    srcVideoId: (typeof _grokVideoSrcId !== 'undefined' ? _grokVideoSrcId : null) || null,
-  } : null;
-
-  return {
-    veoResolution, veoRefMode, veoDuration,
-    lumaResolution, lumaDurationSel, lumaLoop, lumaColorMode, lumaCharRefAssetId,
-    wan27vSnap, wan27eSnap, sd2Snap, grokVideoSnap,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
-// NEW generateVideo — reads from #vpXxx IDs via buildVideoParams.
-// Keeps backward-compat legacy snap objects for handlers (Fáze 7).
-// ─────────────────────────────────────────────────────────────
-async function generateVideo() {
-  if (typeof _GIS_SIG === 'undefined' || typeof GIS_COPYRIGHT === 'undefined' ||
-      _GIS_SIG !== btoa(unescape(encodeURIComponent(GIS_COPYRIGHT))).slice(0, 20)) {
-    toast('Application integrity check failed. Please use the original GIS.', 'err');
-    return;
-  }
-
-  const activeKey = getActiveVideoModelKey();
-  const proxyUrl = getProxyUrl();
-
-  // Topaz / Magnific — keep legacy dispatch (Fáze 7 refactors these handlers).
-  if (TOPAZ_MODELS[activeKey]) {
-    _syncVpToLegacyTopaz();
-    await _generateTopazJob(activeKey, proxyUrl);
-    return;
-  }
-  if (MAGNIFIC_VIDEO_MODELS[activeKey]) {
-    const freepikKey = (localStorage.getItem('gis_freepik_apikey') || '').trim();
-    if (!freepikKey) { showApiKeyWarning('Freepik API Key missing', 'Magnific Video requires a Freepik API key. Add it in the Setup tab.'); return; }
-    if (!proxyUrl)   { showApiKeyWarning('Proxy URL missing', 'Magnific Video requires the GIS proxy URL. Add it in the Setup tab.'); return; }
-    _syncVpToLegacyMagnific();
-    await _generateMagnificVideoJob(activeKey, freepikKey, proxyUrl);
-    return;
-  }
-
-  const modelKey = activeKey;
-  const model = VIDEO_MODELS[modelKey];
-  if (!model) { toast('Select a video model', 'err'); return; }
-
-  const falKey    = document.getElementById('fluxApiKey')?.value?.trim() || '';
-  const googleKey = document.getElementById('apiKey')?.value?.trim() || localStorage.getItem('gis_apikey') || '';
-  const lumaKey   = (localStorage.getItem('gis_luma_apikey') || '').trim();
-
-  // Key validation per model type
-  if (model.type === 'veo') {
-    if (!googleKey) { showApiKeyWarning('Google API Key missing', 'Veo requires a Google AI API key. Add it in the Setup tab.'); return; }
-  } else if (model.type === 'luma_video') {
-    if (!lumaKey)  { showApiKeyWarning('Luma API Key missing', 'Ray3 / Ray3.14 requires a Luma API key. Add it in the Setup tab.'); return; }
-    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'Luma video requires the GIS proxy URL. Add it in the Setup tab.'); return; }
-  } else if (model.type === 'pixverse_video') {
-    const pvKey = (localStorage.getItem('gis_pixverse_apikey') || '').trim();
-    if (!pvKey)    { showApiKeyWarning('PixVerse API Key missing', 'PixVerse requires a PixVerse API key. Add it in the Setup tab.'); return; }
-    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'PixVerse requires the GIS proxy URL. Add it in the Setup tab.'); return; }
-  } else if (model.type === 'wan27_video') {
-    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 requires a fal.ai API key. Add it in the Setup tab.'); return; }
-  } else if (model.type === 'wan27e_video') {
-    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 Video Edit requires a fal.ai API key. Add it in the Setup tab.'); return; }
-    if (typeof wan27eSrcVideoId === 'undefined' || !wan27eSrcVideoId) {
-      toast('Select a source video first — click ▷ Use on any video in the gallery', 'err'); return;
-    }
-  } else if (model.type === 'grok_video') {
-    const xaiKey = (localStorage.getItem('gis_xai_apikey') || '').trim();
-    if (!xaiKey)   { showApiKeyWarning('xAI API Key missing', 'Grok Video requires an xAI API key. Add it in the Setup tab.'); return; }
-    if (!proxyUrl) { showApiKeyWarning('Proxy URL missing', 'Grok Video requires the GIS proxy URL. Add it in the Setup tab.'); return; }
-  } else {
-    if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'Video generation requires a fal.ai API key. Add it in the Setup tab.'); return; }
-  }
-
-  // Read unified params
-  const params = buildVideoParams();
-  const rawVideoPrompt = document.getElementById('vpPrompt')?.value?.trim() || '';
-
-  // Prompt validation
-  const refMode = model.refMode || 'none';
-  const veoFramesMode = model.type === 'veo' && params.veo?.refMode === 'frames';
-  const promptOptional = veoFramesMode ||
-    (model.type !== 'luma_video' && model.type !== 'kling_video' && model.type !== 'pixverse_video' &&
-     (refMode === 'single_end' || refMode === 'single' || refMode === 'keyframe' ||
-      refMode === 'wan_r2v' || refMode === 'seedance2_r2v' || refMode === 'multi'));
-  if (!rawVideoPrompt && !promptOptional) { toast('Enter a prompt', 'err'); return; }
-
-  // Append style + camera suffix
-  const vStyleSuffix  = buildStyleSuffix('flux');
-  const vCameraSuffix = buildCameraSuffix();
-  const vExtra = [vStyleSuffix, vCameraSuffix].filter(Boolean).join(', ');
-  const prompt = vExtra ? (rawVideoPrompt ? rawVideoPrompt + ', ' + vExtra : vExtra) : rawVideoPrompt;
-
-  // Ref validation
-  if ((refMode === 'single' || refMode === 'single_end') && videoRefs.length === 0 &&
-      model.type !== 'veo' && model.type !== 'luma_video' && model.type !== 'wan27e_video' &&
-      model.refMode !== 'wan_r2v') {
-    toast('Start frame image required for I2V', 'err'); return;
-  }
-  if (refMode === 'keyframe' && videoRefs.length < 2) {
-    toast(`Both start and end frames required (have ${videoRefs.length}/2)`, 'err'); return;
-  }
-  if (refMode === 'video_ref' && !videoMotionFile && !videoMotionVideoId) {
-    toast('Upload or pick a motion reference video for Motion Control', 'err'); return;
-  }
-
-  // V2V: upload motion video to R2 before submitting jobs
-  let motionVideoUrl = null;
-  if (refMode === 'video_ref' && (videoMotionFile || videoMotionVideoId)) {
-    toast('Uploading motion video…', 'ok');
-    try {
-      if (videoMotionFile) {
-        motionVideoUrl = await uploadVideoToFal(videoMotionFile, falKey);
-      } else {
-        const full = await dbGet('videos', videoMotionVideoId);
-        if (!full?.videoData) throw new Error('Video data not found in gallery');
-        const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
-        motionVideoUrl = await uploadVideoToFal(blob, falKey);
-      }
-    } catch(e) {
-      toast(`Motion video upload failed: ${e.message}`, 'err'); return;
-    }
-  }
-
-  // Build legacy-shaped snaps for compatibility with existing handlers (Fáze 7).
-  const snaps = _buildLegacySnaps(modelKey, model, params);
-
-  // Target folder (unified panel doesn't have this yet — legacy field still in DOM).
-  const targetFolder = document.getElementById('videoTargetFolder')?.value || 'all';
-
-  // Apply audio toggle from unified panel (overrides model default).
-  const enableAudio = model.hasAudio && (params.enableAudio ?? true);
-
-  // Snapshot current refs at submit time (includes imageData for deletion resilience).
-  const videoRefsAtSubmit = await Promise.all(videoRefs.map(async r => {
-    const snap = {
-      assetId: r.assetId || null,
-      mimeType: r.mimeType,
-      autoName: r.autoName,
-      userLabel: r.userLabel || '',
-      thumb: r.thumb || null,
-    };
-    if (r.data) {
-      snap.imageData = r.data;
-    } else if (r.assetId) {
-      const asset = await dbGet('assets', r.assetId).catch(() => null);
-      if (asset?.imageData) snap.imageData = asset.imageData;
-      if (!snap.thumb && asset?.thumb) snap.thumb = asset.thumb;
-    }
-    return snap;
-  }));
-
-  // Submit count jobs (parallel)
-  const count = params.count;
-  const duration    = params.duration;
-  const aspectRatio = params.aspectRatio;
-  const cfgScale    = params.cfgScale;
-
-  const jobs = [];
-  for (let i = 0; i < count; i++) {
-    const jobId = `vid_${Date.now()}_${i}_${Math.random().toString(36).substr(2,4)}`;
-    const job = {
-      id: jobId, modelKey, model, prompt,
-      duration, aspectRatio, enableAudio, cfgScale, targetFolder,
-      falKey, googleKey, lumaKey, proxyUrl,
-      pixverseKey: (localStorage.getItem('gis_pixverse_apikey') || '').trim(),
-      xaiKey:      (localStorage.getItem('gis_xai_apikey')      || '').trim(),
-      // Legacy-shape (bridge for current handlers — Fáze 7 will drop these):
-      veoResolution:    snaps.veoResolution,
-      veoRefMode:       snaps.veoRefMode,
-      veoDuration:      snaps.veoDuration,
-      lumaResolution:   snaps.lumaResolution,
-      lumaDurationSel:  snaps.lumaDurationSel,
-      lumaLoop:         snaps.lumaLoop,
-      lumaColorMode:    snaps.lumaColorMode,
-      lumaCharRefAssetId: snaps.lumaCharRefAssetId,
-      wan27vSnap:       snaps.wan27vSnap,
-      wan27eSnap:       snaps.wan27eSnap,
-      sd2Snap:          snaps.sd2Snap,
-      grokVideoSnap:    snaps.grokVideoSnap,
-      // New unified params (Fáze 7 handlers will prefer this):
-      params,
-      status: 'pending', startedAt: Date.now(),
-      motionVideoUrl,
-      videoRefsSnapshot: videoRefsAtSubmit,
-    };
-    videoJobs.push(job);
-    videoShowPlaceholder(job);
-    jobs.push(job);
-  }
-  renderVideoQueue();
-
-  // Run all jobs concurrently
-  await Promise.allSettled(jobs.map(job =>
-    runVideoJob(job).catch(e => videoJobError(job, e.message || 'Unknown error'))
-  ));
-}
-
-// ─────────────────────────────────────────────────────────────
-// Sync vpXxx values → legacy Topaz/Magnific IDs.  Required because
-// the Topaz / Magnific video handlers (video-topaz.js) still read
-// from legacy DOM IDs — Fáze 7 will refactor them to use params.
-// Called just before `_generateTopazJob` / `_generateMagnificVideoJob`.
-// ─────────────────────────────────────────────────────────────
-function _syncVpToLegacyTopaz() {
-  const m = {
-    vpTopazResolution: 'topazResolution',
-    vpTopazFactor:     'topazFactor',
-    vpTopazFps:        'topazFps',
-    vpTopazSlowmo:     'topazSlowmo',
-    vpTopazCreativity: 'topazCreativity',
-  };
-  for (const [vpId, legacyId] of Object.entries(m)) {
-    const vpEl = document.getElementById(vpId);
-    const lgEl = document.getElementById(legacyId);
-    if (vpEl && lgEl && 'value' in lgEl) lgEl.value = vpEl.value;
-  }
-}
-
-function _syncVpToLegacyMagnific() {
-  const sel = {
-    vpMagnificResolution: 'magnificVidResolution',
-  };
-  for (const [vpId, legacyId] of Object.entries(sel)) {
-    const vpEl = document.getElementById(vpId);
-    const lgEl = document.getElementById(legacyId);
-    if (vpEl && lgEl && 'value' in lgEl) lgEl.value = vpEl.value;
-  }
-  const vpFps = document.getElementById('vpMagnificFps');
-  const lgFps = document.getElementById('magnificVidFps');
-  if (vpFps && lgFps && 'checked' in lgFps) lgFps.checked = !!vpFps.checked;
-  const sliderMap = {
-    vpMagnificSharpen:    'magnificVidSharpen',
-    vpMagnificGrain:      'magnificVidGrain',
-    vpMagnificCreativity: 'magnificVidCreativity',
-    vpMagnificStrength:   'magnificVidStrength',
-  };
-  for (const [vpId, legacyId] of Object.entries(sliderMap)) {
-    const vpEl = document.getElementById(vpId);
-    const lgEl = document.getElementById(legacyId);
-    if (vpEl && lgEl && 'value' in lgEl) lgEl.value = vpEl.value;
-  }
-  const vpP = document.getElementById('vpMagnificPrompt');
-  const lgP = document.getElementById('magnificVidPrompt');
-  if (vpP && lgP && 'value' in lgP) lgP.value = vpP.value;
-  const vpFlavor = document.querySelector('input[name="vpMagnificFlavor"]:checked');
-  if (vpFlavor) {
-    const lgFlavor = document.querySelector(`input[name="magnificVidFlavor"][value="${vpFlavor.value}"]`);
-    if (lgFlavor) lgFlavor.checked = true;
-  }
+function _cloneSnap(snap) {
+  if (!snap || typeof snap !== 'object') return null;
+  // Shallow JSON clone strips non-serializable fields
+  try { return JSON.parse(JSON.stringify(snap)); } catch { return null; }
 }

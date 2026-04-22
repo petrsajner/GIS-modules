@@ -998,41 +998,58 @@ async function reuseVideoJob(id) {
   switchView('gen');
   setGenMode('video');
   const meta = rec || fullRec;
-  const modelKey = meta.modelKey;
 
-  // Detect params shape: new (Fáze 5+) has variantKey; old shape is ad-hoc.
-  let params;
-  if (_isOldVideoParamsShape(meta.params)) {
-    params = _migrateOldVideoParams(meta, modelKey);
-  } else {
-    // Clone so mutations below don't persist back to DB.
-    params = JSON.parse(JSON.stringify(meta.params));
-    // Back-compat: sometimes duration was stored on meta top-level.
-    if (typeof meta.duration === 'number' && !params.duration) params.duration = meta.duration;
-  }
-  // Prompt is historically stored on meta top-level (not inside params).
-  params.prompt = meta.prompt || '';
+  // Set prompt
+  const promptEl = document.getElementById('videoPrompt');
+  if (promptEl) promptEl.value = meta.prompt || '';
 
-  // Set model (Kling groups use sub-select; direct models set directly).
+  // Set model
   const modelSel = document.getElementById('videoModelSelect');
-  if (modelSel && modelKey && (VIDEO_MODELS[modelKey] || TOPAZ_MODELS[modelKey] || MAGNIFIC_VIDEO_MODELS[modelKey])) {
+  if (modelSel && meta.modelKey && VIDEO_MODELS[meta.modelKey]) {
+    // Find if this variant belongs to a Kling group
     const groupKey = Object.keys(KLING_GROUPS).find(gk =>
-      KLING_GROUPS[gk].variants.some(v => v.key === modelKey)
+      KLING_GROUPS[gk].variants.some(v => v.key === meta.modelKey)
     );
     if (groupKey) {
       modelSel.value = groupKey;
-      onVideoModelChange(groupKey);  // populates klingVersionSelect with group
+      onVideoModelChange(groupKey);  // populates klingVersionSelect with group default
       const verSel = document.getElementById('klingVersionSelect');
-      if (verSel) verSel.value = modelKey;
-      _applyVideoModel(modelKey);
+      if (verSel) { verSel.value = meta.modelKey; _applyVideoModel(meta.modelKey); }
     } else {
-      modelSel.value = modelKey;
-      onVideoModelChange(modelKey);
+      modelSel.value = meta.modelKey;
+      onVideoModelChange(meta.modelKey);
     }
   }
 
-  // Apply all params to unified panel (replaces old ad-hoc getElementById writes).
-  loadVideoJobParamsToForm(params, modelKey);
+  // Set duration
+  const dur = meta.params?.duration || meta.duration || 5;
+  const durEl = document.getElementById('videoDuration');
+  if (durEl) { durEl.value = String(dur); if (typeof updateVideoDurationHighlight !== 'undefined') updateVideoDurationHighlight(); }
+
+  // Set aspect ratio
+  const arEl = document.getElementById('videoAspectRatio');
+  if (arEl && meta.params?.aspectRatio) arEl.value = meta.params.aspectRatio;
+
+  // Set CFG scale
+  const cfgEl = document.getElementById('videoCfgScale');
+  const cfgVal = document.getElementById('videoCfgVal');
+  if (cfgEl && typeof meta.params?.cfgScale === 'number') {
+    cfgEl.value = meta.params.cfgScale;
+    if (cfgVal) cfgVal.textContent = meta.params.cfgScale.toFixed(1);
+  }
+
+  // Set audio toggle
+  const audioEl = document.getElementById('videoEnableAudio');
+  if (audioEl && typeof meta.params?.enableAudio === 'boolean') {
+    audioEl.checked = meta.params.enableAudio;
+    updateAudioToggleUI();
+  }
+
+  // ─── v209en metadata unification — apply per-family saved params ──────
+  // These write to LEGACY DOM IDs (UI unchanged).  Schema is optional —
+  // older meta records skip silently; newer ones fully restore UI state.
+  if (meta.params) _applyVideoMetaToLegacyUi(meta.params, meta.modelKey);
+  // ──────────────────────────────────────────────────────────────────────
 
   // Restore refs — supports both formats:
   //   v102+:    { assetId, mimeType, autoName, userLabel } → load from assets DB
@@ -1040,7 +1057,7 @@ async function reuseVideoJob(id) {
   const refsSource = fullRec?.usedVideoRefs || rec?.usedVideoRefs || [];
   if (refsSource.length) {
     videoRefs = [];
-    const m = VIDEO_MODELS[modelKey] || {};
+    const m = VIDEO_MODELS[meta.modelKey] || {};
     const max = m.maxRefs || 10;
     for (const snap of refsSource) {
       if (videoRefs.length >= max) break;
@@ -1085,10 +1102,6 @@ async function reuseVideoJob(id) {
     }
     renderVideoRefPanel();
     renderAssets?.();
-    // Apply Luma per-ref weight sliders after refs render (so sliders exist).
-    if (params.luma && Array.isArray(params.luma.refWeights)) {
-      setTimeout(() => _applyVpLumaRefWeights(params.luma.refWeights), 50);
-    }
     if (videoRefs.length) toast(`Setup loaded · ${videoRefs.length} ref(s) restored ✓`, 'ok');
     else toast('Video setup loaded ✓', 'ok');
   } else {
@@ -1608,204 +1621,116 @@ function initVideoRubberBand() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SESSION 2 · FÁZE 6 — loadVideoJobParamsToForm + shape detection / migration
+// v209en metadata unification — write saved per-family params back to the
+// original (legacy) UI IDs.  No visual panel changes — we simply populate
+// the already-visible per-model controls from the unified schema.
 // ═══════════════════════════════════════════════════════════════════════════
-
-// Detect pre-Fáze-5 params shape.  New shape always has `variantKey`.
-function _isOldVideoParamsShape(params) {
-  return !params || typeof params !== 'object' || !params.variantKey;
-}
-
-// Best-effort migration of old meta.params → new schema.
-function _migrateOldVideoParams(meta, modelKey) {
-  const m = VIDEO_MODELS[modelKey] || TOPAZ_MODELS[modelKey] || MAGNIFIC_VIDEO_MODELS[modelKey] || {};
-  const p = (meta && meta.params) || {};
-  return {
-    resolution:     p.resolution    || meta.resolution   || (m.resolutions && m.resolutions[0]) || '720p',
-    aspectRatio:    p.aspectRatio   || meta.aspectRatio  || (m.aspectRatios && m.aspectRatios[0]) || '16:9',
-    duration:       p.duration      || meta.duration     || m.defaultDur || 5,
-    cfgScale:       typeof p.cfgScale === 'number' ? p.cfgScale : (typeof meta.cfgScale === 'number' ? meta.cfgScale : 0.5),
-    seed:           p.seed !== undefined ? p.seed : (meta.seed !== undefined ? meta.seed : null),
-    enableAudio:    typeof p.enableAudio === 'boolean' ? p.enableAudio : (typeof meta.enableAudio === 'boolean' ? meta.enableAudio : true),
-    count:          1,
-    negativePrompt: p.negativePrompt || meta.negativePrompt || '',
-    modeValue:      p.mode || meta.veoRefMode || meta.grokMode || null,
-    variantKey:     modelKey,
-    sourceVideoId:  null,  // Source videos are session-local, not migrated
-    audioUrls:      (p.audioUrls && p.audioUrls.length) ? p.audioUrls : ((meta.sd2Snap && meta.sd2Snap.audioUrls) || []),
-    topaz:    p.topaz    || null,
-    magnific: p.magnific || null,
-    pixverse: p.pixverse || (meta.pixverseSnap ? {
-      quality:    meta.pixverseSnap.quality    || '720p',
-      cameraMove: meta.pixverseSnap.cameraMove || '',
-      multiClip:  !!meta.pixverseSnap.multiClip,
-      offPeak:    !!meta.pixverseSnap.offPeak,
-    } : null),
-    luma:     p.luma || (meta.lumaLoop !== undefined || meta.lumaColorMode ? {
-      loop:       !!meta.lumaLoop,
-      colorMode:  meta.lumaColorMode || 'sdr',
-      refWeights: [],
-    } : null),
-    wan:      p.wan || null,
-    grok:     p.grok || (meta.grokVideoSnap ? { mode: meta.grokVideoSnap.mode || 't2v' } : null),
-    veo:      p.veo  || (meta.veoRefMode ? { refMode: meta.veoRefMode } : null),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
-// Write unified params → vpXxx DOM IDs.  Inverse of buildVideoParams.
-// ─────────────────────────────────────────────────────────────
-function loadVideoJobParamsToForm(params, modelKey) {
+function _applyVideoMetaToLegacyUi(params, modelKey) {
   if (!params) return;
-  const ui = getVideoUi(modelKey);
+  const model = VIDEO_MODELS[modelKey];
+  if (!model) return;
 
-  // Prompt (goes through the redirect to vpPrompt).
-  if (typeof params.prompt === 'string') {
-    const legacyPrompt = document.getElementById('videoPrompt');
-    if (legacyPrompt) legacyPrompt.value = params.prompt;
-    const vpPrompt = document.getElementById('vpPrompt');
-    if (vpPrompt) vpPrompt.value = params.prompt;
+  // Negative prompt — common field, routed per model (pixverse / wan27 use different IDs).
+  if (typeof params.negativePrompt === 'string') {
+    if (model.type === 'wan27_video') _setValue('wan27vNegPrompt', params.negativePrompt);
+    if (model.type === 'pixverse_video') _setValue('pixverseNegPrompt', params.negativePrompt);
   }
 
-  // Core
-  _vpSetValue('vpResolution', params.resolution);
-  _vpSetValue('vpAspect',     params.aspectRatio);
-  _vpSetValue('vpCfg',        params.cfgScale);
-  _vpSetValue('vpSeed',       (params.seed !== null && params.seed !== undefined) ? String(params.seed) : '');
-  _vpSetChecked('vpAudio',    params.enableAudio);
-  _vpSetValue('vpCount',      params.count);
-  _vpSetValue('vpNegPrompt',  params.negativePrompt);
-  // CFG display update
-  const cfgVal = document.getElementById('vpCfgVal');
-  if (cfgVal && typeof params.cfgScale === 'number') cfgVal.textContent = params.cfgScale.toFixed(2);
-  // Count display update
-  const cntVal = document.getElementById('vpCountVal');
-  if (cntVal && params.count) cntVal.textContent = String(params.count);
-
-  // Duration — sync across slider/select/radio
-  if (typeof params.duration === 'number') {
-    const durSlider = document.getElementById('vpDuration');
-    if (durSlider) durSlider.value = params.duration;
-    const durValEl = document.getElementById('vpDurationVal');
-    if (durValEl) durValEl.textContent = params.duration + 's';
-    const durSel = document.getElementById('vpDurationSelect');
-    if (durSel) durSel.value = params.duration;
-    const durRadio = document.querySelector(`input[name="vpDurationRadio"][value="${params.duration}"]`);
-    if (durRadio) durRadio.checked = true;
+  // Veo
+  if (params.veo && model.type === 'veo') {
+    _setValue('veoRefMode',   params.veo.refMode);
+    _setValue('veoResolution', params.veo.resolution);
+    if (typeof onVeoRefModeChange === 'function') onVeoRefModeChange(params.veo.refMode);
+    if (typeof onVeoResolutionChange === 'function') onVeoResolutionChange();
   }
 
-  // Mode sub-select (Kling version / Veo refMode / Grok mode / Pixverse mode)
-  if (params.modeValue) {
-    const modeSel = document.getElementById('vpModeSelect');
-    if (modeSel) modeSel.value = params.modeValue;
+  // Luma
+  if (params.luma && model.type === 'luma_video') {
+    _setValue('lumaResolution', params.luma.resolution);
+    _setChecked('lumaLoop',     params.luma.loop);
+    _setValue('lumaColorMode',  params.luma.colorMode);
   }
 
-  // Negative prompt status indicator
-  if (params.negativePrompt) {
-    const body = document.getElementById('vpNegPromptBody');
-    const caret = document.getElementById('vpNegPromptCaret');
-    const status = document.getElementById('vpNegPromptStatus');
-    if (body && caret) { body.style.display = ''; caret.textContent = '▾'; }
-    if (status) status.style.display = 'none';
+  // WAN 2.7 (T2V / I2V / R2V)
+  if (params.wan27v && model.type === 'wan27_video') {
+    const s = params.wan27v;
+    _setValue('wan27vResolution', s.resolution);
+    _setValue('wan27vDuration',   s.duration);
+    _setValue('wan27vNegPrompt',  s.negPrompt);
+    _setChecked('wan27vPromptExpand', s.promptExpand !== false);
+    _setChecked('wan27vSafety',    s.safety !== false);
+    _setValue('wan27vSeed',        s.seed);
+    _setValue('wan27vAudioUrl',    s.audioUrl);
   }
 
-  // Per-family advanced
-  if (params.topaz)    _applyVpTopazParams(params.topaz);
-  if (params.magnific) _applyVpMagnificParams(params.magnific);
-  if (params.pixverse) _applyVpPixverseParams(params.pixverse);
-  if (params.luma)     _applyVpLumaParams(params.luma);
-  if (params.wan)      _vpSetChecked('vpMultiShots', params.wan.multiShots);
-
-  // Source audio URLs (Seedance 2.0)
-  if (Array.isArray(params.audioUrls)) {
-    _vpSetValue('vpSourceAudio1', params.audioUrls[0] || '');
-    _vpSetValue('vpSourceAudio2', params.audioUrls[1] || '');
-    _vpSetValue('vpSourceAudio3', params.audioUrls[2] || '');
+  // WAN 2.7 Video Edit
+  if (params.wan27e && model.type === 'wan27e_video') {
+    const s = params.wan27e;
+    _setValue('wan27eResolution', s.resolution);
+    _setValue('wan27eDuration',   s.duration);
+    _setValue('wan27eAspect',     s.aspectRatio);
+    _setValue('wan27eAudio',      s.audioSetting);
+    _setChecked('wan27eSafety',    s.safety !== false);
+    _setValue('wan27eSeed',        s.seed);
   }
 
-  // Update derived displays
-  if (typeof updateVpResInfo === 'function') updateVpResInfo();
+  // Seedance 2.0
+  if (params.seedance2 && model.type === 'seedance2_video') {
+    const s = params.seedance2;
+    _setValue('sd2Duration',    s.duration);
+    _setChecked('sd2DurAuto',   s.autoDuration);
+    _setValue('sd2Seed',        s.seed);
+    // Resolution radios (sd2Res: 480p / 720p / 1080p)
+    if (s.resolution) {
+      const r = document.querySelector(`input[name="sd2Res"][value="${s.resolution}"]`);
+      if (r) r.checked = true;
+    }
+    // Audio URLs (up to 3)
+    if (Array.isArray(s.audioUrls)) {
+      _setValue('sd2AudioUrl1', s.audioUrls[0] || '');
+      _setValue('sd2AudioUrl2', s.audioUrls[1] || '');
+      _setValue('sd2AudioUrl3', s.audioUrls[2] || '');
+    }
+    // Duration label sync
+    const durLabelEl = document.getElementById('sd2DurLabel');
+    if (durLabelEl && s.duration) durLabelEl.textContent = s.duration + 's';
+  }
+
+  // PixVerse
+  if (params.pixverse && model.type === 'pixverse_video') {
+    const s = params.pixverse;
+    _setValue('pixverseQuality',     s.quality);
+    _setValue('pixverseCameraMove',  s.cameraMove);
+    _setChecked('pixverseMultiClip', s.multiClip);
+    _setChecked('pixverseOffPeak',   s.offPeak);
+  }
+
+  // Grok Video
+  if (params.grok && model.type === 'grok_video') {
+    const s = params.grok;
+    _setValue('grokVideoMode',  s.mode);
+    _setValue('grokVideoDur',   s.duration);
+    if (s.resolution) {
+      const r = document.querySelector(`input[name="grokVideoRes"][value="${s.resolution}"]`);
+      if (r) r.checked = true;
+    }
+    if (typeof onGrokVideoModeChange === 'function' && s.mode) onGrokVideoModeChange(s.mode);
+  }
+
+  // WAN 2.6
+  if (params.wan26 && model.type === 'wan_video') {
+    _setValue('wanResolution', params.wan26.resolution);
+  }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Helpers for loadVideoJobParamsToForm
-// ─────────────────────────────────────────────────────────────
-function _vpSetValue(id, val) {
+// Helpers (local to this section — do not collide with other modules)
+function _setValue(id, val) {
   if (val === undefined || val === null) return;
   const el = document.getElementById(id);
   if (el && 'value' in el) el.value = val;
 }
-function _vpSetChecked(id, val) {
+function _setChecked(id, val) {
   if (val === undefined || val === null) return;
   const el = document.getElementById(id);
   if (el && 'checked' in el) el.checked = !!val;
-}
-
-function _applyVpTopazParams(t) {
-  _vpSetValue('vpTopazResolution', t.resolution);
-  _vpSetValue('vpTopazFactor',     t.factor);
-  _vpSetValue('vpTopazFps',        t.fps);
-  _vpSetValue('vpTopazSlowmo',     t.slowmo);
-  _vpSetValue('vpTopazCreativity', t.creativity);
-}
-
-function _applyVpMagnificParams(m) {
-  _vpSetValue('vpMagnificResolution', m.resolution);
-  _vpSetChecked('vpMagnificFps',      m.fpsBoost);
-  _vpSetValue('vpMagnificSharpen',    m.sharpen);
-  _vpSetValue('vpMagnificGrain',      m.grain);
-  _vpSetValue('vpMagnificPrompt',     m.prompt);
-  _vpSetValue('vpMagnificCreativity', m.creativity);
-  _vpSetValue('vpMagnificStrength',   m.strength);
-  if (m.flavor) {
-    const r = document.querySelector(`input[name="vpMagnificFlavor"][value="${m.flavor}"]`);
-    if (r) r.checked = true;
-    // Visual highlight
-    ['vivid', 'natural'].forEach(v => {
-      const lbl = document.getElementById(`vpMagnificFlavor_${v}`);
-      if (lbl) {
-        lbl.style.borderColor = v === m.flavor ? 'var(--purple)' : 'var(--border)';
-        lbl.style.color       = v === m.flavor ? 'var(--purple)' : 'var(--dim)';
-      }
-    });
-  }
-  // Display value updates
-  const pairs = [
-    ['vpMagnificSharpen',    'vpMagnificSharpenVal'],
-    ['vpMagnificGrain',      'vpMagnificGrainVal'],
-    ['vpMagnificCreativity', 'vpMagnificCreativityVal'],
-    ['vpMagnificStrength',   'vpMagnificStrengthVal'],
-  ];
-  for (const [inputId, valId] of pairs) {
-    const el = document.getElementById(inputId);
-    const vv = document.getElementById(valId);
-    if (el && vv) vv.textContent = el.value;
-  }
-}
-
-function _applyVpPixverseParams(p) {
-  _vpSetValue('vpPixverseQuality', p.quality);
-  _vpSetValue('vpCameraMove',      p.cameraMove);
-  _vpSetChecked('vpMultiClip',     p.multiClip);
-  _vpSetChecked('vpOffPeak',       p.offPeak);
-}
-
-function _applyVpLumaParams(l) {
-  _vpSetChecked('vpLumaLoop',      l.loop);
-  _vpSetValue('vpLumaColorMode',   l.colorMode);
-  // Ref weights are applied after refs panel renders (see _applyVpLumaRefWeights).
-}
-
-// Apply Luma per-ref weight sliders after refs have been rendered.
-function _applyVpLumaRefWeights(weights) {
-  if (!Array.isArray(weights)) return;
-  weights.forEach((w, i) => {
-    const el = document.getElementById(`vpRefWeight${i}`);
-    if (el) {
-      const nw = typeof w === 'number' ? w : 0.85;
-      el.value = nw;
-      const valEl = document.getElementById(`vpRefWeight${i}Val`);
-      if (valEl) valEl.textContent = nw.toFixed(2);
-    }
-  });
 }
