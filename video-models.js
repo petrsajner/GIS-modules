@@ -585,7 +585,7 @@ const VIDEO_MODELS = {
     refMode: 'none', maxRefs: 0, maxDur: 15, hasAudio: false,
     durOptions: [5, 10, 15],
     desc: 'T2V · Multi-shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
-    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
+    spendKey: () => getUnifiedResolution() === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
   wan26_t2v_single: {
     name: 'Wan 2.6', type: 'wan_video',
@@ -594,7 +594,7 @@ const VIDEO_MODELS = {
     multiShots: false,
     durOptions: [5, 10, 15],
     desc: 'T2V · Single shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
-    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
+    spendKey: () => getUnifiedResolution() === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
   wan26_i2v: {
     name: 'Wan 2.6', type: 'wan_video',
@@ -604,7 +604,7 @@ const VIDEO_MODELS = {
     durOptions: [5, 10, 15],
     refLabel: 'Start frame',
     desc: 'I2V · Start frame · Multi-shot · Audio always on · Up to 15s · $0.10/s (720p) · Alibaba',
-    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
+    spendKey: () => getUnifiedResolution() === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
 
   // ── Wan 2.6 R2V Flash — character consistency via image refs ─
@@ -620,7 +620,7 @@ const VIDEO_MODELS = {
     durOptions: [5, 10],
     refLabel: 'Character refs (image or video)',
     desc: 'R2V Flash · Character consistency · 1-5 refs · Up to 10s · $0.05/s · Alibaba',
-    spendKey: () => document.getElementById('wanResolution')?.value === '1080p' ? '_wan26_1080p' : '_wan26_720p',
+    spendKey: () => getUnifiedResolution() === '1080p' ? '_wan26_1080p' : '_wan26_720p',
   },
   // ── PixVerse C1 — via proxy (async submit → poll → download) ──
   // Camera movements: disabled for C1 (v4/v4.5 only)
@@ -714,6 +714,137 @@ const VIDEO_MODELS = {
     grokVideoModes: ['t2v', 'i2v', 'ref2v', 'edit', 'extend'],
     xaiKey: true,
   },
+};
+
+// ── Per-family info text (shown below model description, above parameters) ──
+// v220en: info text was previously hardcoded inside each per-family psec
+// container (e.g. "C1 · 1–15s · 1080p..." inside pixverseParams).  That made
+// it sit UNDER "PARAMETERS" where it didn't belong — this is metadata about
+// the model itself, not a parameter.  Now it's data, rendered in #videoModelInfo
+// directly below #videoModelDesc.  Only families with useful capability info
+// have entries; others leave the info line hidden.
+const VIDEO_MODEL_FAMILY_INFO = {
+  'pixverse_video':  'PixVerse C1 · 1–15s · up to 1080p · Native audio · 20+ camera moves · from $0.05/s',
+  'seedance2_video': 'Seedance 2.0 · 4–15s · 480p/720p/1080p · Native audio · $0.30/s std · $0.24/s fast · ByteDance',
+};
+
+// ── Per-family prompt placeholder ──────────────────────────
+// v220en: Seedance had a "Dialogue / Multi-shot" hint box inside seedance2Params
+// and a longer "Multi-shot & Camera Control" guide at the bottom.  Both were
+// reference-type info that belongs in the empty prompt (same spirit as the
+// default "Describe the scene, camera movement, lighting…" placeholder that
+// vanishes when the user starts typing).  Now it's data; placeholder is swapped
+// per-model in _applyVideoModel.  Fallback is the default placeholder defined
+// in template.html.
+const VIDEO_DEFAULT_PROMPT_PLACEHOLDER = 'Describe the scene, camera movement, lighting…';
+const VIDEO_MODEL_PROMPT_PLACEHOLDER = {
+  'seedance2_video':
+    'Describe the scene, camera movement, lighting…\n\n' +
+    '💡 Dialogue: wrap spoken lines in "double quotes" for lip-synced audio\n' +
+    '💡 Multi-shot: Shot 1: … Shot 2: … (or [lens switch]) for camera cuts\n' +
+    '💡 Timeline: [0-3s] wide shot… [4-7s] close-up…\n' +
+    '💡 Camera: dolly zoom, tracking shot, Dutch angle, crane up, worm\'s eye',
+};
+
+// ── Per-family duration slider config (v221en) ─────────────
+// Unified Duration slider (`videoDurRow`) reads config from this map by
+// model.type and sets min/max/step/default, optional snap-to-allowed
+// (for Grok's discrete [3,5,8,10,12,15]), and shows/hides Auto
+// (Seedance 2.0) or Match-source (WAN 2.7e) checkboxes.
+//
+// Legacy per-family inputs (#lumaDuration radios, #wan27vDuration select,
+// #wan27eDuration select with "Auto (match source)", #sd2Duration range
+// with Auto checkbox, #grokVideoDur select) are kept hidden in the DOM
+// so existing generate/reuse code reading them keeps working.  The
+// unified slider mirrors its value into the active legacy input on every
+// change; _applyVideoModel mirrors legacy value → unified slider on model
+// switch (so "Reuse job" continues to work).
+// ── Per-family resolution config (v223en) ──────────────────
+// Unified Resolution switcher (`unifiedResRow`) reads config from this map
+// by model.type.  Each entry declares:
+//   legacyId    : ID of the hidden <select>/<input> that actual generate/reuse
+//                 code reads.  Click on a segmented button mirrors value here
+//                 and dispatches 'change' so existing onchange handlers fire.
+//   resolutions : array of option values (for static models).  For models
+//                 where resolutions depend on variant (e.g. PixVerse qualityOptions,
+//                 Seedance 2.0 Fast tier has no 1080p), configureResolutionSwitcher
+//                 reads from the active model's own field.
+//   labels      : optional {value: "short label"} overrides for button text
+//                 (default is just the raw value like "720p" or "4K").
+//
+// v225en: Legacy per-family Resolution <select> elements removed from DOM.
+// Unified `#unifiedResButtons` is the single source of truth; generate/reuse
+// read/write via getUnifiedResolution/setUnifiedResolution helpers.
+const RESOLUTION_CONFIG_BY_TYPE = {
+  'veo': {
+    resolutions: ['720p', '1080p', '4k'],
+    labels:      { '720p': '720p', '1080p': '1080p', '4k': '4K' },
+  },
+  'luma_video': {
+    resolutions: ['540p', '720p', '1080p', '4k'],
+    labels:      { '540p': '540p', '720p': '720p', '1080p': '1080p', '4k': '4K' },
+  },
+  'wan_video': {
+    resolutions: ['720p', '1080p'],
+  },
+  'wan27_video': {
+    resolutions: ['720p', '1080p'],
+  },
+  'wan27e_video': {
+    resolutions: ['720p', '1080p'],
+  },
+  'pixverse_video': {
+    // resolutions read from m.qualityOptions at configure time
+    resolutions: null,
+    labels:      { '360p': '360p', '540p': '540p', '720p': '720p', '1080p': '1080p' },
+  },
+  'seedance2_video': {
+    // resolutions read from m.resolutions at configure time (Fast tier has no 1080p)
+    resolutions: null,
+  },
+  'grok_video': {
+    resolutions: ['480p', '720p'],
+  },
+  // kling_video / vidu_video / seedance_video: no user-chosen Resolution
+  // (fixed per-variant).  Info line shown only ("720p · T2V · Kling Pro").
+};
+
+// Resolution → base height map (for computing WIDTH×HEIGHT info).
+const _RESOLUTION_HEIGHTS = {
+  '240p': 240, '360p': 360, '480p': 480, '540p': 540,
+  '720p': 720, '1080p': 1080, '4k': 2160, '2k': 1440,
+};
+
+// Aspect ratio → [width, height] unit pair for WxH computation.
+const _ASPECT_RATIOS = {
+  '16:9': [16, 9], '9:16': [9, 16],
+  '4:3':  [4, 3],  '3:4':  [3, 4],
+  '1:1':  [1, 1],
+  '21:9': [21, 9], '9:21': [9, 21],
+  '3:2':  [3, 2],  '2:3':  [2, 3],
+  '5:4':  [5, 4],  '4:5':  [4, 5],
+};
+
+function computeVideoDimensions(resolution, aspectRatio) {
+  const h = _RESOLUTION_HEIGHTS[resolution] || parseInt(resolution) || 720;
+  const [aw, ah] = _ASPECT_RATIOS[aspectRatio] || [16, 9];
+  // Width = height * (aw/ah), rounded to a multiple of 8 (typical API constraint).
+  const w = Math.round((h * aw / ah) / 8) * 8;
+  return { width: w, height: h };
+}
+
+const DURATION_CONFIG_BY_TYPE = {
+  'kling_video':     { min: 3,  max: 15, step: 1, default: 5 },
+  'veo':             { min: 4,  max: 8,  step: 1, default: 8 },
+  'luma_video':      { min: 5,  max: 10, step: 5, default: 5 },
+  'wan_video':       { min: 5,  max: 10, step: 5, default: 5 },
+  'wan27_video':     { min: 2,  max: 15, step: 1, default: 5 },
+  'wan27e_video':    { min: 2,  max: 10, step: 1, default: 5, matchSource: true },
+  'pixverse_video':  { min: 1,  max: 15, step: 1, default: 8 },
+  'seedance_video':  { min: 5,  max: 10, step: 5, default: 5 },
+  'seedance2_video': { min: 4,  max: 15, step: 1, default: 5, autoCheckbox: true },
+  'grok_video':      { min: 3,  max: 15, step: 1, default: 8, allowed: [3, 5, 8, 10, 12, 15] },
+  'vidu_video':      { min: 4,  max: 8,  step: 4, default: 4 },
 };
 
 // ── Kling model groups (main key → variants list) ────────
@@ -1315,10 +1446,10 @@ function _applyVideoModel(key) {
     _setRow('topazSlowmoRow',    true);
     _setRow('topazCreativityRow',!!tm.hasCreativity);
     // Hide incompatible rows
-    _setRow('videoResInfoRow',   false);
     _setRow('veoResRow',         false);
     _setRow('lumaResRow',        false);
     _setRow('wanResRow',         false);
+    _setRow('unifiedResRow',     false);  // v223en: Topaz uses own topazResRow
     _setRow('wan27vParams',      false);
     _setRow('pixverseParams',    false);
     _setRow('videoAspectRow',    false);
@@ -1375,10 +1506,10 @@ function _applyVideoModel(key) {
     _setRow('topazFpsRow',        false);
     _setRow('topazSlowmoRow',     false);
     _setRow('topazCreativityRow', false);
-    _setRow('videoResInfoRow',    false);
     _setRow('veoResRow',          false);
     _setRow('lumaResRow',         false);
     _setRow('wanResRow',          false);
+    _setRow('unifiedResRow',      false);  // v223en: Magnific uses magnificVidOpts
     _setRow('wan27vParams',       false);
     _setRow('pixverseParams',    false);
     _setRow('videoAspectRow',     false);
@@ -1434,15 +1565,31 @@ function _applyVideoModel(key) {
   if (!m) return;
   document.getElementById('videoModelDesc').textContent = m.desc;
 
-  // Resolution info
-  const resEl = document.getElementById('videoResInfo');
-  const resInfoRow = document.getElementById('videoResInfoRow');
-  const hasResSwitcher = m.type === 'veo' || m.type === 'luma_video' || m.type === 'wan_video';
-  if (resInfoRow) resInfoRow.style.display = hasResSwitcher ? 'none' : '';
-  if (resEl && !hasResSwitcher) {
-    const isPro = key.includes('_pro');
-    resEl.textContent = isPro ? '1080p · ' + (m.refMode === 'none' ? 'T2V' : 'I2V') : '720p · ' + (m.refMode === 'none' ? 'T2V' : 'I2V');
+  // v220en: Family info line below videoModelDesc (was hardcoded inside
+  // per-family psec containers).  Shown only when the family has an entry.
+  const infoEl = document.getElementById('videoModelInfo');
+  if (infoEl) {
+    const info = VIDEO_MODEL_FAMILY_INFO[m.type];
+    infoEl.textContent = info || '';
+    infoEl.style.display = info ? '' : 'none';
   }
+
+  // v220en: Per-family prompt placeholder (was hardcoded hint boxes inside
+  // seedance2Params).  Uses default when family has no entry.
+  const promptEl = document.getElementById('vpPrompt');
+  if (promptEl) {
+    promptEl.placeholder = VIDEO_MODEL_PROMPT_PLACEHOLDER[m.type] || VIDEO_DEFAULT_PROMPT_PLACEHOLDER;
+  }
+
+  // v221en: Configure unified Duration slider per model type.
+  configureDurationSlider(m);
+
+  // v223en: Unified Resolution switcher configured at END of this function
+  // (after all per-model tweaks like Seedance Fast-tier 1080p snap-back).
+  // See call after _vpApplyUnifiedLayer below.
+
+  // v225en: videoResInfoRow + videoResInfo span removed from DOM.  Unified
+  // switcher's info label ("1280×720 · 16:9") is the single Resolution display.
 
   // Ref panel — show/hide and configure based on refMode
   const refSec = document.getElementById('videoRefSection');
@@ -1495,67 +1642,22 @@ function _applyVideoModel(key) {
   }
   updateAudioToggleUI();
 
-  // Duration — slider for continuous, radio buttons for fixed options (older models)
-  const durSlider = document.getElementById('videoDuration');
-  const durRadioRow = document.getElementById('videoDurRadioRow');
-  if (m.durOptions) {
-    // Fixed options (e.g. 5s / 10s) — show radios, hide slider
-    const sliderRow = document.getElementById('videoDurSliderRow');
-    if (sliderRow) sliderRow.style.display = 'none';
-    if (durRadioRow) {
-      durRadioRow.style.display = '';
-      durRadioRow.innerHTML = m.durOptions.map(d =>
-        `<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:10px;font-size:11px;color:var(--dim);">
-          <input type="radio" name="videoDurFixed" value="${d}" ${d === (m.defaultDur !== undefined ? m.defaultDur : m.durOptions[0]) ? 'checked' : ''} onchange="document.getElementById('videoDuration').value=this.value;document.getElementById('videoDurVal').textContent=this.value+'s'">
-          ${d}s
-        </label>`
-      ).join('');
-      // Sync slider value to first option
-      const defDur = m.defaultDur !== undefined ? m.defaultDur : m.durOptions[0];
-      if (durSlider) { durSlider.value = defDur; durSlider.max = m.maxDur; }
-      const durValEl = document.getElementById('videoDurVal');
-      if (durValEl) durValEl.textContent = defDur + 's';
-    }
-  } else {
-    // Continuous slider
-    const sliderRow = document.getElementById('videoDurSliderRow');
-    if (sliderRow) sliderRow.style.display = '';
-    if (durRadioRow) durRadioRow.style.display = 'none';
-    if (durSlider) {
-      durSlider.max = m.maxDur;
-      if (parseInt(durSlider.value) > m.maxDur) {
-        durSlider.value = m.maxDur;
-        const durValEl = document.getElementById('videoDurVal');
-        if (durValEl) durValEl.textContent = m.maxDur + 's';
-      }
-    }
-  }
-  const durNote = document.getElementById('videoDurNote');
-  if (durNote) durNote.textContent = m.durOptions ? `Fixed: ${m.durOptions.join('s / ')}s` : (m.maxDur < 15 ? `Max ${m.maxDur}s` : '');
+  // v221en: Duration is now configured by configureDurationSlider(m.type) earlier
+  // in this function (unified slider in videoDurRow).  Legacy radio/slider
+  // switching logic based on m.durOptions / m.maxDur removed; those fields
+  // are now consumed by configureDurationSlider as per-model overrides.
 
   // Aspect ratio: hide for I2V single (inferred from image) — but show for Veo and Luma (T2V/I2V toggle)
   const arRow = document.getElementById('videoAspectRow');
   if (arRow) arRow.style.display = (m.refMode === 'single' || m.refMode === 'single_end') && m.type !== 'veo' && m.type !== 'luma_video' ? 'none' : '';
 
-  // Veo resolution selector — show only for Veo models, rebuild options per model
-  const veoResRow = document.getElementById('veoResRow');
-  const veoResSel = document.getElementById('veoResolution');
-  if (veoResRow) veoResRow.style.display = m.type === 'veo' ? '' : 'none';
-  if (veoResSel && m.type === 'veo') {
-    const resLabels = {
-      '720p':  '720p — HD Standard',
-      '1080p': '1080p — Full HD',
-      '4k':    '4K — Ultra HD  ·  $$',
-    };
-    const curRes = veoResSel.value;
-    veoResSel.innerHTML = (m.resolutions || ['720p', '1080p']).map(r =>
-      `<option value="${r}">${resLabels[r] || r}</option>`
-    ).join('');
-    // Restore previous selection if still valid, else default to 1080p
-    if (m.resolutions?.includes(curRes)) veoResSel.value = curRes;
-    else veoResSel.value = '1080p';
-    // Sync duration radio states for current resolution (enables/disables 4s/6s)
-    onVeoResolutionChange();
+  // v225en: Veo legacy veoResolution select removed from DOM — unified
+  // Resolution switcher renders buttons from m.resolutions directly.
+  // onVeoResolutionChange side effects (force 8s for 1080p/4K) now fire
+  // from _onUnifiedResClick via _applyResolutionSideEffects.
+  if (m.type === 'veo') {
+    // Trigger side-effects for initial resolution state on model switch.
+    if (typeof onVeoResolutionChange === 'function') onVeoResolutionChange();
   }
 
   // Veo ref mode selector
@@ -1572,12 +1674,12 @@ function _applyVideoModel(key) {
     onGrokVideoModeChange(document.getElementById('grokVideoMode')?.value || 't2v');
   }
 
-  // Luma Ray3 controls — show/hide panel + configure
-  // Ray2/Ray2-Flash: only resolution selector, no special panel
-  // Ray3+: full controls (loop, colorMode, charRef)
-  const isLumaRay3 = m.type === 'luma_video' && (m.modelId?.includes('ray-3') || m.modelId?.includes('ray-hdr'));
-  const lumaPanel = document.getElementById('lumaVideoParams');
-  if (lumaPanel) lumaPanel.style.display = isLumaRay3 ? '' : 'none';
+  // Luma controls — v224en: Loop + Color mode + CharRef are now managed
+  //   by block 2i (_vpApplyUnifiedLayer) via supportsLoop/supportsHdr/
+  //   supportsCharRef flags.  The legacy lumaVideoParams panel is hidden
+  //   always (extracted elements moved to bottom toggles / source slots).
+  // v225en: lumaResolution legacy select removed from DOM — unified
+  //   Resolution switcher renders buttons from m.resolutions directly.
   if (m.type === 'luma_video') {
     // Show ref panel for keyframes
     const refSec = document.getElementById('videoRefSection');
@@ -1586,44 +1688,23 @@ function _applyVideoModel(key) {
     if (refSec) refSec.style.display = 'block';
     if (refLabel) refLabel.childNodes[0].textContent = 'Keyframes (optional)';
     if (refCount) refCount.textContent = `${videoRefs.length} / 2`;
-    // Rebuild resolution select
-    const lumaResSel = document.getElementById('lumaResolution');
-    if (lumaResSel) {
-      const lumaResLabels = { '540p': '540p', '720p': '720p', '1080p': '1080p — native', '4k': '4K — upscaled' };
-      lumaResSel.innerHTML = (m.resolutions || ['720p', '1080p']).map(r =>
-        `<option value="${r}"${r === '1080p' ? ' selected' : ''}>${lumaResLabels[r] || r}</option>`
-      ).join('');
-    }
-    // Show resolution row (always for luma)
-    const lumaResRow = document.getElementById('lumaResRow');
-    if (lumaResRow) lumaResRow.style.display = '';
-    if (isLumaRay3) {
-      // HDR row + char ref
-      const hdrRow = document.getElementById('lumaHdrRow');
-      if (hdrRow) hdrRow.style.display = m.supportsHdr ? '' : 'none';
-      const charRow = document.getElementById('lumaCharRefRow');
-      if (charRow) charRow.style.display = m.supportsCharRef ? '' : 'none';
-    }
     renderVideoRefPanel();
-  } else {
-    const lumaResRow = document.getElementById('lumaResRow');
-    if (lumaResRow) lumaResRow.style.display = 'none';
   }
-
-  // WAN resolution row — shown for all wan_video models
-  const wanResRow = document.getElementById('wanResRow');
-  if (wanResRow) wanResRow.style.display = m.type === 'wan_video' ? '' : 'none';
 
   const wan27vParams = document.getElementById('wan27vParams');
   if (wan27vParams) wan27vParams.style.display = m.type === 'wan27_video' ? '' : 'none';
   // Extend video row: only I2V (single_end refMode)
   const wan27vExtendRow = document.getElementById('wan27vExtendRow');
   if (wan27vExtendRow) wan27vExtendRow.style.display = (m.type === 'wan27_video' && m.refMode === 'single_end') ? '' : 'none';
+  // v222en: Audio URL row — visible for all wan27_video modes.  Now sits
+  // in the source slot under refs (extracted from wan27vParams).
+  const wan27vAudioUrlRow = document.getElementById('wan27vAudioUrlRow');
+  if (wan27vAudioUrlRow) wan27vAudioUrlRow.style.display = m.type === 'wan27_video' ? '' : 'none';
 
   // wan27_video has own params panel → hide generic duplicate rows
+  // v222en: videoDurRow removed from hide list — unified Duration slider
+  // is now the single Duration UI for wan27_video too.
   if (m.type === 'wan27_video') {
-    _setRow('videoResInfoRow', false);
-    _setRow('videoDurRow',     false);
     _setRow('videoCfgRow',     false);
     _setRow('videoCountRow',   false);
   }
@@ -1633,54 +1714,39 @@ function _applyVideoModel(key) {
   const isWan27e = m.type === 'wan27e_video';
   if (wan27eSrcRow) wan27eSrcRow.style.display = isWan27e ? '' : 'none';
   if (wan27eParams) wan27eParams.style.display  = isWan27e ? '' : 'none';
+  // v222en: videoDurRow removed from hide list (same reason as wan27_video).
   if (isWan27e) {
-    _setRow('videoResInfoRow', false);
-    _setRow('videoDurRow',     false);
     _setRow('videoCfgRow',     false);
     _setRow('videoCountRow',   false);
   }
 
-  // PixVerse params panel
-  const pixverseParams = document.getElementById('pixverseParams');
+  // PixVerse — v225en: pixverseParams shell removed from template.html.
+  //   All .ctrl children (MultiClip/OffPeak/Seed) are extracted to their
+  //   unified slots.  No shell to hide.
   const isPixverse = m.type === 'pixverse_video';
-  if (pixverseParams) pixverseParams.style.display = isPixverse ? '' : 'none';
   if (isPixverse) {
     _setRow('videoCfgRow',     false);
-    // Rebuild quality select
-    const qSel = document.getElementById('pixverseQuality');
-    if (qSel && m.qualityOptions) {
-      qSel.innerHTML = m.qualityOptions.map(q =>
-        `<option value="${q}"${q === '720p' ? ' selected' : ''}>${q}</option>`
-      ).join('');
-    }
-    // Show/hide multi-clip checkbox (only for models that support it)
-    const mcRow = document.getElementById('pixverseMultiClip')?.closest('.ctrl');
-    if (mcRow) mcRow.style.display = m.supportsMultiClip ? '' : 'none';
   }
 
-  // Seedance 2.0 params panel
-  const sd2Params = document.getElementById('seedance2Params');
+  // Seedance 2.0 — v225en: seedance2Params shell removed from template.html.
+  //   sd2R2VSection (R2V panel) extracted to source slot area pod videoRefSection.
+  //   Other controls (Seed) extracted to unified Seed slot.
   const isSd2 = m.type === 'seedance2_video';
-  if (sd2Params) sd2Params.style.display = isSd2 ? '' : 'none';
+
+  // v224.1: sd2R2VSection visibility MUST be managed unconditionally
+  //   (outside isSd2 branch) — otherwise when user switches from Seedance
+  //   R2V (visible) to another model (e.g. WAN 2.6), isSd2 is false so
+  //   the branch is skipped, and the section stays visible bleeding into
+  //   unrelated models' UI.  Move to top-level per-model check.
+  const isR2V = isSd2 && m.refMode === 'seedance2_r2v';
+  const sd2R2VSection = document.getElementById('sd2R2VSection');
+  if (sd2R2VSection) sd2R2VSection.style.display = isR2V ? '' : 'none';
+
   if (isSd2) {
     _setRow('videoCfgRow',     false);
-    _setRow('videoDurRow',     false);
-    _setRow('videoResInfoRow', false);
     _setRow('videoCountRow',   false);
-    // R2V video/audio slots: only for seedance2_r2v refMode
-    const isR2V = m.refMode === 'seedance2_r2v';
-    const sd2R2VSection = document.getElementById('sd2R2VSection');
-    if (sd2R2VSection) sd2R2VSection.style.display = isR2V ? '' : 'none';
-    // 1080p resolution: only STANDARD endpoints (Fast tier has no 1080p on fal)
-    const has1080p = (m.resolutions || []).includes('1080p');
-    const sd2Res1080Wrap = document.getElementById('sd2Res1080Wrap');
-    if (sd2Res1080Wrap) sd2Res1080Wrap.style.display = has1080p ? '' : 'none';
-    // Fallback: when switching to Fast while 1080p was selected, snap to 720p
-    const curRes = document.querySelector('input[name="sd2Res"]:checked');
-    if (curRes?.value === '1080p' && !has1080p) {
-      const r720 = document.querySelector('input[name="sd2Res"][value="720p"]');
-      if (r720) r720.checked = true;
-    }
+    // v225en: Fast-tier 1080p snap-back handled by configureResolutionSwitcher
+    //   reading m.resolutions (Fast: ['480p','720p'], 1080p not rendered).
   }
 
   updateVideoResInfo();
@@ -1692,6 +1758,11 @@ function _applyVideoModel(key) {
   // Magnific model (those return early above).
   // ═════════════════════════════════════════════════════════
   _vpApplyUnifiedLayer(key, m);
+
+  // v223en: Configure unified Resolution switcher — called LAST so it
+  // reads the final post-tweak value from the legacy element (e.g. for
+  // Seedance Fast-tier where 1080p snaps back to 720p during above).
+  configureResolutionSwitcher(m);
 }
 
 // Install one-time redirect #videoPrompt.value → #vpPrompt.value so all
@@ -1717,49 +1788,27 @@ function _vpEnsurePromptRedirect() {
 }
 
 // Negative prompt: each family has its own legacy element (pixverseNegPrompt,
-// wan27vNegPrompt, wan27eNegPrompt).  vpNegPrompt is the single visible input;
-// we sync it to the active model's legacy field on model switch + mirror user
-// edits back to the legacy target so generateVideo continues reading from the
-// legacy IDs unchanged.
-let _vpNegPromptTargetId = null;
-let _vpNegPromptHooked   = false;
+// v225en: unified `vpNegPrompt` is the single authoritative input.  Legacy
+// per-family inputs (wan27vNegPrompt, pixverseNegPrompt) removed from DOM.
+// Generate path reads vpNegPrompt directly (_deriveNegPrompt in video-queue.js).
+let _vpNegPromptHooked = false;  // kept for backwards-compat symbol
 function _vpEnsureNegPromptRedirect() {
-  if (_vpNegPromptHooked) return;
-  const vpNeg = document.getElementById('vpNegPrompt');
-  if (!vpNeg) return;
-  vpNeg.addEventListener('input', () => {
-    if (!_vpNegPromptTargetId) return;
-    const tgt = document.getElementById(_vpNegPromptTargetId);
-    if (tgt) tgt.value = vpNeg.value;
-  });
-  _vpNegPromptHooked = true;
+  // No-op after v225en — vpNegPrompt is read directly, no mirror needed.
 }
 
-// Map model key/type → legacy neg prompt input ID.  Called in _vpApplyUnifiedLayer.
+// Show/hide vpNegPromptSection based on whether active model supports neg prompt.
 function _vpUpdateNegPromptTarget(key, model) {
-  const vpNeg    = document.getElementById('vpNegPrompt');
   const vpNegSec = document.getElementById('vpNegPromptSection');
-  if (!vpNeg || !vpNegSec) return;
-
-  // Resolve active model's legacy neg prompt element ID.
-  let targetId = null;
-  if (model.type === 'pixverse_video')     targetId = 'pixverseNegPrompt';
-  else if (model.type === 'wan27_video')   targetId = 'wan27vNegPrompt';
-  else if (model.type === 'wan27e_video')  targetId = 'wan27eNegPrompt';
-  // Kling/Vidu/Seedance/Veo/Grok/Luma/WAN 2.6 don't expose negative prompt to user.
-
-  _vpNegPromptTargetId = targetId;
-
-  if (!targetId) {
-    // Model doesn't support negative prompt — hide the section.
-    vpNegSec.style.display = 'none';
-    return;
+  if (!vpNegSec) return;
+  // Kling/Vidu/Seedance/Veo/Grok/Luma/WAN 2.6/2.7e don't expose negative prompt.
+  const supportsNeg = model.type === 'pixverse_video' || model.type === 'wan27_video';
+  vpNegSec.style.display = supportsNeg ? '' : 'none';
+  // Clear vpNegPrompt when switching to a model that doesn't support it — no
+  // accidental leak of previous model's neg prompt into generate payload.
+  if (!supportsNeg) {
+    const vpNeg = document.getElementById('vpNegPrompt');
+    if (vpNeg) vpNeg.value = '';
   }
-
-  // Copy current legacy value into vpNegPrompt (may be empty).
-  const legacyEl = document.getElementById(targetId);
-  vpNeg.value = (legacyEl && legacyEl.value) || '';
-  vpNegSec.style.display = '';
 }
 
 // Activate vpParams container with only prompt + mode-select visible;
@@ -1783,9 +1832,76 @@ function _vpApplyUnifiedLayer(key, model) {
   //     section based on whether the model supports neg prompt.
   _vpUpdateNegPromptTarget(key, model);
 
-  // 2c. Luma character ref — always hidden per spec ("charakter ref je
-  //     obycejna reference - ani to u lumy nemame zobrazene").
-  _setRow('lumaCharRefRow', false);
+  // v224en: Luma character ref visibility moved to block 2i (per-model
+  // supportsCharRef check).  Previously always hidden.
+
+  // 2d. Seed slot (v218en) — unified across models: only the active
+  //     model's seed row is shown.  Each model that supports seeds has
+  //     its own extracted <input> wrapper sitting in the Seed slot
+  //     (after videoDurRow).  Non-seed models (Kling, Veo, Luma, Grok,
+  //     Vidu, WAN26) show nothing in this slot.  This also fixes a
+  //     latent v217en issue where pixverseSeedRow stayed visible for
+  //     non-PixVerse models after its extraction.
+  const _seedRowByType = {
+    'pixverse_video':  'pixverseSeedRow',
+    'wan27_video':     'wan27vSeedRow',
+    'wan27e_video':    'wan27eSeedRow',
+    'seedance2_video': 'sd2SeedRow',
+  };
+  const _activeSeedRow = _seedRowByType[model.type] || null;
+  ['pixverseSeedRow', 'wan27vSeedRow', 'wan27eSeedRow', 'sd2SeedRow'].forEach(id => {
+    _setRow(id, id === _activeSeedRow);
+  });
+
+  // 2e. PixVerse extracts (v219en) — elements moved from pixverseParams
+  //     into unified slots.  Without per-model visibility, these stayed
+  //     visible for every model (e.g. "QUALITY: 720p" showing on Seedance
+  //     or Kling).  Now: shown only when PixVerse is the active model.
+  //     v223en: pixverseCameraRow removed — Camera Movement feature deleted.
+  //     v225en: pixverseQuality row removed from DOM — unified switcher
+  //     handles PixVerse resolution.
+  //     v224en: pixverseOffPeakRow visibility simplified — supportsOffPeak
+  //     was only on pixverse_video TYPE, not on individual variants (c1_*,
+  //     v6_*).  fal.ai's off-peak mode is available for all PixVerse
+  //     endpoints universally, so we show it whenever PixVerse is active.
+  const _isPixverse = model.type === 'pixverse_video';
+  _setRow('pixverseMultiClipRow', _isPixverse && !!model.supportsMultiClip);
+  _setRow('pixverseOffPeakRow',   _isPixverse);
+
+  // 2i. Luma extracts (v224en) — Loop + Color mode in bottom toggles,
+  //     Character reference in source slot area.  Per-model visibility:
+  //     Ray2/Ray2-Flash: Loop only (supportsLoop:true, rest false).
+  //     Ray3/Ray3.14:    CharRef only (supportsCharRef:true for Ray3).
+  //     Ray3 HDR:        Loop + HDR + CharRef (all true).
+  //     Ray3.14 HDR:     Loop + HDR.
+  const _isLuma = model.type === 'luma_video';
+  _setRow('lumaLoopRow',      _isLuma && !!model.supportsLoop);
+  _setRow('lumaColorModeRow', _isLuma && !!model.supportsHdr);
+  _setRow('lumaCharRefRow',   _isLuma && !!model.supportsCharRef);
+
+  // v225en: Resolution slot — unified #unifiedResButtons is the single UI
+  //   for all models.  All legacy Resolution rows removed from DOM.
+  //   configureResolutionSwitcher() below renders buttons from model data.
+
+  // 2g. Aspect slot (v220en) — WAN 2.7e has its own Aspect switcher
+  //     (Auto/16:9/9:16/1:1/4:3/3:4 with "auto = match source" option)
+  //     extracted to a slot next to the common Aspect row.  Only one
+  //     visible at a time.
+  const _isWan27e = model.type === 'wan27e_video';
+  _setRow('wan27eAspectRow', _isWan27e);
+  // Common Aspect slot (videoAspectRow) is managed elsewhere; when WAN 2.7e
+  // is active the common one should hide.  Add that coupling:
+  const _commonAspectRow = document.getElementById('videoAspectRow');
+  if (_commonAspectRow && _isWan27e) _commonAspectRow.style.display = 'none';
+
+  // 2h. Grok source video row (v221en) — extracted from grokVideoParams.
+  //     For non-Grok models it must be hidden (was previously hidden by
+  //     its parent grokVideoParams's display:none; now it's in source slot).
+  //     For Grok models, onGrokVideoModeChange() decides visibility based
+  //     on mode (edit/extend show it, t2v/i2v/ref2v hide it).
+  if (model.type !== 'grok_video') {
+    _setRow('grokVideoSrcRow', false);
+  }
 
   // 3. Hide the (still empty) vp* placeholder sections — legacy elements
   //    videoTagsRow / videoRefSection have been moved INTO vpParams by
@@ -1910,7 +2026,42 @@ function _vpEnsureDomMoves() {
 
     // STEP 3: Source slots after refs (source video, then source audio eventually).
     //         Reverse order because 'afterend' stacks in reverse.
-    const sourceSlots = ['videoV2VSection', 'wan27eSrcRow'];
+    //         v221en: grokVideoSrcRow added — was previously nested inside
+    //         grokVideoParams (mode-first block above prompt).
+    //         v222en: wan27vExtendRow (video source for WAN 2.7 I2V extend) +
+    //         wan27vAudioUrlRow (audio URL for WAN 2.7 T2V/I2V) added.
+    //         Video sources always appear ABOVE audio sources (Petr's spec:
+    //         "video vys nez audio").  Reverse ordering: audio first (lowest),
+    //         then video (above), then the anchor at top.
+    // Pre-step: wrap wan27vAudioUrl's .ctrl with id 'wan27vAudioUrlRow' so
+    // we can move/address it consistently with other source slots.
+    const wan27vAudioUrlEl = document.getElementById('wan27vAudioUrl');
+    if (wan27vAudioUrlEl) {
+      const wrap = wan27vAudioUrlEl.closest('.ctrl');
+      if (wrap && !wrap.id) wrap.id = 'wan27vAudioUrlRow';
+    }
+    const sourceSlots = [
+      // Audio sources (placed last in loop → end up at BOTTOM of stack):
+      'wan27vAudioUrlRow',
+      // v224en: Luma Character reference — image source (Ray3 char_ref_b64
+      // payload field, separate from standard keyframe refs).  Placed
+      // between audio and video sources so it visually sits between
+      // videoRefSection and video sources.
+      'lumaCharRefRow',
+      // Video sources (placed first in loop → end up at TOP of stack,
+      // right after videoRefSec):
+      'grokVideoSrcRow',
+      'wan27vExtendRow',
+      'wan27eSrcRow',
+      'videoV2VSection',
+      // v224en: Seedance 2.0 R2V section (3 video refs + 3 audio URLs).
+      // Per Petr spec: "rozšířit videoRefSection: umí 9 image + 3 video +
+      // 3 audio — vše dohromady".  Placed LAST in array = closest to
+      // videoRefSec (insertAdjacentElement stacks in reverse).  So for
+      // seedance2_r2v: [ videoRefSec (9 imgs) → sd2R2VSection (3 vid + 3
+      // audio) → <video sources if any> → <audio sources if any> ].
+      'sd2R2VSection',
+    ];
     for (const id of sourceSlots) {
       const el = document.getElementById(id);
       if (el && videoRefSec && videoRefSec.parentNode === vpParams) {
@@ -1921,10 +2072,14 @@ function _vpEnsureDomMoves() {
     // STEP 4: "PARAMETERS" plabel — MOVE (not hide) from legacy psec into vpParams
     //         so it labels the core params section.  Per Petr: "napis parameters
     //         neskryt. Jen nama byt dole ale pod referencemi - nadepisuje oblast parametru"
-    const veoResRowEl = document.getElementById('veoResRow');
+    // v225en: veoResRow removed; use topazResRow as anchor (first .ctrl still in
+    //   the legacy Parameters psec after cleanup).
+    const anchorForParamsPsec = document.getElementById('topazResRow')
+                             || document.getElementById('topazFactorRow')
+                             || document.getElementById('topazFpsRow');
     let paramsPsec = null;
-    if (veoResRowEl) {
-      paramsPsec = veoResRowEl.closest('.psec');
+    if (anchorForParamsPsec) {
+      paramsPsec = anchorForParamsPsec.closest('.psec');
       if (paramsPsec && !paramsPsec.id) paramsPsec.id = 'videoParamsLegacy';
     }
     // Move the "Parameters" plabel to vpParams (right after source slots,
@@ -1933,8 +2088,12 @@ function _vpEnsureDomMoves() {
       const paramsLabel = paramsPsec.querySelector('.plabel');
       if (paramsLabel && paramsLabel.textContent.trim().toLowerCase().startsWith('parameters')) {
         // Find insertion point: after last source slot (or after refs if no sources).
-        const lastSource = document.getElementById('videoV2VSection')
+        // v222en: wan27vAudioUrlRow is now the bottom-most source slot (audio).
+        const lastSource = document.getElementById('wan27vAudioUrlRow')
+                       || document.getElementById('grokVideoSrcRow')
+                       || document.getElementById('wan27vExtendRow')
                        || document.getElementById('wan27eSrcRow')
+                       || document.getElementById('videoV2VSection')
                        || videoRefSec;
         if (lastSource) {
           lastSource.insertAdjacentElement('afterend', paramsLabel);
@@ -1943,18 +2102,16 @@ function _vpEnsureDomMoves() {
     }
 
     // STEP 5: Core params — appended in order after the PARAMETERS plabel.
-    //         Per-model resolution switchers all go here (only active one visible).
-    //         Seed is extracted from per-family panels in step 7.
+    //         v223.1: unifiedResRow added BEFORE videoAspectRow so the new
+    //         segmented-buttons Resolution sits above Aspect (Petr's spec:
+    //         "Resolution nad aspect ratio - u vsech modelu").
     const coreIds = [
-      'videoResInfoRow',  // static info (Kling/Seedance/Vidu)
-      'veoResRow',        // Veo switcher
-      'lumaResRow',       // Luma switcher
-      'wanResRow',        // WAN 2.6 switcher
-      // Extracted: pixverseQualityRow, wan27Resolution wrappers (step 7)
+      'unifiedResRow',    // v223.1: unified segmented-buttons Resolution switcher
       'videoAspectRow',
       'videoCfgRow',
       'videoDurRow',
       // Extracted: seed wrappers (step 7)
+      // v225en: legacy per-family Resolution rows removed from DOM entirely.
     ];
     for (const id of coreIds) {
       const el = document.getElementById(id);
@@ -1964,12 +2121,11 @@ function _vpEnsureDomMoves() {
     }
 
     // STEP 6: Per-family advanced panels (source already moved in step 3).
+    // v225en: lumaVideoParams, pixverseParams, seedance2Params shells removed
+    //   from template.html.  Only wan27vParams + wan27eParams remain.
     const perFamilyIds = [
-      'lumaVideoParams',
-      'pixverseParams',
       'wan27vParams',
       'wan27eParams',
-      'seedance2Params',
     ];
     for (const id of perFamilyIds) {
       const el = document.getElementById(id);
@@ -2006,6 +2162,16 @@ function _vpEnsureDomMoves() {
     //          konci parametru - nad save to folder - pod audio on").
     _vpExtractBottomToggles();
 
+    // v225en: STEP 11/12/13 all removed.  Legacy Duration (wan27vDuration,
+    //   wan27eDuration, sd2Duration, grokVideoDur, lumaDuration radios,
+    //   wan27vPromptExpand), legacy Resolution rows (videoResInfoRow,
+    //   veoResRow, lumaResRow, wanResRow, pixverseQualityRow,
+    //   wan27vResolutionRow, wan27eResolutionRow, sd2ResolutionRow,
+    //   grokResolutionRow), and legacy negative prompt fields
+    //   (pixverseNegPrompt, wan27vNegPrompt) are all gone from template.html.
+    //   Generate/reuse reads/writes go exclusively through unified helpers
+    //   (getUnifiedResolution/Duration, #vpNegPrompt, #videoDuration).
+
     _vpDomMovesDone = true;
   } catch (e) {
     console.warn('[GIS] DOM moves failed:', e);
@@ -2022,8 +2188,13 @@ function _vpExtractPerFamilyElements() {
 
   function moveWrapper(elId, newWrapperId, targetId, position) {
     const el = document.getElementById(elId);
-    if (!el) return;
-    const wrapper = el.closest('.ctrl');
+    let wrapper;
+    if (el) {
+      wrapper = el.closest('.ctrl');
+    }
+    // v220en: fallback for wrappers with pre-assigned IDs in template
+    // (e.g. radio groups where we can't uniquely target by input id).
+    if (!wrapper) wrapper = document.getElementById(newWrapperId);
     if (!wrapper) return;
     if (!wrapper.id) wrapper.id = newWrapperId;
     const target = document.getElementById(targetId);
@@ -2037,10 +2208,42 @@ function _vpExtractPerFamilyElements() {
     }
   }
 
-  // ── PixVerse: Quality → Resolution slot, Camera → common header, Seed → core ──
+  // ── PixVerse: Quality → Resolution slot, Seed → core (v223en: Camera Move removed) ──
   moveWrapper('pixverseQuality',    'pixverseQualityRow',   'wanResRow',       'after');
-  moveWrapper('pixverseCameraMove', 'pixverseCameraRow',    'vpPromptSection', 'appendChild');
   moveWrapper('pixverseSeed',       'pixverseSeedRow',      'videoDurRow',     'after');
+
+  // ── WAN 2.7 / 2.7e / Seedance 2.0: Seed → unified Seed slot (v218en) ──
+  // All four seed rows share the same slot (after videoDurRow).  Only one
+  // is visible at a time — show/hide is managed in _vpApplyUnifiedLayer
+  // based on model.type.  Grok has no seed field, so no extraction needed.
+  moveWrapper('wan27vSeed',         'wan27vSeedRow',        'videoDurRow',     'after');
+  moveWrapper('wan27eSeed',         'wan27eSeedRow',        'videoDurRow',     'after');
+  moveWrapper('sd2Seed',            'sd2SeedRow',           'videoDurRow',     'after');
+
+  // ── Resolution extracts (v220en): all models that had Resolution hidden
+  //    inside a per-family psec container (or inside grokVideoParams mode-first
+  //    block) now extract to the unified Resolution slot at `wanResRow`.
+  //    After this block the core Resolution slot is in a consistent order:
+  //      videoResInfoRow (Kling/Vidu/Seedance1 read-only)
+  //    → veoResRow                (Veo)
+  //    → lumaResRow               (Luma — already in core slot, no move needed)
+  //    → wanResRow                (WAN 2.6)
+  //    → pixverseQualityRow       (PixVerse, v217en)
+  //    → grokResolutionRow        (Grok, v220en)
+  //    → sd2ResolutionRow         (Seedance 2.0, v220en)
+  //    → wan27eResolutionRow      (WAN 2.7e, v220en)
+  //    → wan27vResolutionRow      (WAN 2.7, v220en)
+  //    Only one is visible at a time; show/hide in _vpApplyUnifiedLayer block 2f.
+  moveWrapper('wan27vResolution',   'wan27vResolutionRow',  'wanResRow',       'after');
+  moveWrapper('wan27eResolution',   'wan27eResolutionRow',  'wanResRow',       'after');
+  moveWrapper(null,                 'sd2ResolutionRow',     'wanResRow',       'after');
+  moveWrapper(null,                 'grokResolutionRow',    'wanResRow',       'after');
+
+  // ── WAN 2.7e Aspect ratio → common Aspect slot (v220en) ──
+  // WAN 2.7e has its own aspect switcher (Auto/16:9/9:16/1:1/4:3/3:4) while
+  // other models share videoAspectRatio.  Extract to sit right after the
+  // common Aspect row; visibility in block 2f.
+  moveWrapper('wan27eAspect',       'wan27eAspectRow',      'videoAspectRow',  'after');
 }
 
 // Extract bottom toggles (multi-clip, off-peak) and append them to vpParams.
@@ -2063,10 +2266,17 @@ function _vpExtractBottomToggles() {
   appendWrapperAtEnd('pixverseMultiClip', 'pixverseMultiClipRow');
   appendWrapperAtEnd('pixverseOffPeak',   'pixverseOffPeakRow');
 
-  // After extraction pixverseParams is mostly empty (just plabel + desc).
-  // Hide it permanently — per Petr "unified panel = stejne veci na stejnych mistech".
-  const pvParams = document.getElementById('pixverseParams');
-  if (pvParams) pvParams.style.display = 'none';
+  // v224en: Luma Loop + Color mode → bottom toggles.
+  //   Previously inside lumaVideoParams which was hidden for Ray2/Ray2-Flash
+  //   (only Ray3+ showed the panel), so Loop — supported by Ray2 — never
+  //   appeared.  Per Petr: "Loop a color mod bych nechal dole".
+  //   Visibility is per-model: lumaLoopRow for m.supportsLoop,
+  //   lumaColorModeRow for m.supportsHdr (see _vpApplyUnifiedLayer block 2i).
+  appendWrapperAtEnd('lumaLoop',      'lumaLoopRow');
+  appendWrapperAtEnd('lumaColorMode', 'lumaColorModeRow');
+
+  // v225en: pixverseParams + lumaVideoParams + seedance2Params shells removed
+  //   from template.html.  No post-extraction hide needed.
 }
 
 // Handler for the unified mode select — routes to the existing
@@ -2142,51 +2352,408 @@ function onVeoRefModeChange(mode) {
 }
 
 function onVeoResolutionChange() {
-  const sel = document.getElementById('veoResolution');
-  const note = document.getElementById('veoResNote');
-  const res = sel?.value || '720p';
-  if (note) note.style.display = res === '4k' ? 'block' : 'none';
-  // 1080p and 4K require 8s duration — disable shorter options, force 8s
+  // v225en: reads unified via getUnifiedResolution; legacy veoResolution
+  // select + veoResNote removed from DOM.  Called from:
+  //   - _applyVideoModel on Veo model switch (to apply initial side effects)
+  //   - _applyResolutionSideEffects when user clicks a unified Resolution button
+  const res = (typeof getUnifiedResolution === 'function' ? getUnifiedResolution() : null) || '720p';
+  // 1080p and 4K require 8s duration — force slider to 8 and disable it.
   const needsForce8 = (res === '1080p' || res === '4k');
-  document.querySelectorAll('input[name="videoDurFixed"]').forEach(r => {
-    const v = parseInt(r.value);
-    r.disabled = needsForce8 && v < 8;
-    if (r.disabled && r.checked) {
-      r.checked = false;
-      const r8 = document.querySelector('input[name="videoDurFixed"][value="8"]');
-      if (r8) { r8.checked = true; r8.dispatchEvent(new Event('change')); }
+  const slider = document.getElementById('videoDuration');
+  const valLbl = document.getElementById('videoDurVal');
+  if (slider) {
+    if (needsForce8) {
+      slider.value = 8;
+      slider.disabled = true;
+      if (valLbl) valLbl.textContent = '8s';
+    } else {
+      slider.disabled = false;
     }
-    const lbl = r.closest('label');
-    if (lbl) lbl.style.opacity = r.disabled ? '0.35' : '1';
-  });
+  }
   updateVideoResInfo();
 }
 
 function updateVideoResInfo() {
-  const modelKey = getActiveVideoModelKey();
-  const m = VIDEO_MODELS[modelKey];
-  const resEl = document.getElementById('videoResInfo');
-  const resInfoRow = document.getElementById('videoResInfoRow');
-  if (!m) return;
+  // v225en: videoResInfo span removed from DOM.  All Resolution display
+  // handled by unified switcher's info label.  This function remains as
+  // a public entry point for external onchange handlers (e.g. aspect
+  // select calls it) — simply refreshes the unified info.
+  if (typeof updateResolutionInfo === 'function') updateResolutionInfo();
+}
 
-  const hasResSwitcher = m.type === 'veo' || m.type === 'luma_video' || m.type === 'wan_video';
-  const hasOwnPanel    = m.type === 'wan27_video' || m.type === 'wan27e_video' || m.type === 'seedance2_video';
-  if (resInfoRow) resInfoRow.style.display = (hasResSwitcher || hasOwnPanel) ? 'none' : '';
-  if (!resEl || hasResSwitcher || hasOwnPanel) return;
+// ═══════════════════════════════════════════════════════════
+// UNIFIED DURATION SLIDER (v221en)
+// ═══════════════════════════════════════════════════════════
+// videoDurRow is the single Duration UI for all video models.  Per-model
+// slider range/step/default and optional Auto (Seedance 2.0) / Match source
+// (WAN 2.7e) checkboxes come from DURATION_CONFIG_BY_TYPE.  Legacy per-family
+// inputs (#lumaDuration radios, #wan27vDuration, #wan27eDuration, #sd2Duration,
+// #grokVideoDur) are kept hidden in DOM and mirrored on slider change so
+// existing generate/reuse code continues to work without any rewrites.
 
-  if (m.type === 'pixverse_video') {
-    const q = document.getElementById('pixverseQuality')?.value || '720p';
-    const aspect = document.getElementById('videoAspectRatio')?.value || '16:9';
-    resEl.textContent = `${q} · ${aspect}`;
-  } else if (m.type === 'veo') {
-    const res = document.getElementById('veoResolution')?.value || '720p';
-    const mode = videoRefs.length > 0 ? 'I2V' : 'T2V';
-    resEl.textContent = `${res} · ${mode} · Google`;
-  } else {
-    const aspect = document.getElementById('videoAspectRatio')?.value || '16:9';
-    const isPro = modelKey.includes('_pro');
-    resEl.textContent = `${isPro ? '1080p' : '720p'} · ${aspect}`;
+function configureDurationSlider(model) {
+  const modelType = model?.type;
+  const baseCfg = DURATION_CONFIG_BY_TYPE[modelType];
+  if (!baseCfg || !model) return;
+  // Merge per-model overrides (m.maxDur/m.minDur/m.durOptions/m.defaultDur)
+  // onto the per-type base config.  Keeps pre-v221en model data working.
+  const cfg = {
+    min:     (typeof model.minDur === 'number') ? model.minDur : baseCfg.min,
+    max:     (typeof model.maxDur === 'number') ? model.maxDur : baseCfg.max,
+    step:    baseCfg.step,
+    default: (typeof model.defaultDur === 'number') ? model.defaultDur : baseCfg.default,
+    allowed: (Array.isArray(model.durOptions) && model.durOptions.length > 0)
+             ? model.durOptions : baseCfg.allowed,
+    autoCheckbox: baseCfg.autoCheckbox,
+    matchSource:  baseCfg.matchSource,
+  };
+  const slider   = document.getElementById('videoDuration');
+  const valLbl   = document.getElementById('videoDurVal');
+  const minLbl   = document.getElementById('videoDurMinLbl');
+  const maxLbl   = document.getElementById('videoDurMaxLbl');
+  const autoLbl  = document.getElementById('videoDurAutoLbl');
+  const matchLbl = document.getElementById('videoDurMatchLbl');
+  const autoCb   = document.getElementById('videoDurAuto');
+  const matchCb  = document.getElementById('videoDurMatch');
+  const durNote  = document.getElementById('videoDurNote');
+  if (!slider) return;
+
+  slider.min  = cfg.min;
+  slider.max  = cfg.max;
+  // Compute step: if allowed values are uniform spacing (e.g. [5, 10], [5, 9]),
+  // use that spacing so slider has exactly N positions.  Non-uniform (e.g. Grok
+  // [3,5,8,10,12,15]) falls back to step 1 + snap-on-release.
+  let effectiveStep = cfg.step;
+  if (cfg.allowed && cfg.allowed.length >= 2) {
+    const diffs = [];
+    for (let i = 1; i < cfg.allowed.length; i++) diffs.push(cfg.allowed[i] - cfg.allowed[i - 1]);
+    const uniform = diffs.every(d => d === diffs[0]);
+    if (uniform) effectiveStep = diffs[0];
   }
+  slider.step = effectiveStep;
+
+  // v225en: Initial value from config default (legacy per-family inputs removed).
+  //   Reuse path calls setUnifiedDuration BEFORE configureDurationSlider, so
+  //   slider value is set to the reused value before we read it here.  If
+  //   slider already has a value (set by reuse or prior user interaction),
+  //   preserve it within valid range; else use cfg.default.
+  const currentSliderVal = parseInt(slider.value);
+  let initialVal = !isNaN(currentSliderVal) && currentSliderVal > 0
+    ? currentSliderVal
+    : cfg.default;
+
+  // Snap to allowed values (discrete durOptions or Grok [3,5,8,10,12,15]).
+  if (cfg.allowed) initialVal = _snapToAllowed(initialVal, cfg.allowed);
+  // Clamp to range.
+  initialVal = Math.max(cfg.min, Math.min(cfg.max, initialVal));
+
+  slider.value = initialVal;
+  slider.disabled = false;
+  if (minLbl) minLbl.textContent = cfg.min + 's';
+  if (maxLbl) maxLbl.textContent = cfg.max + 's';
+
+  // Auto checkbox visibility — Seedance 2.0 only.
+  if (autoLbl) autoLbl.style.display = cfg.autoCheckbox ? 'inline-flex' : 'none';
+  // Match-source checkbox visibility — WAN 2.7e only.
+  if (matchLbl) matchLbl.style.display = cfg.matchSource ? 'inline-flex' : 'none';
+
+  // Initial checkbox state: reset to off on model switch (reuse path sets
+  // them back if needed via setUnifiedDurationAuto / setUnifiedDurationMatchSource).
+  if (autoCb)  autoCb.checked = false;
+  if (matchCb) matchCb.checked = false;
+
+  // Update value label.
+  if (valLbl) {
+    valLbl.textContent = initialVal + 's';
+  }
+
+  // v222en: Note element was showing "Allowed: 1s / 2s / ..." which was
+  // inaccurate for snap-based configs (e.g. Grok shows wrong values because
+  // merged durOptions came from elsewhere) and redundant for continuous ones
+  // (min/max labels already convey range).  Keep element empty.
+  if (durNote) durNote.textContent = '';
+}
+
+function _snapToAllowed(val, allowed) {
+  let best = allowed[0];
+  let bestDiff = Math.abs(best - val);
+  for (const a of allowed) {
+    const d = Math.abs(a - val);
+    if (d < bestDiff) { best = a; bestDiff = d; }
+  }
+  return best;
+}
+
+// v225en: legacy per-family Duration inputs removed from DOM.  Unified slider
+// (#videoDuration) is the single source of truth.  configureDurationSlider
+// reads initial value from DURATION_CONFIG_BY_TYPE[type].default (or model
+// override m.defaultDur).  Generate reads getUnifiedDuration().
+
+// onchange handler for unified slider.
+function _onUnifiedDurChange() {
+  const slider = document.getElementById('videoDuration');
+  const valLbl = document.getElementById('videoDurVal');
+  const key = getActiveVideoModelKey();
+  const m = VIDEO_MODELS[key];
+  if (!slider || !m) return;
+
+  // Snap to allowed (Grok) on user input.
+  const cfg = DURATION_CONFIG_BY_TYPE[m.type];
+  if (cfg?.allowed) {
+    const snapped = _snapToAllowed(parseInt(slider.value) || cfg.default, cfg.allowed);
+    if (slider.value != snapped) slider.value = snapped;
+  }
+
+  const autoCb  = document.getElementById('videoDurAuto');
+  const matchCb = document.getElementById('videoDurMatch');
+  const showAuto  = cfg?.autoCheckbox && autoCb?.checked;
+  const showMatch = cfg?.matchSource  && matchCb?.checked;
+  if (valLbl) valLbl.textContent = showAuto ? 'auto' : (showMatch ? 'match source' : slider.value + 's');
+
+  updateVideoResInfo();
+}
+
+// onchange for Auto checkbox (Seedance 2.0).
+function _onUnifiedDurAutoChange() {
+  const slider = document.getElementById('videoDuration');
+  const autoCb = document.getElementById('videoDurAuto');
+  const valLbl = document.getElementById('videoDurVal');
+  if (!slider || !autoCb) return;
+  slider.disabled = autoCb.checked;
+  if (valLbl) valLbl.textContent = autoCb.checked ? 'auto' : slider.value + 's';
+}
+
+// onchange for Match source checkbox (WAN 2.7e).
+function _onUnifiedDurMatchChange() {
+  const slider  = document.getElementById('videoDuration');
+  const matchCb = document.getElementById('videoDurMatch');
+  const valLbl  = document.getElementById('videoDurVal');
+  if (!slider || !matchCb) return;
+  slider.disabled = matchCb.checked;
+  if (valLbl) valLbl.textContent = matchCb.checked ? 'match source' : slider.value + 's';
+}
+
+// ═══════════════════════════════════════════════════════════
+// UNIFIED RESOLUTION SWITCHER (v223en, v225en: legacy mirror removed)
+// ═══════════════════════════════════════════════════════════
+// Single segmented-buttons component for all video models with resolution
+// choice.  Source of truth: the button with `.active` class (its data-val
+// attribute).  v225en: legacy <select>/<input> elements deleted from DOM;
+// generate/reuse code reads via getUnifiedResolution() / setUnifiedResolution().
+// Per-model remembered value stored in _lastResolutionByType — survives
+// model switches within the same family (e.g. switching between Veo variants
+// keeps your 4K selection).
+
+const _lastResolutionByType = {};  // { 'veo': '4k', 'pixverse_video': '1080p', ... }
+
+function configureResolutionSwitcher(m) {
+  const row       = document.getElementById('unifiedResRow');
+  const buttonsEl = document.getElementById('unifiedResButtons');
+  const infoEl    = document.getElementById('unifiedResInfo');
+  if (!row || !buttonsEl) return;
+
+  if (!m) {
+    row.style.display = 'none';
+    return;
+  }
+
+  const cfg = RESOLUTION_CONFIG_BY_TYPE[m.type];
+  if (!cfg) {
+    // No user-chosen Resolution for this family (Kling, Vidu, Seedance 1.5).
+    // Show a read-only info line with the fixed resolution.
+    row.style.display = '';
+    // Priority: explicit m.resolution field (Seedance 1.5 Pro, Vidu Q3 have
+    // `resolution: '720p'`); Kling variants don't have the field but their
+    // key contains `_pro` (1080p) or `_std` (720p).  Fallback: 720p.
+    let fixed = m.resolution || m.fixedResolution;
+    if (!fixed) {
+      const key = getActiveVideoModelKey();
+      if (key.includes('_pro') || /master|o3/i.test(key)) {
+        fixed = '1080p';
+      } else {
+        fixed = '720p';
+      }
+    }
+    // Render fixed label as single disabled-looking button (data-val for read).
+    buttonsEl.innerHTML = `<div class="seg-btn active" data-val="${fixed}" style="cursor:default;">${fixed}</div>`;
+    updateResolutionInfo();
+    return;
+  }
+
+  // Resolutions list: prefer cfg.resolutions, fallback to per-model fields.
+  let resolutions = cfg.resolutions;
+  if (!resolutions) {
+    if (m.type === 'pixverse_video' && Array.isArray(m.qualityOptions)) {
+      resolutions = m.qualityOptions;
+    } else if (Array.isArray(m.resolutions)) {
+      resolutions = m.resolutions;
+    }
+  }
+  if (!resolutions || resolutions.length === 0) {
+    row.style.display = 'none';
+    return;
+  }
+
+  // Current value: prefer per-type remembered value, fallback to default.
+  let currentVal = _lastResolutionByType[m.type];
+  if (!currentVal || !resolutions.includes(currentVal)) {
+    // Prefer 1080p if available (matches old default for Veo/WAN/etc),
+    // else 720p, else first option.
+    currentVal = resolutions.includes('1080p') ? '1080p'
+               : resolutions.includes('720p')  ? '720p'
+               : resolutions[0];
+  }
+  _lastResolutionByType[m.type] = currentVal;
+
+  // Render buttons.
+  buttonsEl.innerHTML = resolutions.map(val => {
+    const label = (cfg.labels && cfg.labels[val]) || val;
+    const isActive = val === currentVal ? ' active' : '';
+    return `<button type="button" class="seg-btn${isActive}" data-val="${val}" onclick="_onUnifiedResClick('${val}')">${label}</button>`;
+  }).join('');
+
+  row.style.display = '';
+  updateResolutionInfo();
+
+  // Apply side effects for initial value (e.g. Veo 4K → force duration 8s).
+  _applyResolutionSideEffects(m, currentVal);
+}
+
+// Click handler for segmented Resolution buttons.
+function _onUnifiedResClick(value) {
+  const key = getActiveVideoModelKey();
+  const m = VIDEO_MODELS[key];
+  if (!m) return;
+  // Remember per-type selection.
+  _lastResolutionByType[m.type] = value;
+  // Update active class on buttons.
+  const buttonsEl = document.getElementById('unifiedResButtons');
+  if (buttonsEl) {
+    buttonsEl.querySelectorAll('.seg-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.val === value);
+    });
+  }
+  updateResolutionInfo();
+  _applyResolutionSideEffects(m, value);
+}
+
+// Per-model side effects triggered by resolution change.  Replaces the
+// legacy dispatch-change-on-legacy-select pattern.
+function _applyResolutionSideEffects(m, value) {
+  if (m.type === 'veo') {
+    // Veo: 1080p and 4K require 8s duration — force slider + disable.
+    const needsForce8 = (value === '1080p' || value === '4k');
+    const slider = document.getElementById('videoDuration');
+    const valLbl = document.getElementById('videoDurVal');
+    if (slider) {
+      if (needsForce8) {
+        slider.value = 8;
+        slider.disabled = true;
+        if (valLbl) valLbl.textContent = '8s';
+      } else {
+        slider.disabled = false;
+      }
+    }
+  } else if (m.type === 'seedance2_video') {
+    // Seedance Fast tier doesn't support 1080p — snap back to 720p if needed.
+    // (Only matters when switching from Std to Fast while 1080p was selected.
+    // Guarded by the Fast-tier variant having no '1080p' in m.resolutions.)
+    const allowed = m.resolutions || ['720p'];
+    if (!allowed.includes(value)) {
+      _lastResolutionByType[m.type] = allowed.includes('720p') ? '720p' : allowed[0];
+    }
+  }
+}
+
+// ─── Public API: getUnifiedResolution / setUnifiedResolution ───────
+// Read the currently selected resolution (string like '720p', '1080p', '4k').
+// Returns null if no model active or no selection.
+function getUnifiedResolution() {
+  const btn = document.querySelector('#unifiedResButtons .seg-btn.active');
+  return btn?.dataset.val || null;
+}
+
+// Programmatically set resolution (e.g. during reuse).  Updates button state,
+// remembered value, info label, and applies side effects.
+function setUnifiedResolution(value) {
+  if (!value) return;
+  const key = getActiveVideoModelKey();
+  const m = VIDEO_MODELS[key];
+  if (!m) return;
+  _lastResolutionByType[m.type] = value;
+  const buttonsEl = document.getElementById('unifiedResButtons');
+  if (buttonsEl) {
+    let found = false;
+    buttonsEl.querySelectorAll('.seg-btn').forEach(btn => {
+      const match = btn.dataset.val === value;
+      btn.classList.toggle('active', match);
+      if (match) found = true;
+    });
+    if (!found) return;  // value not valid for current model
+  }
+  updateResolutionInfo();
+  _applyResolutionSideEffects(m, value);
+}
+
+// Update the "1280×720 · 16:9" info line based on active button + aspect.
+function updateResolutionInfo() {
+  const infoEl = document.getElementById('unifiedResInfo');
+  if (!infoEl) return;
+  const key = getActiveVideoModelKey();
+  const m = VIDEO_MODELS[key];
+  if (!m) { infoEl.textContent = ''; return; }
+  const res = getUnifiedResolution()
+           || m.resolution
+           || m.fixedResolution
+           || (key.includes('_pro') || /master|o3/i.test(key) ? '1080p' : '720p');
+  if (!res) { infoEl.textContent = ''; return; }
+  // Aspect: WAN 2.7e uses its own dropdown; others use common videoAspectRatio.
+  let aspect;
+  if (m.type === 'wan27e_video') {
+    const a = document.getElementById('wan27eAspect')?.value;
+    aspect = (a && a !== 'auto') ? a : '16:9';
+  } else {
+    aspect = document.getElementById('videoAspectRatio')?.value || '16:9';
+  }
+  const { width, height } = computeVideoDimensions(res, aspect);
+  infoEl.textContent = `${width}×${height} · ${aspect}`;
+}
+
+// ─── Public API: getUnifiedDuration / setUnifiedDuration ───────────
+// Source of truth: #videoDuration slider (+ Auto checkbox for Seedance 2.0,
+// Match source checkbox for WAN 2.7e).  Generate/reuse use these helpers.
+function getUnifiedDuration() {
+  const slider = document.getElementById('videoDuration');
+  return parseInt(slider?.value || '5');
+}
+
+function setUnifiedDuration(value) {
+  const n = parseInt(value);
+  if (isNaN(n)) return;
+  const slider = document.getElementById('videoDuration');
+  const valLbl = document.getElementById('videoDurVal');
+  if (slider) {
+    slider.value = String(n);
+    if (valLbl) valLbl.textContent = n + 's';
+  }
+}
+
+// Auto checkbox (Seedance 2.0) — true when unified slider shows "auto".
+function getUnifiedDurationAuto() {
+  return !!document.getElementById('videoDurAuto')?.checked;
+}
+function setUnifiedDurationAuto(val) {
+  const cb = document.getElementById('videoDurAuto');
+  if (cb) cb.checked = !!val;
+}
+
+// Match source checkbox (WAN 2.7e).
+function getUnifiedDurationMatchSource() {
+  return !!document.getElementById('videoDurMatch')?.checked;
+}
+function setUnifiedDurationMatchSource(val) {
+  const cb = document.getElementById('videoDurMatch');
+  if (cb) cb.checked = !!val;
 }
 
 function initVideoCountHighlight() {
@@ -2463,8 +3030,9 @@ async function callPixverseVideo(job) {
   if (!pixverseKey) throw new Error('Missing PixVerse API key');
   if (!proxyUrl)    throw new Error('Missing proxy URL');
 
-  const quality   = document.getElementById('pixverseQuality')?.value || '720p';
-  const negPrompt = document.getElementById('pixverseNegPrompt')?.value?.trim() || '';
+  // v225en: Resolution/NegPrompt from unified UI (legacy elements removed)
+  const quality   = getUnifiedResolution() || '720p';
+  const negPrompt = document.getElementById('videoNegPrompt')?.value?.trim() || '';
   const seedStr   = document.getElementById('pixverseSeed')?.value?.trim();
   const seed      = seedStr ? parseInt(seedStr) : undefined;
   const multiClip = document.getElementById('pixverseMultiClip')?.checked || false;
@@ -3103,26 +3671,46 @@ function onGrokVideoModeChange(mode) {
   const noteEl = document.getElementById('grokVideoModeNote');
   if (noteEl) noteEl.textContent = notes[mode] || '';
 
-  // Duration + resolution — hidden for Edit (output matches input)
-  const durEl = document.getElementById('grokVideoDur')?.parentElement;
-  const resEl = document.querySelector('input[name="grokVideoRes"]')?.closest('.ctrl');
-  if (durEl) durEl.style.display = mode === 'edit' ? 'none' : '';
-  if (resEl) resEl.style.display = (mode === 'edit' || mode === 'extend') ? 'none' : '';
+  // Duration + resolution — visibility per mode (edit has no duration/res,
+  // extend has no resolution).
+  // v222en: was manipulating legacy #grokVideoDur/#grokVideoRes .ctrl
+  // wrappers which fought with STEP 12's permanent hide.
+  // v223.1: grokResolutionRow permanently hidden by STEP 13 (unified
+  // switcher owns Resolution).  Toggle unifiedResRow here for edit/extend
+  // modes.  Duration slot (videoDurRow) remains toggled for 'edit'.
+  const unifiedDurRow   = document.getElementById('videoDurRow');
+  const unifiedResRow   = document.getElementById('unifiedResRow');
+  if (unifiedDurRow) unifiedDurRow.style.display = mode === 'edit' ? 'none' : '';
+  if (unifiedResRow) unifiedResRow.style.display = (mode === 'edit' || mode === 'extend') ? 'none' : '';
 
-  // Duration max per mode
-  const durSelect = document.getElementById('grokVideoDur');
-  if (durSelect) {
+  // Duration constraints per mode — applied to unified slider (v222en).
+  const slider   = document.getElementById('videoDuration');
+  const valLbl   = document.getElementById('videoDurVal');
+  const minLbl   = document.getElementById('videoDurMinLbl');
+  const maxLbl   = document.getElementById('videoDurMaxLbl');
+  if (slider && mode !== 'edit') {
     const maxDur = mode === 'ref2v' ? 10 : (mode === 'extend' ? 10 : 15);
-    const minDur = mode === 'extend' ? 2 : 1;
-    for (const opt of durSelect.options) {
-      const v = parseInt(opt.value);
-      opt.disabled = v > maxDur || v < minDur;
+    const minDur = mode === 'extend' ? 2 : 3;
+    slider.min = minDur;
+    slider.max = maxDur;
+    if (minLbl) minLbl.textContent = minDur + 's';
+    if (maxLbl) maxLbl.textContent = maxDur + 's';
+    let v = parseInt(slider.value) || 8;
+    if (v > maxDur) v = maxDur;
+    if (v < minDur) v = minDur;
+    // Snap to Grok's allowed discrete values (filtered by current range).
+    const allowed = [3, 5, 8, 10, 12, 15].filter(a => a >= minDur && a <= maxDur);
+    if (allowed.length > 0) {
+      let best = allowed[0], bestDiff = Math.abs(best - v);
+      for (const a of allowed) {
+        const d = Math.abs(a - v);
+        if (d < bestDiff) { best = a; bestDiff = d; }
+      }
+      v = best;
     }
-    // If current selection is out of range, reset
-    const cur = parseInt(durSelect.value);
-    if (cur > maxDur || cur < minDur) {
-      durSelect.value = mode === 'extend' ? '6' : '8';
-    }
+    slider.value = v;
+    if (valLbl) valLbl.textContent = v + 's';
+    // v225en: legacy #grokVideoDur removed; unified slider is authoritative.
   }
 
   // Source video row — show for Edit and Extend

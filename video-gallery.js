@@ -1049,6 +1049,16 @@ async function reuseVideoJob(id) {
   // These write to LEGACY DOM IDs (UI unchanged).  Schema is optional —
   // older meta records skip silently; newer ones fully restore UI state.
   if (meta.params) _applyVideoMetaToLegacyUi(meta.params, meta.modelKey);
+  // v223en: after legacy Resolution values are set, refresh the unified
+  // segmented-buttons switcher so the active button reflects the reused
+  // resolution.  Also refresh the "WxH · aspect" info line.
+  {
+    const m2 = VIDEO_MODELS[meta.modelKey];
+    if (m2 && typeof configureResolutionSwitcher === 'function') {
+      configureResolutionSwitcher(m2);
+    }
+    if (typeof updateResolutionInfo === 'function') updateResolutionInfo();
+  }
   // ──────────────────────────────────────────────────────────────────────
 
   // Restore refs — supports both formats:
@@ -1630,44 +1640,49 @@ function _applyVideoMetaToLegacyUi(params, modelKey) {
   const model = VIDEO_MODELS[modelKey];
   if (!model) return;
 
-  // Negative prompt — common field, routed per model (pixverse / wan27 use different IDs).
-  if (typeof params.negativePrompt === 'string') {
-    if (model.type === 'wan27_video') _setValue('wan27vNegPrompt', params.negativePrompt);
-    if (model.type === 'pixverse_video') _setValue('pixverseNegPrompt', params.negativePrompt);
+  // Negative prompt — v225en: unified vpNegPrompt is the single source.
+  if (typeof params.negativePrompt === 'string' &&
+      (model.type === 'wan27_video' || model.type === 'pixverse_video')) {
+    _setValue('vpNegPrompt', params.negativePrompt);
   }
 
   // Veo
+  // v225en: Resolution via unified helper; duration via unified slider.
   if (params.veo && model.type === 'veo') {
     _setValue('veoRefMode',   params.veo.refMode);
-    _setValue('veoResolution', params.veo.resolution);
+    if (params.veo.resolution) setUnifiedResolution(params.veo.resolution);
     if (typeof onVeoRefModeChange === 'function') onVeoRefModeChange(params.veo.refMode);
-    if (typeof onVeoResolutionChange === 'function') onVeoResolutionChange();
   }
 
   // Luma
+  // v225en: Resolution via unified helper; Luma duration was stored as "5s"/"9s"
+  //   format — strip 's' suffix and use as number on unified slider.
   if (params.luma && model.type === 'luma_video') {
-    _setValue('lumaResolution', params.luma.resolution);
+    if (params.luma.resolution) setUnifiedResolution(params.luma.resolution);
     _setChecked('lumaLoop',     params.luma.loop);
     _setValue('lumaColorMode',  params.luma.colorMode);
   }
 
   // WAN 2.7 (T2V / I2V / R2V)
+  // v225en: resolution/duration via unified helpers.  Prompt expansion and
+  //   legacy negative prompt removed — not part of new system.
   if (params.wan27v && model.type === 'wan27_video') {
     const s = params.wan27v;
-    _setValue('wan27vResolution', s.resolution);
-    _setValue('wan27vDuration',   s.duration);
-    _setValue('wan27vNegPrompt',  s.negPrompt);
-    _setChecked('wan27vPromptExpand', s.promptExpand !== false);
+    if (s.resolution) setUnifiedResolution(s.resolution);
+    if (s.duration)   setUnifiedDuration(s.duration);
     _setChecked('wan27vSafety',    s.safety !== false);
     _setValue('wan27vSeed',        s.seed);
     _setValue('wan27vAudioUrl',    s.audioUrl);
   }
 
   // WAN 2.7 Video Edit
+  // v225en: duration='0' means "match source" → unified checkbox, else numeric.
   if (params.wan27e && model.type === 'wan27e_video') {
     const s = params.wan27e;
-    _setValue('wan27eResolution', s.resolution);
-    _setValue('wan27eDuration',   s.duration);
+    if (s.resolution) setUnifiedResolution(s.resolution);
+    const matchSrc = (String(s.duration) === '0' || s.duration === 0);
+    setUnifiedDurationMatchSource(matchSrc);
+    if (!matchSrc && s.duration) setUnifiedDuration(s.duration);
     _setValue('wan27eAspect',     s.aspectRatio);
     _setValue('wan27eAudio',      s.audioSetting);
     _setChecked('wan27eSafety',    s.safety !== false);
@@ -1675,51 +1690,46 @@ function _applyVideoMetaToLegacyUi(params, modelKey) {
   }
 
   // Seedance 2.0
+  // v225en: unified duration slider + Auto checkbox; resolution via helper.
   if (params.seedance2 && model.type === 'seedance2_video') {
     const s = params.seedance2;
-    _setValue('sd2Duration',    s.duration);
-    _setChecked('sd2DurAuto',   s.autoDuration);
+    if (s.duration) setUnifiedDuration(s.duration);
+    setUnifiedDurationAuto(!!s.autoDuration);
+    if (s.resolution) setUnifiedResolution(s.resolution);
     _setValue('sd2Seed',        s.seed);
-    // Resolution radios (sd2Res: 480p / 720p / 1080p)
-    if (s.resolution) {
-      const r = document.querySelector(`input[name="sd2Res"][value="${s.resolution}"]`);
-      if (r) r.checked = true;
-    }
     // Audio URLs (up to 3)
     if (Array.isArray(s.audioUrls)) {
       _setValue('sd2AudioUrl1', s.audioUrls[0] || '');
       _setValue('sd2AudioUrl2', s.audioUrls[1] || '');
       _setValue('sd2AudioUrl3', s.audioUrls[2] || '');
     }
-    // Duration label sync
-    const durLabelEl = document.getElementById('sd2DurLabel');
-    if (durLabelEl && s.duration) durLabelEl.textContent = s.duration + 's';
   }
 
   // PixVerse
+  // v225en: quality (resolution) via unified helper.
   if (params.pixverse && model.type === 'pixverse_video') {
     const s = params.pixverse;
-    _setValue('pixverseQuality',     s.quality);
-    _setValue('pixverseCameraMove',  s.cameraMove);
+    if (s.quality) setUnifiedResolution(s.quality);
     _setChecked('pixverseMultiClip', s.multiClip);
     _setChecked('pixverseOffPeak',   s.offPeak);
   }
 
   // Grok Video
+  // v225en: mode select stays (mode-first panel above prompt);
+  //   resolution/duration via unified helpers.
   if (params.grok && model.type === 'grok_video') {
     const s = params.grok;
     _setValue('grokVideoMode',  s.mode);
-    _setValue('grokVideoDur',   s.duration);
-    if (s.resolution) {
-      const r = document.querySelector(`input[name="grokVideoRes"][value="${s.resolution}"]`);
-      if (r) r.checked = true;
-    }
     if (typeof onGrokVideoModeChange === 'function' && s.mode) onGrokVideoModeChange(s.mode);
+    // setUnified* must come AFTER onGrokVideoModeChange — it applies per-mode
+    //   constraints (min/max, allowed values) to the unified slider/buttons.
+    if (s.duration)   setUnifiedDuration(s.duration);
+    if (s.resolution) setUnifiedResolution(s.resolution);
   }
 
   // WAN 2.6
   if (params.wan26 && model.type === 'wan_video') {
-    _setValue('wanResolution', params.wan26.resolution);
+    if (params.wan26.resolution) setUnifiedResolution(params.wan26.resolution);
   }
 }
 

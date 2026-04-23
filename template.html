@@ -342,6 +342,40 @@ input[type=file] { display:none; }
 }
 .ibtn:hover { border-color:var(--accent); color:var(--accent); }
 
+/* v223en: Segmented buttons — used for unified Resolution switcher.
+   Same visual idiom as the image panel's 1K/2K/4K.  Active state uses
+   yellow accent background; inactive is transparent with dim border. */
+.seg-row { display:flex; gap:0; width:100%; }
+.seg-btn {
+  flex:1;
+  padding:6px 8px;
+  background:var(--s2);
+  border:1px solid var(--border);
+  color:var(--dim);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  cursor:pointer;
+  text-align:center;
+  transition:all .12s;
+  margin-left:-1px; /* overlap borders */
+}
+.seg-btn:first-child { margin-left:0; }
+.seg-btn:hover { color:var(--accent); border-color:var(--accent); z-index:1; position:relative; }
+.seg-btn.active {
+  background:var(--accent);
+  color:#000;
+  border-color:var(--accent);
+  font-weight:600;
+  z-index:2;
+  position:relative;
+}
+.seg-btn:disabled, .seg-btn[disabled] {
+  opacity:.35; cursor:not-allowed;
+}
+.seg-btn:disabled:hover, .seg-btn[disabled]:hover {
+  color:var(--dim); border-color:var(--border); z-index:auto;
+}
+
 .ibtn.upscale-btn:hover { border-color:#bb88ff; color:#bb88ff; }
 .ibtn.reuse-btn:hover { border-color:#66cc88; color:#66cc88; }
 
@@ -2839,6 +2873,7 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div id="videoModelDesc" style="margin-top:6px;font-size:10px;color:var(--dim);line-height:1.6;">
           T2V · Native audio · Up to 15s · Highest quality
         </div>
+        <div id="videoModelInfo" style="margin-top:3px;font-size:10px;color:var(--dim2);line-height:1.5;display:none;"></div>
       </div>
 
       <!-- ═══════════════════════════════════════════════════════ -->
@@ -3193,7 +3228,8 @@ select.inpaint-num option { background:#fff; color:#111; }
         </div>
       </div>
 
-      <!-- Grok Video params -->
+      <!-- Grok Video params — v225en: legacy Duration/Resolution removed.
+           Mode select stays (mode-first panel above prompt — per Petr spec). -->
       <div class="psec" id="grokVideoParams" style="display:none;padding:6px 14px;">
         <div class="ctrl" style="margin:0 0 8px 0;">
           <div class="ctrl-label" style="color:var(--text);">Mode</div>
@@ -3205,28 +3241,6 @@ select.inpaint-num option { background:#fff; color:#111; }
             <option value="extend">Extend — Continue from last frame</option>
           </select>
           <div id="grokVideoModeNote" style="font-size:10px;color:var(--dim2);margin-top:3px;">Prompt-only generation with native audio</div>
-        </div>
-        <div class="ctrl" style="margin:0 0 6px 0;">
-          <div class="ctrl-label">Duration</div>
-          <select id="grokVideoDur" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-            <option value="3">3s</option>
-            <option value="5">5s</option>
-            <option value="8" selected>8s</option>
-            <option value="10">10s</option>
-            <option value="12">12s</option>
-            <option value="15">15s</option>
-          </select>
-        </div>
-        <div class="ctrl" style="margin:0 0 6px 0;">
-          <div class="ctrl-label">Resolution</div>
-          <div style="display:flex;gap:12px;">
-            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text);cursor:pointer;">
-              <input type="radio" name="grokVideoRes" value="480p" style="margin:0;">480p
-            </label>
-            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text);cursor:pointer;">
-              <input type="radio" name="grokVideoRes" value="720p" checked style="margin:0;">720p
-            </label>
-          </div>
         </div>
         <div id="grokVideoSrcRow" style="display:none;margin-top:6px;">
           <div style="font-size:10px;color:var(--dim2);margin-bottom:3px;">Source video: <span id="grokVideoSrcLabel" style="color:var(--accent);">none — click ▷ Use on a gallery video</span></div>
@@ -3252,68 +3266,44 @@ select.inpaint-num option { background:#fff; color:#111; }
 
 
 
-      <!-- Luma Ray3 / Ray3.14 controls — shown only for luma_video models -->
-      <div id="lumaVideoParams" style="display:none;">
+      <!-- v225en: lumaVideoParams shell removed.  Loop/Color mode/Char ref
+           stay as standalone elements — runtime extraction moves them to
+           bottom toggles (Loop, Color mode) or source slot (Character ref).
+           Legacy Duration radios removed — unified slider is source of truth. -->
 
-        <!-- Duration radios -->
-        <div class="ctrl" style="padding:8px 14px 0;">
-          <div class="ctrl-label">Duration</div>
-          <div style="display:flex;gap:14px;padding:4px 0;">
-            <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--dim);">
-              <input type="radio" name="lumaDuration" value="5s" checked onchange=""> 5s
-            </label>
-            <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--dim);">
-              <input type="radio" name="lumaDuration" value="10s" onchange=""> 10s
-            </label>
-          </div>
+      <!-- Luma Loop — extracted to bottom toggles at runtime -->
+      <div class="ctrl" style="padding:6px 14px 0;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:var(--dim);">
+          <input type="checkbox" id="lumaLoop">
+          Loop — seamless looping video
+        </label>
+      </div>
+
+      <!-- Luma HDR / EXR color mode — Ray3 only (extracted to bottom toggles) -->
+      <div class="ctrl" id="lumaHdrRow" style="display:none;padding:6px 14px 0;">
+        <div class="ctrl-label">Color mode</div>
+        <select id="lumaColorMode" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+          <option value="sdr">SDR — standard</option>
+          <option value="hdr">HDR — 16-bit, vivid dynamic range</option>
+          <option value="hdr_exr">HDR + EXR — 16-bit EXR frames download (540p/720p)</option>
+        </select>
+        <div style="font-size:11px;color:var(--dim2);margin-top:3px;">HDR: ~4× cost · EXR: ~7× cost vs SDR · EXR limited to 540p/720p</div>
+      </div>
+
+      <!-- Luma Character reference — Ray3 only (extracted to source slot) -->
+      <div class="ctrl" id="lumaCharRefRow" style="display:none;padding:6px 14px 8px;">
+        <div class="ctrl-label">Character reference
+          <span style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;" id="lumaCharRefName">None</span>
         </div>
-
-        <!-- Resolution -->
-        <div class="ctrl" style="padding:6px 14px 0;">
-          <div class="ctrl-label">Resolution</div>
-          <select id="lumaResolution" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-            <option value="540p">540p</option>
-            <option value="720p">720p</option>
-            <option value="1080p" selected>1080p — native</option>
-            <option value="4k">4K — upscaled</option>
-          </select>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+          <button class="ibtn" onclick="lumaPickCharRef()" style="font-size:10px;padding:3px 9px;">↑ Upload</button>
+          <button class="ibtn" onclick="lumaPickCharRefFromAssets()" style="font-size:10px;padding:3px 9px;">☰ Assets</button>
+          <button class="ibtn" onclick="lumaClearCharRef()" id="lumaCharRefClearBtn" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
         </div>
-
-        <!-- Loop -->
-        <div class="ctrl" style="padding:6px 14px 0;">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:var(--dim);">
-            <input type="checkbox" id="lumaLoop">
-            Loop — seamless looping video
-          </label>
-        </div>
-
-        <!-- HDR / EXR color mode — Ray3 only -->
-        <div class="ctrl" id="lumaHdrRow" style="display:none;padding:6px 14px 0;">
-          <div class="ctrl-label">Color mode</div>
-          <select id="lumaColorMode" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-            <option value="sdr">SDR — standard</option>
-            <option value="hdr">HDR — 16-bit, vivid dynamic range</option>
-            <option value="hdr_exr">HDR + EXR — 16-bit EXR frames download (540p/720p)</option>
-          </select>
-          <div style="font-size:11px;color:var(--dim2);margin-top:3px;">HDR: ~4× cost · EXR: ~7× cost vs SDR · EXR limited to 540p/720p</div>
-        </div>
-
-        <!-- Character reference — Ray3 only -->
-        <div class="ctrl" id="lumaCharRefRow" style="display:none;padding:6px 14px 8px;">
-          <div class="ctrl-label">Character reference
-            <span style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;" id="lumaCharRefName">None</span>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
-            <button class="ibtn" onclick="lumaPickCharRef()" style="font-size:10px;padding:3px 9px;">↑ Upload</button>
-            <button class="ibtn" onclick="lumaPickCharRefFromAssets()" style="font-size:10px;padding:3px 9px;">☰ Assets</button>
-            <button class="ibtn" onclick="lumaClearCharRef()" id="lumaCharRefClearBtn" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
-          </div>
-          <input type="file" id="lumaCharRefInput" accept="image/*" style="display:none" onchange="lumaCharRefFileSelected(this.files)">
-          <input type="hidden" id="lumaCharRefAssetId" value="">
-          <div style="font-size:11px;color:var(--dim2);margin-top:4px;">Maintains character identity across shots</div>
-        </div>
-
-      </div><!-- /lumaVideoParams -->
+        <input type="file" id="lumaCharRefInput" accept="image/*" style="display:none" onchange="lumaCharRefFileSelected(this.files)">
+        <input type="hidden" id="lumaCharRefAssetId" value="">
+        <div style="font-size:11px;color:var(--dim2);margin-top:4px;">Maintains character identity across shots</div>
+      </div>
 
       <!-- V2V / Motion Control: video input — unified panel -->
       <div class="psec" id="videoV2VSection" style="display:none;">
@@ -3353,46 +3343,11 @@ select.inpaint-num option { background:#fff; color:#111; }
 
       <!-- WAN 2.7 Video Edit: source video — unified panel -->
 
-      <!-- WAN 2.7 I2V/T2V/R2V params — shown for wan27_video type -->
+      <!-- WAN 2.7 I2V/T2V/R2V params — shown for wan27_video type.
+           v225en: legacy Resolution/Duration/NegPrompt/PromptExpand/Seed
+           removed — all driven by unified layer. -->
         <div id="wan27vParams" style="display:none">
-
-          <!-- Resolution -->
-          <div class="ctrl">
-            <div class="ctrl-label">Resolution</div>
-            <select id="wan27vResolution"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-              <option value="1080p" selected>1080p</option>
-              <option value="720p">720p</option>
-            </select>
-          </div>
-
-          <!-- Duration -->
-          <div class="ctrl">
-            <div class="ctrl-label">Duration</div>
-            <select id="wan27vDuration"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-              <option value="2">2s</option><option value="3">3s</option><option value="4">4s</option>
-              <option value="5" selected>5s</option><option value="6">6s</option><option value="7">7s</option>
-              <option value="8">8s</option><option value="9">9s</option><option value="10">10s</option>
-              <option value="11">11s</option><option value="12">12s</option><option value="13">13s</option>
-              <option value="14">14s</option><option value="15">15s</option>
-            </select>
-          </div>
-
-          <!-- Negative prompt -->
-          <div class="ctrl">
-            <div class="ctrl-label">Negative prompt <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-            <textarea id="wan27vNegPrompt" rows="2" placeholder="blurry, distorted, low quality…"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;resize:vertical;"></textarea>
-          </div>
-
-          <!-- Prompt expansion -->
-          <div class="ctrl">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-              <input type="checkbox" id="wan27vPromptExpand" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Prompt expansion <span style="color:var(--dim2)">(better quality, slower)</span></span>
-            </label>
-          </div>
+          <div class="plabel">WAN 2.7 Settings</div>
 
           <!-- Safety checker -->
           <div class="ctrl">
@@ -3402,21 +3357,23 @@ select.inpaint-num option { background:#fff; color:#111; }
             </label>
           </div>
 
-          <!-- Seed -->
+          <!-- Seed input (wrapper extracted to unified Seed slot at runtime) -->
           <div class="ctrl">
             <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
             <input type="number" id="wan27vSeed" placeholder="42" min="0" max="2147483647"
               style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
           </div>
 
-          <!-- Audio URL — optional background audio for T2V / I2V -->
+          <!-- Audio URL — optional background audio for T2V / I2V
+               (extracted to source slot under refs at runtime) -->
           <div class="ctrl">
             <div class="ctrl-label">Audio URL <span style="color:var(--dim2);font-weight:400;">(optional · MP3/WAV)</span></div>
             <input type="url" id="wan27vAudioUrl" placeholder="https://…/audio.mp3"
               style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
           </div>
 
-          <!-- Extend Video — I2V only: source video for continuation -->
+          <!-- Extend Video — I2V only: source video for continuation
+               (extracted to source slot under refs at runtime) -->
           <div id="wan27vExtendRow" style="display:none;">
             <div style="font-size:10px;color:var(--dim2);margin-bottom:5px;line-height:1.5;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
               <b style="color:var(--dim);">Extend video</b> — optional source video to continue
@@ -3455,32 +3412,15 @@ select.inpaint-num option { background:#fff; color:#111; }
       <!-- WAN 2.7 Video Edit: params -->
       <div class="psec" id="wan27eParams" style="display:none;">
 
-        <!-- Resolution -->
-        <div class="ctrl">
-          <div class="ctrl-label">Resolution</div>
-          <select id="wan27eResolution"
-            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-            <option value="1080p" selected>1080p — $0.15/s</option>
-            <option value="720p">720p — $0.10/s</option>
-          </select>
-        </div>
+        <div class="plabel">WAN 2.7 Video Edit</div>
 
-        <!-- Duration -->
-        <div class="ctrl">
-          <div class="ctrl-label">Duration <span style="color:var(--dim2);font-weight:400;">(0 = match source)</span></div>
-          <select id="wan27eDuration"
-            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
-            <option value="0" selected>Auto (match source)</option>
-            <option value="2">2s</option><option value="3">3s</option><option value="4">4s</option>
-            <option value="5">5s</option><option value="6">6s</option><option value="7">7s</option>
-            <option value="8">8s</option><option value="9">9s</option><option value="10">10s</option>
-          </select>
-        </div>
+        <!-- v225en: Legacy Resolution/Duration removed — unified layer. -->
 
-        <!-- Aspect ratio -->
+        <!-- Aspect ratio (extracted to core slot alongside common Aspect) -->
         <div class="ctrl">
           <div class="ctrl-label">Aspect ratio</div>
           <select id="wan27eAspect"
+            onchange="updateResolutionInfo()"
             style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;cursor:pointer;">
             <option value="auto" selected>Auto (match source)</option>
             <option value="16:9">16:9 Landscape</option>
@@ -3501,7 +3441,7 @@ select.inpaint-num option { background:#fff; color:#111; }
           </select>
         </div>
 
-        <!-- Seed -->
+        <!-- Seed (wrapper extracted to unified Seed slot at runtime) -->
         <div class="ctrl">
           <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
           <input type="number" id="wan27eSeed" placeholder="42" min="0" max="2147483647"
@@ -3522,137 +3462,47 @@ select.inpaint-num option { background:#fff; color:#111; }
 
       </div>
 
-      <!-- PixVerse C1 params -->
-      <div class="psec" id="pixverseParams" style="display:none;">
-        <div class="plabel">PixVerse C1 Settings</div>
-        <div class="ctrl">
-          <div class="ctrl-label">Quality</div>
-          <select id="pixverseQuality" onchange="updateVideoResInfo()" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-            <option value="360p">360p — Turbo</option>
-            <option value="540p">540p</option>
-            <option value="720p" selected>720p</option>
-            <option value="1080p">1080p</option>
-          </select>
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Camera Movement <span style="color:var(--dim2);font-weight:400;">(v4/v4.5 only — C1 pending)</span></div>
-          <select id="pixverseCameraMove" disabled style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--dim2);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;opacity:.5;cursor:not-allowed;">
-            <option value="">— None —</option>
-            <optgroup label="Pan &amp; Follow">
-              <option value="pan_left">Pan Left</option>
-              <option value="pan_right">Pan Right</option>
-              <option value="left_follow">Left Follow</option>
-              <option value="right_follow">Right Follow</option>
-            </optgroup>
-            <optgroup label="Horizontal / Vertical">
-              <option value="horizontal_left">Horizontal Left</option>
-              <option value="horizontal_right">Horizontal Right</option>
-              <option value="vertical_up">Vertical Up</option>
-              <option value="vertical_down">Vertical Down</option>
-            </optgroup>
-            <optgroup label="Zoom">
-              <option value="zoom_in">Zoom In</option>
-              <option value="zoom_out">Zoom Out</option>
-              <option value="quickly_zoom_in">Quick Zoom In</option>
-              <option value="quickly_zoom_out">Quick Zoom Out</option>
-              <option value="smooth_zoom_in">Smooth Zoom In</option>
-            </optgroup>
-            <optgroup label="Cinematic">
-              <option value="crane_up">Crane Up</option>
-              <option value="super_dolly_out">Super Dolly Out</option>
-              <option value="hitchcock">Hitchcock (Dolly Zoom)</option>
-              <option value="whip_pan">Whip Pan</option>
-              <option value="robo_arm">Robo Arm</option>
-              <option value="camera_rotation">Camera Rotation</option>
-            </optgroup>
-            <optgroup label="Special">
-              <option value="fix_bg">Fix Background</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Negative prompt <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-          <input type="text" id="pixverseNegPrompt" placeholder="blurry, low quality..."
-            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-        </div>
-        <div class="ctrl">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="pixverseMultiClip" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-            <span style="font-size:11px;color:var(--dim);">Multi-clip (cuts &amp; camera changes)</span>
-          </label>
-        </div>
-        <div class="ctrl">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="pixverseOffPeak" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-            <span style="font-size:11px;color:var(--dim);">Off-peak mode (~50% cheaper, up to 24h)</span>
-          </label>
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-          <input type="number" id="pixverseSeed" placeholder="42" min="0" max="2147483647"
-            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-        </div>
-        <div style="font-size:10px;color:var(--dim2);margin-top:4px;line-height:1.5;">
-          C1 · 1–15s · 1080p · Audio · 20+ camera moves · $0.05/s at 720p
-        </div>
+      <!-- PixVerse C1 params — v225en: legacy Resolution (Quality) removed.
+           MultiClip + OffPeak checkboxes extracted to bottom toggles at runtime.
+           Seed input extracted to unified Seed slot at runtime.
+           NegPrompt kept — still legacy mirror target for #vpNegPrompt. -->
+      <!-- v225en: PixVerse extracted controls (MultiClip, OffPeak, Seed).
+           Runtime moveWrapper picks these up and moves them to:
+             - MultiClip → bottom toggles
+             - OffPeak   → bottom toggles
+             - Seed      → unified Seed slot
+           Legacy NegPrompt removed — unified #vpNegPrompt replaces it. -->
+      <div class="ctrl">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="pixverseMultiClip" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+          <span style="font-size:11px;color:var(--dim);">Multi-clip (cuts &amp; camera changes)</span>
+        </label>
+      </div>
+      <div class="ctrl">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="pixverseOffPeak" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+          <span style="font-size:11px;color:var(--dim);">Off-peak mode (~50% cheaper, up to 24h)</span>
+        </label>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+        <input type="number" id="pixverseSeed" placeholder="42" min="0" max="2147483647"
+          style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
       </div>
 
-      <!-- Seedance 2.0 params -->
-      <div class="psec" id="seedance2Params" style="display:none;">
-        <div class="plabel">Seedance 2.0 Settings</div>
+      <!-- v225en: Seedance 2.0 extracted controls (Seed + R2V section).
+           Runtime moveWrapper picks these up and moves them to:
+             - Seed         → unified Seed slot
+             - sd2R2VSection → source slot area pod videoRefSection -->
+      <div class="ctrl">
+        <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+        <input type="number" id="sd2Seed" placeholder="42" min="0" max="2147483647"
+          style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+      </div>
 
-        <!-- Duration slider + Auto -->
-        <div class="ctrl">
-          <div class="ctrl-label">Duration
-            <span id="sd2DurLabel" style="color:var(--acc);font-weight:400;margin-left:auto;">5s</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <input type="range" id="sd2Duration" min="4" max="15" value="5" step="1"
-              oninput="document.getElementById('sd2DurLabel').textContent=this.value+'s'"
-              style="flex:1;accent-color:var(--acc);">
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">
-              <input type="checkbox" id="sd2DurAuto"
-                onchange="document.getElementById('sd2Duration').disabled=this.checked; document.getElementById('sd2DurLabel').textContent=this.checked?'auto':document.getElementById('sd2Duration').value+'s'"
-                style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:10px;color:var(--dim);">Auto</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Resolution radio -->
-        <div class="ctrl">
-          <div class="ctrl-label">Resolution</div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;">
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-              <input type="radio" name="sd2Res" value="720p" checked style="accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">720p</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-              <input type="radio" name="sd2Res" value="480p" style="accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">480p (faster)</span>
-            </label>
-            <label id="sd2Res1080Wrap" style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-              <input type="radio" name="sd2Res" value="1080p" style="accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">1080p (HD)</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Prompt hint: dialogue + multi-shot syntax -->
-        <div style="font-size:10px;color:var(--dim2);line-height:1.5;padding:6px 9px;background:var(--s2);border:1px solid var(--border);margin-bottom:8px;">
-          💡 Dialogue: wrap spoken lines in <code style="color:var(--dim);">"double&nbsp;quotes"</code> for lip-synced audio<br>
-          💡 Multi-shot: <code style="color:var(--dim);">Shot 1: … Shot 2: …</code> for camera cuts in one clip
-        </div>
-
-        <!-- Seed -->
-        <div class="ctrl">
-          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-          <input type="number" id="sd2Seed" placeholder="42" min="0" max="2147483647"
-            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-        </div>
-
-        <!-- R2V section: video slots + audio URLs (hidden unless R2V) -->
-        <div id="sd2R2VSection" style="display:none;">
+      <!-- R2V section: video slots + audio URLs (hidden unless R2V)
+           Extracted to source slot area under videoRefSection at runtime. -->
+      <div id="sd2R2VSection" style="display:none;">
 
           <!-- Video ref slots (3x) -->
           <div class="ctrl" style="margin-top:8px;">
@@ -3711,20 +3561,6 @@ select.inpaint-num option { background:#fff; color:#111; }
           </div>
         </div>
 
-        <!-- Multi-shot prompting guide -->
-        <div style="font-size:10px;color:var(--dim2);margin-top:8px;line-height:1.6;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;">
-          <b style="color:var(--acc);">Multi-shot &amp; Camera Control</b> — use in prompt:<br>
-          <code style="color:var(--dim);font-size:10px;">[lens switch]</code> — hard cut between shots<br>
-          <code style="color:var(--dim);font-size:10px;">[0-3s] wide shot... [4-7s] close-up...</code> — timeline<br>
-          <code style="color:var(--dim);font-size:10px;">Shot 1: ... Shot 2: ... Shot 3: ...</code> — numbered<br>
-          Camera: <code style="color:var(--dim);font-size:10px;">dolly zoom</code>, <code style="color:var(--dim);font-size:10px;">tracking shot</code>, <code style="color:var(--dim);font-size:10px;">Dutch angle</code>, <code style="color:var(--dim);font-size:10px;">crane up</code>, <code style="color:var(--dim);font-size:10px;">worm's eye</code>, <code style="color:var(--dim);font-size:10px;">bird's eye</code>
-        </div>
-
-        <div style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;">
-          Seedance 2.0 · 4–15s · 720p/480p · Native audio · $0.30/s std · $0.24/s fast
-        </div>
-      </div>
-
       <!-- Unified ref panel — adapts to model refMode -->
       <div class="psec" id="videoRefSection" style="display:none;">
         <div class="plabel" id="videoRefLabel">Reference images
@@ -3748,44 +3584,11 @@ select.inpaint-num option { background:#fff; color:#111; }
       <div class="psec">
         <div class="plabel">Parameters</div>
 
-        <!-- Resolution — static info for Kling/Seedance/Vidu; hidden when switcher is active -->
-        <div class="ctrl" id="videoResInfoRow">
-          <div class="ctrl-label">Resolution</div>
-          <div id="videoResInfo" style="font-size:11px;color:var(--accent);padding:4px 0;">1080p (Pro model)</div>
-        </div>
-
-        <!-- Veo resolution switcher — shown only for Veo models -->
-        <div class="ctrl" id="veoResRow" style="display:none;">
-          <div class="ctrl-label">Resolution</div>
-          <select id="veoResolution" onchange="onVeoResolutionChange()" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-            <option value="720p">720p — HD Standard</option>
-            <option value="1080p" selected>1080p — Full HD</option>
-            <option value="4k">4K — Ultra HD  ·  $$$$</option>
-          </select>
-          <div id="veoResNote" style="font-size:11px;color:var(--dim2);margin-top:3px;display:none;">
-            4K: higher latency · ~2.7× cost vs 1080p · extension not supported
-          </div>
-        </div>
-
-        <!-- Luma resolution switcher — shown for all Luma video models -->
-        <div class="ctrl" id="lumaResRow" style="display:none;">
-          <div class="ctrl-label">Resolution</div>
-          <select id="lumaResolution" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-            <option value="540p">540p</option>
-            <option value="720p">720p</option>
-            <option value="1080p" selected>1080p — native</option>
-            <option value="4k">4K — upscaled</option>
-          </select>
-        </div>
-
-        <!-- WAN 2.6 resolution switcher — 720p / 1080p -->
-        <div class="ctrl" id="wanResRow" style="display:none;">
-          <div class="ctrl-label">Resolution</div>
-          <select id="wanResolution" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
-            <option value="720p">720p — HD</option>
-            <option value="1080p" selected>1080p — Full HD</option>
-          </select>
-        </div>
+        <!-- v225en: Legacy Resolution rows removed.  Unified segmented-buttons
+             #unifiedResRow (in core params) is the single Resolution UI.
+             Removed: videoResInfoRow, veoResRow (+ veoResolution select +
+             veoResNote), lumaResRow (+ lumaResolution), wanResRow
+             (+ wanResolution).  Generate/reuse read via getUnifiedResolution(). -->
 
         <!-- Topaz: Output Resolution — 1080p / 4K -->
         <div class="ctrl" id="topazResRow" style="display:none;">
@@ -3929,10 +3732,24 @@ select.inpaint-num option { background:#fff; color:#111; }
           </div>
         </div>
 
+        <!-- v223en: Unified Resolution switcher — segmented buttons.
+             Populated by configureResolutionSwitcher(m) on model switch.
+             Active model's resolution options become buttons; click sets
+             the active model's legacy Resolution input and dispatches 'change'
+             so existing onchange handlers (e.g. onVeoResolutionChange) fire.
+             The right-side info shows WIDTH×HEIGHT · ASPECT dynamically. -->
+        <div class="ctrl" id="unifiedResRow" style="display:none;">
+          <div class="ctrl-label">
+            <span>Resolution</span>
+            <span id="unifiedResInfo" class="cv"></span>
+          </div>
+          <div class="seg-row" id="unifiedResButtons"></div>
+        </div>
+
         <!-- Aspect Ratio — right after resolution -->
         <div class="ctrl" id="videoAspectRow">
           <div class="ctrl-label">Aspect Ratio</div>
-          <select id="videoAspectRatio" onchange="updateVideoResInfo()" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
+          <select id="videoAspectRatio" onchange="updateVideoResInfo();updateResolutionInfo();" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 8px;outline:none;">
             <option value="16:9" selected>16:9 — Landscape</option>
             <option value="9:16">9:16 — Portrait</option>
             <option value="1:1">1:1 — Square</option>
@@ -3952,11 +3769,25 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div class="ctrl" id="videoDurRow">
           <div class="ctrl-label">Duration <span id="videoDurVal" style="color:var(--accent);">5s</span></div>
           <div class="ctrl-row" id="videoDurSliderRow">
-            <input type="range" id="videoDuration" min="3" max="15" step="1" value="5"
-              style="width:100%;accent-color:var(--accent);"
-              oninput="document.getElementById('videoDurVal').textContent=this.value+'s';updateVideoResInfo()">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <input type="range" id="videoDuration" min="3" max="15" step="1" value="5"
+                style="flex:1;accent-color:var(--accent);"
+                oninput="_onUnifiedDurChange()">
+              <!-- v221en: Auto checkbox — Seedance 2.0 only (length auto) -->
+              <label id="videoDurAutoLbl" style="display:none;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">
+                <input type="checkbox" id="videoDurAuto" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);"
+                  onchange="_onUnifiedDurAutoChange()">
+                <span style="font-size:10px;color:var(--dim);">Auto</span>
+              </label>
+              <!-- v221en: Match source checkbox — WAN 2.7e only (0 = match) -->
+              <label id="videoDurMatchLbl" style="display:none;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">
+                <input type="checkbox" id="videoDurMatch" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);"
+                  onchange="_onUnifiedDurMatchChange()">
+                <span style="font-size:10px;color:var(--dim);">Match source</span>
+              </label>
+            </div>
             <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim2);margin-top:2px;">
-              <span>3s</span><span>9s</span><span>15s</span>
+              <span id="videoDurMinLbl">3s</span><span id="videoDurMaxLbl">15s</span>
             </div>
           </div>
           <div id="videoDurRadioRow" style="display:none;padding:4px 0;"></div>

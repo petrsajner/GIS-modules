@@ -1,171 +1,197 @@
 # STAV.md — Generative Image Studio
 
-## Aktuální verze: v217en (stable — layout podle Petrovy spec)
-## Příští verze: v218en (seed extrakce pro WAN 2.7/2.7e/Grok/Seedance)
-## Datum: 2026-04-22
-## Worker verze: 2026-16
+## Aktuální verze: v225en (FULL CLEANUP — bez legacy zbytků)
+## Příští verze: v226en (smoke test + případné fixy)
+## Datum: 2026-04-23
+## Worker verze: 2026-16 (beze změn)
 
 ---
 
-## Co je v v217en (oproti v216en)
+## Co je v v225en (oproti v224en)
 
-### ✅ Velká restrukturalizace dle původní Petrovy specifikace
+### Cíl: kompletní přechod na unified systém. Žádné legacy zbytky, žádná kompatibilita se starým schematem.
 
-**Opravené chyby proti v216en:**
+Petr's explicit directive: *"Ted vycistit. Zrusit vse co nepatri do noveho systemu. Parametry, ktere schovavas pro reuse nemusis schovavat - nepotrebuji zpetnou kompatibilitu. (...) Nenechavej zadny stary kod jen kvuli kompatibilite."*
 
-1. **Negativní prompt** — nyní `prompt → tagy → NEG PROMPT → refs` (dřív jsem ho omylem dal pod prompt před tagy).
+### Fáze A — JS refactor (unified = single source of truth)
 
-2. **"PARAMETERS" plabel — přesunut, NEskrývaný** — dřív jsem ho trvale skryl (display:none). Nyní:
-   - Plabel je extrahován z legacy Parameters psec
-   - Přesunut do vpParams **nad core params** (= labeluje "Resolution, Aspect, CFG, Duration" sekci)
-   - Legacy Parameters psec zůstává visible (obsahuje Save to folder)
+**Odstraněno:**
+- `_syncDurationToLegacy(modelType)` + všechna volání (4 místa)
+- `_readLegacyDurationValue(modelType)` (nepoužívané po A)
+- `_vpNegPromptTargetId` + `_vpInstallNegPromptMirror` mirror system — `vpNegPrompt` je jediný zdroj pro generate/reuse
+- Legacy `<select>` rebuild logika v `_applyVideoModel`:
+  - `veoResolution.innerHTML = ...` + `veoResNote` show/hide
+  - `lumaResolution.innerHTML = ...`
+  - `pixverseQuality` options rebuild
+  - `sd2Res` snap-back logika + `sd2Res1080Opt` toggle
+- `onGrokVideoModeChange` legacy `grokVideoDur` mirror
+- `onVeoResolutionChange`: čte přes `getUnifiedResolution()` (ne z legacy select)
+- `updateVideoResInfo`: jen refresh unified info label (žádný legacy text update)
+- `videoResInfo` span text updates (element pryč z HTML)
+- STEP 11 (hide legacy neg prompt fields) + STEP 12/13 references
+- `_setRow('videoResInfoRow', ...)` mrtvá volání (4 místa)
+- `legacyId` field z `RESOLUTION_CONFIG_BY_TYPE` (mrtvé pole, nikdo jej nečetl)
+- Post-extraction `pixverseParams.style.display = 'none'` + `lumaVideoParams` hide
+- `perFamilyIds` obsahuje jen `wan27vParams` + `wan27eParams` (ostatní shells pryč)
 
-3. **Bottom toggles (multi-clip, off-peak)** pod audio — dřív byly před Count. Nyní:
-   - `appendChild` na vpParams po Count + Audio → padají na samé dno
-   - Výsledek: `... → Count → Audio → Multi-clip → Off-peak → (Save to folder vně vpParams)`
+**Změněno:**
+- `configureDurationSlider`: initial value z `cfg.default` (ne z legacy), zachovává current slider value pokud je validní (pro reuse path co nastavuje `setUnifiedDuration` před configure)
+- `_onUnifiedDurChange/_onUnifiedDurAutoChange/_onUnifiedDurMatchChange`: nevolá `_syncDurationToLegacy`
+- `_vpUpdateNegPromptTarget`: jen show/hide `vpNegPromptSection` + clear `vpNeg.value` při přechodu na nepodporovaný model
+- `_vpEnsureNegPromptRedirect`: no-op (zachován jako symbol pro backwards-compat v build orderu)
+- `_deriveNegPrompt(model)` v video-queue.js: pro WAN 2.7 + PixVerse čte unified `#vpNegPrompt`
+- Reuse path video-gallery.js: `_setValue('vpNegPrompt', ...)` místo per-family mirror
 
-4. **PixVerse extrakce dokončená** — Quality, Camera Move, Seed, Multi-clip, Off-peak všechny přesunuty do unified slotů. `pixverseParams` (prázdný shell po extrakci) skryt.
+### Fáze B — HTML cleanup
 
-5. **Negativní prompt sync** přes `vpNegPrompt` redirect pro PixVerse / WAN 2.7 / WAN 2.7e (z v215en).
+**Odstraněno z template.html:**
+- `<div class="psec" id="pixverseParams">` shell (obsah přesunut na top-level)
+- `<div class="psec" id="seedance2Params">` shell (Seed + sd2R2VSection přesunuty)
+- `<input id="pixverseNegPrompt">` + parent `.ctrl` (unified vpNegPrompt nahrazuje)
 
-6. **Luma character ref** trvale skryt (z v215en).
+**Co zůstalo v template.html:**
+- PixVerse extracted: `pixverseMultiClip`, `pixverseOffPeak`, `pixverseSeed` (top-level `.ctrl` wrappers, runtime extracted moveWrapperem do bottom toggles / Seed slot)
+- Seedance extracted: `sd2Seed` (Seed slot), `sd2R2VSection` (source slot area)
+- Per-family panely: `wan27vParams` (Safety), `wan27eParams` (Audio mode + Safety), `grokVideoParams` (Mode select + Mode note)
+- Unified elements: `unifiedResButtons` + `unifiedResInfo` (Resolution), `videoDuration` slider + `videoDurAuto/Match` checkboxy, `vpNegPromptSection` s `vpNegPrompt` input
 
-### Nové pořadí v vpParams (finálně podle spec)
+### Ověření
 
-```
-vpParams:
-├── STEP 1 — Sub-select (mode):
-│   ├── vpModeSection           (Kling/PixVerse/Vidu/Seedance2/WAN27/WAN26 groups)
-│   ├── veoRefModeRow           (Veo mode — mode-first insert)
-│   └── grokVideoParams         (Grok panel — mode-first insert)
-│
-├── STEP 2 — Common header:
-│   ├── vpPromptSection         (prompt + ✦ AI + 🎨 Styles + 📷 Camera + 📹 Model Camera [extract])
-│   ├── videoTagsRow            (style + camera tagy)
-│   ├── vpNegPromptSection      (neg prompt — TĚSNĚ POD TAGY, NAD REFS)
-│   └── videoRefSection         (refs panel)
-│
-├── STEP 3 — Source slots:
-│   ├── wan27eSrcRow            (WAN 2.7e source video)
-│   └── videoV2VSection         (V2V motion source)
-│
-├── STEP 4 — "PARAMETERS" plabel (přesunut z legacy psec)
-│
-├── STEP 5 — Core params:
-│   ├── videoResInfoRow         ← jeden z těchto 5 je vždy visible (Resolution slot)
-│   ├── veoResRow
-│   ├── lumaResRow
-│   ├── wanResRow
-│   ├── pixverseQualityRow      (extrakce z pixverseParams)
-│   ├── videoAspectRow
-│   ├── videoCfgRow
-│   ├── videoDurRow
-│   └── pixverseSeedRow         (extrakce z pixverseParams — Seed slot)
-│
-├── STEP 6 — Per-family advanced (hidden panels / just desc):
-│   ├── lumaVideoParams         (Loop, HDR; char ref hidden; ref weight TODO)
-│   ├── pixverseParams          (skryt — po extrakci prázdný)
-│   ├── wan27vParams            (WAN 2.7 advanced)
-│   ├── wan27eParams            (WAN 2.7e advanced)
-│   └── seedance2Params         (audio URLs + seed uvnitř — extrakce TODO)
-│
-├── STEP 7 — Count
-├── STEP 8 — Audio toggle
-└── STEP 9 — Bottom toggles:
-    ├── pixverseMultiClipRow    (extrakce z pixverseParams)
-    └── pixverseOffPeakRow      (extrakce z pixverseParams)
-```
-
-Pod tím zůstává **mimo vpParams**:
-```
-videoParamsLegacy (psec, visible):
-  ["Parameters" plabel byl přesunut pryč — tato psec má už jen]
-  topazResRow, topazFactorRow, topazFpsRow, topazSlowmoRow, topazCreativityRow  (hidden pro non-Topaz)
-  Save to folder (videoTargetFolder)
-
-Generate Video button
-```
-
-### Topaz / Magnific — beze změny
-
-- `vpParams` hidden → všechny přesunuté elementy nejsou viditelné
-- `videoParamsLegacy` visible s Topaz rows (Topaz) nebo jen Save to folder (Magnific)
-
-### Build stats (v217en)
-
-- **25 modulů** (beze změny)
-- **24 192 JS řádků** (+71 oproti v216en)
-- **29 605 total lines** (+71)
-- `✓ HTML div balance: OK (866 pairs)` (HTML netknuté)
-- `node --check` → OK
-
-### Změněné moduly
-
-| Modul | Status | Popis |
-|---|---|---|
-| `video-models.js` | upraven | +71 ř.: Kompletní přepis `_vpEnsureDomMoves` (10 kroků) + `_vpExtractPerFamilyElements` + nový `_vpExtractBottomToggles` + oprava videoParamsLegacy visibility v Magnific a _vpApplyUnifiedLayer |
+- **JS syntax check**: `node --check` ✓
+- **HTML div balance**: 821 pairs OK ✓
+- **Zero legacy element reads** napříč všemi 28 JS moduly (verified grepem)
+- **Zero legacy IDs** v template.html (verified grepem)
 
 ---
 
-## Příklad: PixVerse C1 UI po v217en
+## Metrika
+
+| | v217en | v224en | **v225en** |
+|--|--|--|--|
+| video-models.js | ? | 3969 | 3866 |
+| video-queue.js | ~950 | 985 | 985 |
+| video-gallery.js | ~1700 | 1746 | 1742 |
+| template.html | 5438 | 5274 | 5269 |
+| JS total | ? | 24852 | **24799** |
+| HTML total | ? | 30101 | **30043** |
+
+Celkem −53 JS lines a −58 total oproti v224en. Celkem −203 JS lines oproti v217en stabilu (odstraněn všechen mirror kód, rebuild logika, legacy wrappers).
+
+---
+
+## Architektura (v225en current state)
+
+### Unified helpers (single source of truth)
+
+**Resolution** (`#unifiedResButtons`):
+- `getUnifiedResolution()` — vrací `data-val` aktivního `.seg-btn`
+- `setUnifiedResolution(value)` — aktualizuje aktivní tlačítko, `_lastResolutionByType[type]` memory, info label, side effects
+- `updateResolutionInfo()` — aktualizuje "1280×720 · 16:9" label pod switcherem
+- `_applyResolutionSideEffects(m, value)` — volá `onVeoResolutionChange` pro Veo 1080p/4K force 8s
+
+**Duration** (`#videoDuration`):
+- `getUnifiedDuration()` — `parseInt(slider.value)`
+- `setUnifiedDuration(value)` — nastaví slider + val label
+- `getUnifiedDurationAuto()/setUnifiedDurationAuto(bool)` — `#videoDurAuto` checkbox (Seedance 2.0)
+- `getUnifiedDurationMatchSource()/setUnifiedDurationMatchSource(bool)` — `#videoDurMatch` checkbox (WAN 2.7e)
+
+**Negative prompt** (`#vpNegPrompt`):
+- Generate čte přímo `document.getElementById('vpNegPrompt').value` (pouze pro wan27_video + pixverse_video)
+- Reuse setuje přímo `_setValue('vpNegPrompt', ...)`
+- `_vpUpdateNegPromptTarget(key, model)` show/hide sekce + clear hodnoty při přepnutí
+
+**Aspect ratio**:
+- Common: `#videoAspectRatio`
+- WAN 2.7e: `#wan27eAspect` (má vlastní s "auto = match source" option)
+
+### Data maps
+
+- `RESOLUTION_CONFIG_BY_TYPE[type]` — `{ resolutions, labels }` per type, `resolutions: null` = read from model (PixVerse m.qualityOptions, Seedance2 m.resolutions)
+- `DURATION_CONFIG_BY_TYPE[type]` — `{ min, max, step, default, allowed?, autoCheckbox?, matchSource? }` per type
+- `_lastResolutionByType` — `{ 'veo': '4k', 'pixverse_video': '1080p', ... }` remembered across model switches within family
+- `_RESOLUTION_HEIGHTS` + `_ASPECT_RATIOS` → `computeVideoDimensions(res, aspect)` → `{width, height}`
+
+### Per-family panely (intentionally kept)
+
+- `wan27vParams` — Safety checkbox
+- `wan27eParams` — Audio mode (Auto/Origin) + Safety
+- `grokVideoParams` — Mode select + ModeNote (stays mode-first above prompt)
+- `veoRefModeRow` — ref mode select (stays mode-first)
+
+### vpParams layout (universal)
 
 ```
-[Sub-select: "V6 T2V" / "V6 I2V" / ...]         (vpModeSection)
-[Prompt: "A tarot card coming to life..."]      (vpPromptSection)
-[🎨 Styles] [📷 Camera]                         (přesunuté buttons)
-[📹 Camera Movement dropdown (disabled C1)]     (pixverseCameraMove extrakce)
-[Style tagy] [Camera tagy]                      (videoTagsRow)
-[Negative Prompt ▸]                             (vpNegPromptSection - sync s pixverseNegPrompt)
-[REFERENCE IMAGES 0/1]                          (videoRefSection)
-[↑ Add ref tile]
-
-PARAMETERS                                      (plabel přesunutý z legacy psec)
-Quality: 720p                                   (pixverseQuality extrahovaný)
-Aspect: 16:9 Landscape
-CFG: 0.5
-Duration: 5s
-Seed: 42                                        (pixverseSeed extrahovaný)
-
-Count: [1] 2 3 4
-[🔊 AUDIO ON]
-☐ Multi-clip (cuts & camera changes)            (pixverseMultiClip extrahovaný)
-☐ Off-peak mode (~50% cheaper)                  (pixverseOffPeak extrahovaný)
-
-Save to folder: ◈ All (no folder)
-
-[▶ Generate Video]
+vpParams
+├── MODE-FIRST (v220en)
+│   ├── vpModeSection (Kling/PixVerse/Vidu version select)
+│   ├── veoRefModeRow (Veo)
+│   └── grokVideoParams (Grok)
+├── COMMON HEADER
+│   ├── vpPromptSection
+│   ├── videoTagsRow
+│   ├── vpNegPromptSection (only wan27 / pixverse)
+│   └── videoRefSection
+├── SOURCE SLOTS (v220en+, reverse-stacked via insertAdjacentElement)
+│   [wan27vAudioUrlRow, lumaCharRefRow, grokVideoSrcRow, wan27vExtendRow,
+│    wan27eSrcRow, videoV2VSection, sd2R2VSection]
+├── [PARAMETERS] plabel (moved from legacy psec via STEP 4)
+├── CORE PARAMS (STEP 5)
+│   [unifiedResRow, videoAspectRow, videoCfgRow, videoDurRow]
+├── PER-FAMILY ADVANCED (STEP 6)
+│   [wan27vParams, wan27eParams]
+├── videoCountRow
+├── videoAudioCtrl
+└── BOTTOM TOGGLES (STEP 10)
+    [pixverseMultiClipRow, pixverseOffPeakRow, lumaLoopRow, lumaColorModeRow]
 ```
 
 ---
 
-## Co zbývá (další iterace)
+## Zbývá pro v226en (Session 2 Phase 8 smoke test)
 
-### v218en — Seed extrakce pro ostatní rodiny
-- `wan27vSeed` → unified Seed slot (po pixverseSeedRow)
-- `wan27eSeed` → unified Seed slot
-- `grokSeed` (uvnitř grokVideoParams)
-- `sd2Seed` (uvnitř seedance2Params)
+1. **Spustit GIS a otestovat každou rodinu modelů:**
+   - Kling V3 Pro T2V (resolution default, duration default)
+   - Vidu Q3 (single button resolution)
+   - Seedance 1
+   - Veo 3 T2V (4K automaticky force 8s), Veo Fast I2V
+   - Luma Ray2 (Loop bottom), Luma Ray3 HDR (CharRef + Loop + Color)
+   - WAN 2.6 T2V/I2V (resolution 720p/1080p)
+   - WAN 2.7 T2V (Audio URL source slot + Safety) + Extend
+   - WAN 2.7e V2V (Aspect wan27e + Audio mode + Safety + Match source)
+   - PixVerse C1 T2V (MultiClip + Off-peak bottom, Seed), PixVerse V6 V2V
+   - Seedance 2.0 I2V Std (Seed v core), R2V Fast (9img + 3vid + 3audio unified)
+   - Grok T2V 720p, Grok Edit
+   - Topaz Starlight, Magnific Precise 2
 
-### v219en — WAN 2.7 resolution extrakce
-- `wan27Resolution` → unified Resolution slot
+2. **Ověřit payload pro každý model:**
+   - resolution z `getUnifiedResolution()`
+   - duration z `getUnifiedDuration()` (plus Auto pro sd2, Match source pro wan27e)
+   - negPrompt z `#vpNegPrompt` (jen WAN 2.7 + PixVerse)
 
-### v220en — Seedance audio URLs jako source audio
-- `sd2AudioUrl1`, `sd2AudioUrl2`, `sd2AudioUrl3` → source audio slot pod source video
+3. **Ověřit reuse (ctrl+R):**
+   - `setUnifiedResolution(value)` funguje napříč všemi rodinami
+   - `setUnifiedDuration(value)` + `setUnifiedDurationAuto(bool)` + `setUnifiedDurationMatchSource(bool)`
+   - Per-family params: Safety, Audio mode, Audio URL, Seed, Source video, CharRef
 
-### v221en — Luma ref weight sliders pod refs
-- lumaVideoParams má ref weight sliders uvnitř → přesun pod refs
-
-### Vrstva N — Cleanup
-Po úspěšném testu: odstranění prázdných legacy shells z HTML (`videoPromptSec`, `pixverseParams`, atd.)
+4. **Dead code cleanup (pokud zbyde čas):**
+   - Staré `_applyVideoModel` (video-models.js) z dřívějších iterací
+   - Staré `generateVideo` (video-queue.js) z dřívějších iterací
+   - Backlog ze summary: Style Library, Claid.ai, Hailuo 2.3, Use V2V, Runway Gen-4
 
 ---
 
-## Mimo Session 2
+## Breaking changes pro v225en
 
-- Topaz/Magnific reuse support
-- Seedance 2.0 I2V universal prompt block bug
-- Style Library "My Presets"
-- Claid.ai via proxy
-- Hailuo 2.3 upgrade
-- Use V2V (Seedance R2V)
-- Runway Gen-4 (research)
+- **Staré saved video jobs (pre-v225en) nemusí správně loadnout** — schema může být odlišné (per-family resolution/duration fields namísto top-level). Petr potvrdil: "Nemam zadna produkcni videa ktera by potrebovala zpetnou kompatibilitu."
+- Pokud staré jobs nereusuje správně → ignore (nové jobs fungují 100%).
+
+---
+
+## Zachovaná architektura
+
+- **Worker**: `gis-proxy.petr-gis.workers.dev` v2026-16 (beze změn)
+- **R2 bucket**: `gis-magnific-videos` binding `VIDEOS` (beze změn)
+- **Build module order** (strict): models → styles → setup → spending → model-select → assets → refs → generate → fal → output-placeholder → proxy → gemini → output-render → db → gallery → toast → paint → ai-prompt → video
+- **Runtime**: single-file HTML via file:// v Chrome, žádný CDN pro kód/knihovny
+- **DB**: IndexedDB stores `images`, `images_meta`, `videos`, `video_meta`, `assets`, `assets_meta` (schema beze změn)
+- **AI agents**: OpenRouter (Sonnet 4.6) primární, Gemini Flash fallback

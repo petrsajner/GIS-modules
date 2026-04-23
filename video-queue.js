@@ -296,28 +296,27 @@ async function generateVideo() {
   const targetFolder = document.getElementById('videoTargetFolder')?.value || 'all';
   const cfgScale = parseFloat(document.getElementById('videoCfgScale')?.value || '0.5');
   const count = parseInt(document.querySelector('input[name="videoCount"]:checked')?.value || '1');
-  const veoResolution = document.getElementById('veoResolution')?.value || '720p';
+  // v225en: Resolution + Duration read from unified UI helpers (no legacy elements).
+  const veoResolution = (model.type === 'veo' ? (getUnifiedResolution() || '720p') : '720p');
   const veoRefMode = document.getElementById('veoRefMode')?.value || 't2v';
   const veoDuration = parseInt(document.getElementById('videoDuration')?.value || '8');
 
   // Luma-specific params
-  const lumaResolution = document.getElementById('lumaResolution')?.value || '1080p';
-  // Duration: prefer custom Luma panel (Ray3 models), fallback to standard radio (Ray2 models)
-  const lumaDurCustom = document.querySelector('input[name="lumaDuration"]:checked')?.value;
-  const lumaDurStandard = document.querySelector('input[name="videoDurFixed"]:checked')?.value
-                       || document.getElementById('videoDuration')?.value || '5';
-  const lumaDurationSel = lumaDurCustom || (lumaDurStandard + 's');
+  const lumaResolution = (model.type === 'luma_video' ? (getUnifiedResolution() || '1080p') : '1080p');
+  // v225en: Luma duration from unified slider (legacy radios removed).
+  //   Luma API expects "5s"/"9s" etc. format.
+  const lumaDurationSel = (getUnifiedDuration() || 5) + 's';
   const lumaLoop = document.getElementById('lumaLoop')?.checked || false;
   const lumaColorMode = document.getElementById('lumaColorMode')?.value || 'sdr';
   // Character ref for Ray3 (single asset ID stored in hidden input)
   const lumaCharRefAssetId = document.getElementById('lumaCharRefAssetId')?.value || null;
 
   // WAN 2.7 I2V/T2V snap (wan27_video type — covers T2V + I2V + R2V)
+  // v225en: resolution/duration from unified; prompt expansion removed;
+  //   negPrompt removed (unified vpNegPromptSection reads directly in generate).
   const wan27vSnap = model.type === 'wan27_video' ? {
-    resolution:   document.getElementById('wan27vResolution')?.value || '1080p',
-    duration:     parseInt(document.getElementById('wan27vDuration')?.value || '5'),
-    negPrompt:    document.getElementById('wan27vNegPrompt')?.value?.trim() || '',
-    promptExpand: document.getElementById('wan27vPromptExpand')?.checked !== false,
+    resolution:   getUnifiedResolution() || '1080p',
+    duration:     getUnifiedDuration() || 5,
     safety:       document.getElementById('wan27vSafety')?.checked !== false,
     seed:         document.getElementById('wan27vSeed')?.value?.trim() || null,
     audioUrl:     document.getElementById('wan27vAudioUrl')?.value?.trim() || null,
@@ -325,10 +324,11 @@ async function generateVideo() {
   } : null;
 
   // WAN 2.7 Video Edit snap
+  // v225en: resolution/duration from unified.  Match source = duration '0'.
   const wan27eSnap = model.type === 'wan27e_video' ? {
     srcVideoId:   wan27eSrcVideoId,
-    resolution:   document.getElementById('wan27eResolution')?.value || '1080p',
-    duration:     document.getElementById('wan27eDuration')?.value || '0',
+    resolution:   getUnifiedResolution() || '1080p',
+    duration:     getUnifiedDurationMatchSource() ? '0' : String(getUnifiedDuration() || 5),
     aspectRatio:  document.getElementById('wan27eAspect')?.value || 'auto',
     audioSetting: document.getElementById('wan27eAudio')?.value || 'auto',
     safety:       document.getElementById('wan27eSafety')?.checked !== false,
@@ -336,10 +336,11 @@ async function generateVideo() {
   } : null;
 
   // Seedance 2.0 snap
+  // v225en: resolution/duration from unified.  Auto duration from unified checkbox.
   const sd2Snap = model.type === 'seedance2_video' ? {
-    duration:      document.getElementById('sd2Duration')?.value || '5',
-    autoDuration:  document.getElementById('sd2DurAuto')?.checked || false,
-    resolution:    document.querySelector('input[name="sd2Res"]:checked')?.value || '720p',
+    duration:      String(getUnifiedDuration() || 5),
+    autoDuration:  getUnifiedDurationAuto(),
+    resolution:    getUnifiedResolution() || '720p',
     seed:          document.getElementById('sd2Seed')?.value?.trim() || null,
     // R2V: source video IDs + audio URLs
     vidSrcIds:     [...sd2VidSrc],
@@ -351,10 +352,12 @@ async function generateVideo() {
   } : null;
 
   // Grok Video snap
+  // v225en: resolution/duration from unified (was per-mode constraint
+  //   handled by onGrokVideoModeChange applying to unified slider directly).
   const grokVideoSnap = model.type === 'grok_video' ? {
     mode:       document.getElementById('grokVideoMode')?.value || 't2v',
-    duration:   parseInt(document.getElementById('grokVideoDur')?.value) || 8,
-    resolution: document.querySelector('input[name="grokVideoRes"]:checked')?.value || '720p',
+    duration:   getUnifiedDuration() || 8,
+    resolution: getUnifiedResolution() || '720p',
     // V2V Edit / Extend: source video gallery ID
     srcVideoId: _grokVideoSrcId || null,
   } : null;
@@ -475,10 +478,11 @@ async function runVideoJob(job) {
   // cfg_scale only when explicitly changed from default — omit otherwise
   if (typeof cfgScale === 'number' && Math.abs(cfgScale - 0.5) > 0.01) payload.cfg_scale = cfgScale;
   // resolution — model-fixed (Seedance/Vidu: always 720p) OR UI-selected (Wan: 720p/1080p)
+  // v225en: Wan 2.6 reads from unified UI
   if (model.resolution) {
     payload.resolution = model.resolution;
   } else if (model.type === 'wan_video') {
-    payload.resolution = document.getElementById('wanResolution')?.value || '1080p';
+    payload.resolution = getUnifiedResolution() || '1080p';
   }
   // multi_shots — Wan 2.6: send false to force single continuous shot (default = true = multi-shot)
   if (model.multiShots === false) payload.multi_shots = false;
@@ -912,8 +916,7 @@ function _buildUnifiedVideoParams(modelKey, model, bag) {
     seedance2: model.type === 'seedance2_video' ? _cloneSnap(bag.sd2Snap) : null,
 
     pixverse: model.type === 'pixverse_video' ? {
-      quality:    document.getElementById('pixverseQuality')?.value || '720p',
-      cameraMove: document.getElementById('pixverseCameraMove')?.value || '',
+      quality:    getUnifiedResolution() || '720p',
       multiClip:  document.getElementById('pixverseMultiClip')?.checked || false,
       offPeak:    document.getElementById('pixverseOffPeak')?.checked || false,
     } : null,
@@ -921,7 +924,7 @@ function _buildUnifiedVideoParams(modelKey, model, bag) {
     grok:     model.type === 'grok_video' ? _cloneSnap(bag.grokVideoSnap) : null,
 
     wan26:    model.type === 'wan_video' ? {
-      resolution: document.getElementById('wanResolution')?.value || '1080p',
+      resolution: getUnifiedResolution() || '1080p',
       multiShot:  modelKey === 'wan26_t2v' ? (document.querySelector('input[name="videoCount"]:checked')?.value ? false : false) : false,
     } : null,
 
@@ -933,15 +936,18 @@ function _buildUnifiedVideoParams(modelKey, model, bag) {
 }
 
 function _deriveResolution(model, bag) {
-  // Each model family reports its own resolution source — preserve original value.
+  // v225en: resolution derivation simplified — snap objects for wan27/wan27e/
+  //   seedance2/grok already contain resolution from unified UI.  Others
+  //   (veo/luma/wan26/pixverse) read from unified helper if active, or from
+  //   bag for saved jobs (no legacy DOM reads).
   if (model.type === 'veo')             return bag.veoResolution || '1080p';
   if (model.type === 'luma_video')      return bag.lumaResolution || '1080p';
   if (model.type === 'wan27_video')     return bag.wan27vSnap?.resolution || '1080p';
   if (model.type === 'wan27e_video')    return bag.wan27eSnap?.resolution || '1080p';
   if (model.type === 'seedance2_video') return bag.sd2Snap?.resolution || '720p';
-  if (model.type === 'pixverse_video')  return document.getElementById('pixverseQuality')?.value || '720p';
+  if (model.type === 'pixverse_video')  return getUnifiedResolution() || '720p';
   if (model.type === 'grok_video')      return bag.grokVideoSnap?.resolution || '720p';
-  if (model.type === 'wan_video')       return document.getElementById('wanResolution')?.value || '1080p';
+  if (model.type === 'wan_video')       return getUnifiedResolution() || '1080p';
   return '';
 }
 
@@ -959,8 +965,11 @@ function _deriveSeed(model, bag) {
 }
 
 function _deriveNegPrompt(model) {
-  if (model.type === 'wan27_video')    return document.getElementById('wan27vNegPrompt')?.value?.trim() || '';
-  if (model.type === 'pixverse_video') return document.getElementById('pixverseNegPrompt')?.value?.trim() || '';
+  // v225en: unified neg prompt for all models — vpNegPrompt is the single
+  // visible input; legacy per-family inputs removed from DOM.
+  if (model.type === 'wan27_video' || model.type === 'pixverse_video') {
+    return document.getElementById('vpNegPrompt')?.value?.trim() || '';
+  }
   return '';
 }
 
