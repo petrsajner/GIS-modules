@@ -1450,7 +1450,6 @@ function _applyVideoModel(key) {
     _setRow('lumaResRow',        false);
     _setRow('wanResRow',         false);
     _setRow('unifiedResRow',     false);  // v223en: Topaz uses own topazResRow
-    _setRow('wan27vParams',      false);
     _setRow('pixverseParams',    false);
     _setRow('videoAspectRow',    false);
     _setRow('videoAudioCtrl',    false);
@@ -1464,7 +1463,7 @@ function _applyVideoModel(key) {
     _setRow('videoTagsRow',      false);
     // Hide ref section — Topaz uses its own source video slot
     _setRow('videoRefSection',   false);
-    _setRow('videoV2VSection',   false);
+    _setRow('unifiedSrcVideoRow', false);
     _setRow('lumaVideoParams',   false);
     _setRow('veoRefModeRow',     false);
     _setRow('grokVideoParams',   false);
@@ -1510,7 +1509,7 @@ function _applyVideoModel(key) {
     _setRow('lumaResRow',         false);
     _setRow('wanResRow',          false);
     _setRow('unifiedResRow',      false);  // v223en: Magnific uses magnificVidOpts
-    _setRow('wan27vParams',       false);
+
     _setRow('pixverseParams',    false);
     _setRow('videoAspectRow',     false);
     _setRow('videoAudioCtrl',     false);
@@ -1522,7 +1521,7 @@ function _applyVideoModel(key) {
     _setRow('videoPromptSec',     false);
     _setRow('videoTagsRow',       false);
     _setRow('videoRefSection',    false);
-    _setRow('videoV2VSection',    false);
+    _setRow('unifiedSrcVideoRow', false);
     _setRow('lumaVideoParams',    false);
     _setRow('veoRefModeRow',      false);
     _setRow('grokVideoParams',    false);
@@ -1599,9 +1598,8 @@ function _applyVideoModel(key) {
   const hasRefs = m.refMode && m.refMode !== 'none';
   if (refSec) refSec.style.display = hasRefs ? 'block' : 'none';
 
-  // V2V Motion Control section
-  const v2vSec = document.getElementById('videoV2VSection');
-  if (v2vSec) v2vSec.style.display = m.refMode === 'video_ref' ? 'block' : 'none';
+  // V2V Motion Control — visibility now managed by _vpApplyUnifiedLayer
+  // via supportsSourceVideo(model) + sourceVideoLabel(model).
 
   if (hasRefs) {
     if (refLabel) refLabel.childNodes[0].textContent = m.refLabel || 'Reference images';
@@ -1691,17 +1689,7 @@ function _applyVideoModel(key) {
     renderVideoRefPanel();
   }
 
-  const wan27vParams = document.getElementById('wan27vParams');
-  if (wan27vParams) wan27vParams.style.display = m.type === 'wan27_video' ? '' : 'none';
-  // Extend video row: only I2V (single_end refMode)
-  const wan27vExtendRow = document.getElementById('wan27vExtendRow');
-  if (wan27vExtendRow) wan27vExtendRow.style.display = (m.type === 'wan27_video' && m.refMode === 'single_end') ? '' : 'none';
-  // v222en: Audio URL row — visible for all wan27_video modes.  Now sits
-  // in the source slot under refs (extracted from wan27vParams).
-  const wan27vAudioUrlRow = document.getElementById('wan27vAudioUrlRow');
-  if (wan27vAudioUrlRow) wan27vAudioUrlRow.style.display = m.type === 'wan27_video' ? '' : 'none';
-
-  // wan27_video has own params panel → hide generic duplicate rows
+  // wan27_video: hide generic duplicate rows (own params are unified now).
   // v222en: videoDurRow removed from hide list — unified Duration slider
   // is now the single Duration UI for wan27_video too.
   if (m.type === 'wan27_video') {
@@ -1709,10 +1697,8 @@ function _applyVideoModel(key) {
     _setRow('videoCountRow',   false);
   }
 
-  const wan27eSrcRow  = document.getElementById('wan27eSrcRow');
   const wan27eParams  = document.getElementById('wan27eParams');
   const isWan27e = m.type === 'wan27e_video';
-  if (wan27eSrcRow) wan27eSrcRow.style.display = isWan27e ? '' : 'none';
   if (wan27eParams) wan27eParams.style.display  = isWan27e ? '' : 'none';
   // v222en: videoDurRow removed from hide list (same reason as wan27_video).
   if (isWan27e) {
@@ -1835,23 +1821,41 @@ function _vpApplyUnifiedLayer(key, model) {
   // v224en: Luma character ref visibility moved to block 2i (per-model
   // supportsCharRef check).  Previously always hidden.
 
-  // 2d. Seed slot (v218en) — unified across models: only the active
-  //     model's seed row is shown.  Each model that supports seeds has
-  //     its own extracted <input> wrapper sitting in the Seed slot
-  //     (after videoDurRow).  Non-seed models (Kling, Veo, Luma, Grok,
-  //     Vidu, WAN26) show nothing in this slot.  This also fixes a
-  //     latent v217en issue where pixverseSeedRow stayed visible for
-  //     non-PixVerse models after its extraction.
-  const _seedRowByType = {
-    'pixverse_video':  'pixverseSeedRow',
-    'wan27_video':     'wan27vSeedRow',
-    'wan27e_video':    'wan27eSeedRow',
-    'seedance2_video': 'sd2SeedRow',
-  };
-  const _activeSeedRow = _seedRowByType[model.type] || null;
-  ['pixverseSeedRow', 'wan27vSeedRow', 'wan27eSeedRow', 'sd2SeedRow'].forEach(id => {
-    _setRow(id, id === _activeSeedRow);
-  });
+  // Seed visibility — single source: supportsSeed() in video-utils.
+  _setRow('unifiedSeedRow', supportsSeed(model));
+
+  // Safety visibility — single source: supportsSafety() in video-utils.
+  _setRow('unifiedSafetyRow', supportsSafety(model));
+
+  // Audio URL slots — audioSlots() returns 0/1/3.
+  const _audioN = audioSlots(model);
+  _setRow('unifiedAudioUrlRow', _audioN > 0);
+  if (_audioN > 0) {
+    for (let i = 0; i < 3; i++) {
+      const el = document.getElementById('unifiedAudioUrl' + (i + 1));
+      if (el) el.style.display = i < _audioN ? '' : 'none';
+    }
+    const hint = document.getElementById('unifiedAudioUrlHint');
+    if (hint) hint.textContent = _audioN === 1
+      ? '(optional · MP3/WAV · background audio)'
+      : '(max 3 · paste URL · use [Audio1] in prompt)';
+  }
+
+  // Source/Motion/Extend Video slot — Grok mode gates actual visibility.
+  let _showSrcVid = supportsSourceVideo(model);
+  if (_showSrcVid && model.type === 'grok_video') {
+    const grokMode = document.getElementById('grokVideoMode')?.value || 't2v';
+    _showSrcVid = (grokMode === 'edit' || grokMode === 'extend' || grokMode === 'v2v');
+  }
+  _setRow('unifiedSrcVideoRow', _showSrcVid);
+  if (_showSrcVid) {
+    const lbl = document.getElementById('unifiedSrcVideoLabel');
+    if (lbl) lbl.textContent = sourceVideoLabel(model);
+    const uploadBtn = document.getElementById('unifiedSrcUploadBtn');
+    if (uploadBtn) uploadBtn.style.display = sourceVideoSupportsUpload(model) ? '' : 'none';
+    const footer = document.getElementById('unifiedSrcFooter');
+    if (footer) footer.textContent = _UNIFIED_SRC_NOTES[model.type] || '';
+  }
 
   // 2e. PixVerse extracts (v219en) — elements moved from pixverseParams
   //     into unified slots.  Without per-model visibility, these stayed
@@ -1894,14 +1898,8 @@ function _vpApplyUnifiedLayer(key, model) {
   const _commonAspectRow = document.getElementById('videoAspectRow');
   if (_commonAspectRow && _isWan27e) _commonAspectRow.style.display = 'none';
 
-  // 2h. Grok source video row (v221en) — extracted from grokVideoParams.
-  //     For non-Grok models it must be hidden (was previously hidden by
-  //     its parent grokVideoParams's display:none; now it's in source slot).
-  //     For Grok models, onGrokVideoModeChange() decides visibility based
-  //     on mode (edit/extend show it, t2v/i2v/ref2v hide it).
-  if (model.type !== 'grok_video') {
-    _setRow('grokVideoSrcRow', false);
-  }
+  // 2h. Unified source video row visibility is handled by the earlier block
+  //     (supportsSourceVideo + Grok mode gate) — no per-type override here.
 
   // 3. Hide the (still empty) vp* placeholder sections — legacy elements
   //    videoTagsRow / videoRefSection have been moved INTO vpParams by
@@ -2026,34 +2024,20 @@ function _vpEnsureDomMoves() {
 
     // STEP 3: Source slots after refs (source video, then source audio eventually).
     //         Reverse order because 'afterend' stacks in reverse.
-    //         v221en: grokVideoSrcRow added — was previously nested inside
-    //         grokVideoParams (mode-first block above prompt).
-    //         v222en: wan27vExtendRow (video source for WAN 2.7 I2V extend) +
-    //         wan27vAudioUrlRow (audio URL for WAN 2.7 T2V/I2V) added.
-    //         Video sources always appear ABOVE audio sources (Petr's spec:
-    //         "video vys nez audio").  Reverse ordering: audio first (lowest),
-    //         then video (above), then the anchor at top.
-    // Pre-step: wrap wan27vAudioUrl's .ctrl with id 'wan27vAudioUrlRow' so
-    // we can move/address it consistently with other source slots.
-    const wan27vAudioUrlEl = document.getElementById('wan27vAudioUrl');
-    if (wan27vAudioUrlEl) {
-      const wrap = wan27vAudioUrlEl.closest('.ctrl');
-      if (wrap && !wrap.id) wrap.id = 'wan27vAudioUrlRow';
-    }
+    //         v229en: wan27v / wan27e / v2v / grok source rows merged into
+    //         unifiedSrcVideoRow.  wan27vAudioUrl + sd2AudioUrl1/2/3 merged
+    //         into unifiedAudioUrlRow.  wan27vParams shell removed entirely.
     const sourceSlots = [
       // Audio sources (placed last in loop → end up at BOTTOM of stack):
-      'wan27vAudioUrlRow',
+      'unifiedAudioUrlRow',
       // v224en: Luma Character reference — image source (Ray3 char_ref_b64
       // payload field, separate from standard keyframe refs).  Placed
       // between audio and video sources so it visually sits between
       // videoRefSection and video sources.
       'lumaCharRefRow',
-      // Video sources (placed first in loop → end up at TOP of stack,
-      // right after videoRefSec):
-      'grokVideoSrcRow',
-      'wan27vExtendRow',
-      'wan27eSrcRow',
-      'videoV2VSection',
+      // Video sources — single unified row covers WAN 2.7 Edit,
+      // WAN 2.7 R2V Extend, Grok V2V/Edit/Extend, Kling Motion Control.
+      'unifiedSrcVideoRow',
       // v224en: Seedance 2.0 R2V section (3 video refs + 3 audio URLs).
       // Per Petr spec: "rozšířit videoRefSection: umí 9 image + 3 video +
       // 3 audio — vše dohromady".  Placed LAST in array = closest to
@@ -2087,13 +2071,9 @@ function _vpEnsureDomMoves() {
     if (paramsPsec) {
       const paramsLabel = paramsPsec.querySelector('.plabel');
       if (paramsLabel && paramsLabel.textContent.trim().toLowerCase().startsWith('parameters')) {
-        // Find insertion point: after last source slot (or after refs if no sources).
-        // v222en: wan27vAudioUrlRow is now the bottom-most source slot (audio).
-        const lastSource = document.getElementById('wan27vAudioUrlRow')
-                       || document.getElementById('grokVideoSrcRow')
-                       || document.getElementById('wan27vExtendRow')
-                       || document.getElementById('wan27eSrcRow')
-                       || document.getElementById('videoV2VSection')
+        // Insertion anchor: bottom-most source/audio slot, or refs fallback.
+        const lastSource = document.getElementById('unifiedAudioUrlRow')
+                       || document.getElementById('unifiedSrcVideoRow')
                        || videoRefSec;
         if (lastSource) {
           lastSource.insertAdjacentElement('afterend', paramsLabel);
@@ -2120,11 +2100,27 @@ function _vpEnsureDomMoves() {
       }
     }
 
+    // STEP 5b: Unified Seed + Safety slots — placed right after videoDurRow.
+    //   Without this, unifiedSeedRow/SafetyRow stay at their static template
+    //   positions and the subsequent appendChild calls in STEP 8/9/10 (count,
+    //   audio, bottom toggles) end up before them, pushing them visually to
+    //   the bottom.  Safety must sit right after Seed (same pattern).
+    //   v226en added seed; v227en extends with safety.
+    const _unifiedSeedRow   = document.getElementById('unifiedSeedRow');
+    const _unifiedSafetyRow = document.getElementById('unifiedSafetyRow');
+    const _videoDurRow      = document.getElementById('videoDurRow');
+    if (_unifiedSeedRow && _videoDurRow) {
+      _videoDurRow.insertAdjacentElement('afterend', _unifiedSeedRow);
+    }
+    if (_unifiedSafetyRow && _unifiedSeedRow) {
+      // Insert after seed so final order is: Duration → Seed → Safety → (rest)
+      _unifiedSeedRow.insertAdjacentElement('afterend', _unifiedSafetyRow);
+    }
+
     // STEP 6: Per-family advanced panels (source already moved in step 3).
-    // v225en: lumaVideoParams, pixverseParams, seedance2Params shells removed
-    //   from template.html.  Only wan27vParams + wan27eParams remain.
+    // v229en: wan27vParams shell deleted (audio + extend were its only content,
+    //   both unified now).  Only wan27eParams remains (aspect + audio select).
     const perFamilyIds = [
-      'wan27vParams',
       'wan27eParams',
     ];
     for (const id of perFamilyIds) {
@@ -2208,41 +2204,26 @@ function _vpExtractPerFamilyElements() {
     }
   }
 
-  // ── PixVerse: Quality → Resolution slot, Seed → core (v223en: Camera Move removed) ──
+  // ── PixVerse: Quality → Resolution slot ──
   moveWrapper('pixverseQuality',    'pixverseQualityRow',   'wanResRow',       'after');
-  moveWrapper('pixverseSeed',       'pixverseSeedRow',      'videoDurRow',     'after');
 
-  // ── WAN 2.7 / 2.7e / Seedance 2.0: Seed → unified Seed slot (v218en) ──
-  // All four seed rows share the same slot (after videoDurRow).  Only one
-  // is visible at a time — show/hide is managed in _vpApplyUnifiedLayer
-  // based on model.type.  Grok has no seed field, so no extraction needed.
-  moveWrapper('wan27vSeed',         'wan27vSeedRow',        'videoDurRow',     'after');
-  moveWrapper('wan27eSeed',         'wan27eSeedRow',        'videoDurRow',     'after');
-  moveWrapper('sd2Seed',            'sd2SeedRow',           'videoDurRow',     'after');
-
-  // ── Resolution extracts (v220en): all models that had Resolution hidden
-  //    inside a per-family psec container (or inside grokVideoParams mode-first
-  //    block) now extract to the unified Resolution slot at `wanResRow`.
-  //    After this block the core Resolution slot is in a consistent order:
-  //      videoResInfoRow (Kling/Vidu/Seedance1 read-only)
-  //    → veoResRow                (Veo)
-  //    → lumaResRow               (Luma — already in core slot, no move needed)
-  //    → wanResRow                (WAN 2.6)
-  //    → pixverseQualityRow       (PixVerse, v217en)
-  //    → grokResolutionRow        (Grok, v220en)
-  //    → sd2ResolutionRow         (Seedance 2.0, v220en)
-  //    → wan27eResolutionRow      (WAN 2.7e, v220en)
-  //    → wan27vResolutionRow      (WAN 2.7, v220en)
-  //    Only one is visible at a time; show/hide in _vpApplyUnifiedLayer block 2f.
+  // ── Resolution extracts: models whose Resolution was hidden inside a
+  //    per-family psec container (or inside grokVideoParams mode-first block)
+  //    extract to the unified Resolution slot at `wanResRow`.  After this
+  //    block the core Resolution slot order is:
+  //      videoResInfoRow → veoResRow → lumaResRow → wanResRow
+  //      → pixverseQualityRow → grokResolutionRow
+  //      → sd2ResolutionRow → wan27eResolutionRow → wan27vResolutionRow
+  //    Only one is visible at a time; show/hide in _vpApplyUnifiedLayer.
   moveWrapper('wan27vResolution',   'wan27vResolutionRow',  'wanResRow',       'after');
   moveWrapper('wan27eResolution',   'wan27eResolutionRow',  'wanResRow',       'after');
   moveWrapper(null,                 'sd2ResolutionRow',     'wanResRow',       'after');
   moveWrapper(null,                 'grokResolutionRow',    'wanResRow',       'after');
 
-  // ── WAN 2.7e Aspect ratio → common Aspect slot (v220en) ──
+  // ── WAN 2.7e Aspect ratio → common Aspect slot ──
   // WAN 2.7e has its own aspect switcher (Auto/16:9/9:16/1:1/4:3/3:4) while
   // other models share videoAspectRatio.  Extract to sit right after the
-  // common Aspect row; visibility in block 2f.
+  // common Aspect row; visibility in _vpApplyUnifiedLayer.
   moveWrapper('wan27eAspect',       'wan27eAspectRow',      'videoAspectRow',  'after');
 }
 
@@ -2546,6 +2527,14 @@ function _onUnifiedDurMatchChange() {
 
 const _lastResolutionByType = {};  // { 'veo': '4k', 'pixverse_video': '1080p', ... }
 
+// Footer hints for the unified source-video slot (shown under buttons).
+const _UNIFIED_SRC_NOTES = {
+  wan27e_video: 'Source video required · Must be <10s · Optional ref image below for style guidance',
+  wan27_video:  'Optional — continue from last frame of this video',
+  grok_video:   'Click ▷ Use on any video in the gallery to set it here',
+  kling_video:  'Motion will be transferred to the character image in Refs below',
+};
+
 function configureResolutionSwitcher(m) {
   const row       = document.getElementById('unifiedResRow');
   const buttonsEl = document.getElementById('unifiedResButtons');
@@ -2754,6 +2743,47 @@ function getUnifiedDurationMatchSource() {
 function setUnifiedDurationMatchSource(val) {
   const cb = document.getElementById('videoDurMatch');
   if (cb) cb.checked = !!val;
+}
+
+// ── Seed (v226en) — single #unifiedSeed for wan27 / wan27e / pixverse / seedance2.
+// Returns trimmed string value ('' → null) so callers can do parseInt() or pass as-is.
+function getUnifiedSeed() {
+  const raw = document.getElementById('unifiedSeed')?.value?.trim();
+  return raw || null;
+}
+function setUnifiedSeed(val) {
+  const el = document.getElementById('unifiedSeed');
+  if (!el) return;
+  // Accept null/undefined/number/string; write empty for null-ish, else string.
+  el.value = (val === null || val === undefined || val === '') ? '' : String(val);
+}
+
+// ── Safety (v227en) — single #unifiedSafety checkbox for wan27 / wan27e.
+// fal.ai "safety checker" flag, defaults to true.  Returns boolean; semantics
+// match legacy `!== false` reads (missing/undefined → treated as true).
+function getUnifiedSafety() {
+  const el = document.getElementById('unifiedSafety');
+  if (!el) return true;  // default if DOM not ready
+  return el.checked !== false;
+}
+function setUnifiedSafety(val) {
+  const el = document.getElementById('unifiedSafety');
+  if (!el) return;
+  // Match legacy semantics: any falsy value except explicit false keeps checked.
+  // null/undefined = default true, explicit false = uncheck, truthy = check.
+  el.checked = (val !== false);
+}
+
+// ── Audio URLs — up to 3 slots (per-model count via audioSlots()).
+// getUnifiedAudioUrl(idx)  → string or '' for empty
+// setUnifiedAudioUrl(idx, v) → write to input
+function getUnifiedAudioUrl(idx) {
+  const el = document.getElementById('unifiedAudioUrl' + (idx + 1));
+  return el?.value?.trim() || '';
+}
+function setUnifiedAudioUrl(idx, val) {
+  const el = document.getElementById('unifiedAudioUrl' + (idx + 1));
+  if (el) el.value = val || '';
 }
 
 function initVideoCountHighlight() {
@@ -3025,16 +3055,14 @@ async function _pixverseUpload(proxyUrl, pixverseKey, imgData, mimeType) {
 }
 
 async function callPixverseVideo(job) {
-  const { model, modelKey, prompt, duration, aspectRatio, enableAudio, pixverseKey, proxyUrl } = job;
+  const { model, modelKey, prompt, duration, aspectRatio, enableAudio, pixverseKey, proxyUrl, params } = job;
 
   if (!pixverseKey) throw new Error('Missing PixVerse API key');
   if (!proxyUrl)    throw new Error('Missing proxy URL');
 
-  // v225en: Resolution/NegPrompt from unified UI (legacy elements removed)
   const quality   = getUnifiedResolution() || '720p';
   const negPrompt = document.getElementById('videoNegPrompt')?.value?.trim() || '';
-  const seedStr   = document.getElementById('pixverseSeed')?.value?.trim();
-  const seed      = seedStr ? parseInt(seedStr) : undefined;
+  const seed      = (params?.seed != null) ? params.seed : undefined;
   const multiClip = document.getElementById('pixverseMultiClip')?.checked || false;
   const offPeak   = document.getElementById('pixverseOffPeak')?.checked || false;
   const durNum    = Math.max(model.minDur || 1, Math.min(model.maxDur || 15, parseInt(duration)));
@@ -3220,17 +3248,17 @@ async function callPixverseVideo(job) {
 // T2V i I2V — sdílí stejnou funkci, falEndpoint rozlišuje
 async function callWan27Video(job) {
   const { model, modelKey, prompt, targetFolder, falKey,
-          videoRefsSnapshot, wan27vSnap } = job;
+          videoRefsSnapshot, wan27vSnap, params } = job;
 
   if (!falKey) throw new Error('fal.ai API key missing. Add it in Setup tab.');
 
   const endpoint     = model.falEndpoint || 'fal-ai/wan/v2.7/image-to-video';
   const resolution   = wan27vSnap?.resolution    || '1080p';
   const duration     = wan27vSnap?.duration      || 5;
-  const negPrompt    = wan27vSnap?.negPrompt     || '';
-  const promptExpand = wan27vSnap?.promptExpand  !== false;
-  const safety       = wan27vSnap?.safety        !== false;
-  const seed         = wan27vSnap?.seed          ? parseInt(wan27vSnap.seed) : undefined;
+  const negPrompt    = params?.negativePrompt    || '';
+  const promptExpand = true;
+  const safety       = params?.safety !== false;
+  const seed         = (params?.seed != null) ? params.seed : undefined;
   const audioUrl     = wan27vSnap?.audioUrl      || null;
   const extendVideoId = wan27vSnap?.extendVideoId || null;
   const isT2V        = model.refMode === 'none';
@@ -3306,7 +3334,7 @@ async function callWan27Video(job) {
 
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
     model: model.name, modelKey, prompt: job.prompt,
-    params: { duration, resolution, seed: seed || null, negPrompt, promptExpand },
+    params: { duration, resolution, negPrompt, promptExpand },
     duration,
   }, job, ['fal', resolution === '1080p' ? '_wan27_1080p' : '_wan27_720p', 1, duration]);
   toast(`WAN 2.7 done · ${elapsed}s`, 'ok');
@@ -3318,7 +3346,7 @@ async function callWan27Video(job) {
 // Ref image: optional, base64 data URI
 async function callWan27eVideo(job) {
   const { model, modelKey, prompt, targetFolder, falKey,
-          videoRefsSnapshot, wan27eSnap } = job;
+          videoRefsSnapshot, wan27eSnap, params } = job;
 
   if (!falKey)               throw new Error('fal.ai API key missing. Add it in Setup tab.');
   if (!prompt)               throw new Error('Prompt required — describe the edit or style transfer.');
@@ -3329,8 +3357,8 @@ async function callWan27eVideo(job) {
   const duration     = wan27eSnap.duration;      // string enum: "0"|"2"..."10"
   const audioSetting = wan27eSnap.audioSetting  || 'auto';  // 'auto' | 'origin'
   const aspectRatio  = wan27eSnap.aspectRatio   || 'auto';
-  const safety       = wan27eSnap.safety        !== false;
-  const seed         = wan27eSnap.seed          ? parseInt(wan27eSnap.seed) : undefined;
+  const safety       = params?.safety !== false;
+  const seed         = (params?.seed != null) ? params.seed : undefined;
 
   // Load source video from DB → base64 data URI
   job.status = 'submitting'; renderVideoQueue();
@@ -3379,7 +3407,7 @@ async function callWan27eVideo(job) {
 
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
     model: model.name, modelKey, prompt: job.prompt,
-    params: { resolution: effectiveRes, audioSetting, aspectRatio, seed: seed || null, srcVideoId: wan27eSnap.srcVideoId },
+    params: { resolution: effectiveRes, audioSetting, aspectRatio, srcVideoId: wan27eSnap.srcVideoId },
     duration: actualDuration,
   }, job, ['fal', effectiveRes === '1080p' ? '_wan27e_1080p' : '_wan27e_720p', 1, actualDuration]);
   toast(`WAN 2.7 Edit done · ${elapsed}s`, 'ok');
@@ -3391,14 +3419,14 @@ async function callWan27eVideo(job) {
 // R2V refs in prompt: [Image1], [Video1], [Audio1]
 async function callSeedance2Video(job) {
   const { model, modelKey, prompt, aspectRatio, enableAudio, falKey,
-          videoRefsSnapshot, sd2Snap } = job;
+          videoRefsSnapshot, sd2Snap, params } = job;
 
   if (!falKey) throw new Error('fal.ai API key missing. Add it in Setup tab.');
 
   const endpoint   = model.endpoint;
   const durVal     = sd2Snap?.autoDuration ? 'auto' : (sd2Snap?.duration || '5');
   const resolution = sd2Snap?.resolution || '720p';
-  const seed       = sd2Snap?.seed ? parseInt(sd2Snap.seed) : undefined;
+  const seed       = (params?.seed != null) ? params.seed : undefined;
   const isI2V      = model.refMode === 'single_end';
   const isR2V      = model.refMode === 'seedance2_r2v';
 
@@ -3492,7 +3520,7 @@ async function callSeedance2Video(job) {
 
   const { elapsed } = await _saveVideoResult(videoArrayBuffer, {
     model: model.name, modelKey, prompt: job.prompt,
-    params: { duration: durVal, resolution, seed: seed || null, enableAudio },
+    params: { duration: durVal, resolution, enableAudio },
     duration: durNum,
     cdnUrl: videoUrl,
   }, job, ['fal', priceKey, 1, durNum]);
@@ -3657,8 +3685,7 @@ async function callGrokVideo(job) {
 }
 
 // ── Grok Video — mode change handler ────────────────────────
-// Global: source video gallery ID for V2V Edit / Extend
-let _grokVideoSrcId = null;
+// Source video gallery ID lives in unifiedSrcVideoId (video-gallery.js).
 
 function onGrokVideoModeChange(mode) {
   const notes = {
@@ -3713,9 +3740,13 @@ function onGrokVideoModeChange(mode) {
     // v225en: legacy #grokVideoDur removed; unified slider is authoritative.
   }
 
-  // Source video row — show for Edit and Extend
-  const srcRow = document.getElementById('grokVideoSrcRow');
-  if (srcRow) srcRow.style.display = (mode === 'edit' || mode === 'extend') ? '' : 'none';
+  // Source video row — visibility + label delegated to _vpApplyUnifiedLayer.
+  // Re-apply it when Grok mode changes so the unified slot updates live.
+  if (typeof _vpApplyUnifiedLayer === 'function') {
+    const key = getActiveVideoModelKey();
+    const m   = VIDEO_MODELS[key];
+    if (m) _vpApplyUnifiedLayer(key, m);
+  }
 
   // Video ref section — show for I2V and Ref2V
   const refSec = document.getElementById('videoRefSection');
@@ -3733,16 +3764,6 @@ function onGrokVideoModeChange(mode) {
     // T2V, Edit, Extend — hide ref section
     if (refSec) refSec.style.display = (mode === 't2v' || mode === 'edit' || mode === 'extend') ? 'none' : '';
   }
-}
-
-// Called when user clicks "Use" on a gallery video → sets source for Grok Edit/Extend
-async function setGrokVideoSrc(videoId) {
-  _grokVideoSrcId = videoId;
-  const meta = await dbGet('video_meta', videoId).catch(() => null);
-  const label = meta?.prompt?.slice(0, 40) || `video #${videoId}`;
-  const durNote = meta?.duration ? ` · ${meta.duration}s` : '';
-  const labelEl = document.getElementById('grokVideoSrcLabel');
-  if (labelEl) labelEl.textContent = `${label}${durNote}`;
 }
 
 let _prevVideoModelKey  = null;  // tracks last applied model key for rewrite

@@ -42,14 +42,24 @@ async function compressImageForUpload(base64, mimeType) {
 // ── Thumbnail generation ─────────────────────────────────
 async function generateVideoThumb(blob) {
   return new Promise(resolve => {
-    const TIMEOUT = 8000;
+    // v226en: overall safety timeout raised from 8s → 15s.  Complex videos
+    // (1080p, 15s+, 5MB+) can take longer than 8s to fully load metadata
+    // and reach a seek point, especially on slower systems or while the UI
+    // is mid-generation.  A null thumb from premature timeout showed up as
+    // a "broken video" clapperboard icon in the library.
+    const TIMEOUT = 15000;
     const timer = setTimeout(() => { cleanup(); resolve(null); }, TIMEOUT);
     const url = URL.createObjectURL(blob);
     const video = document.createElement('video');
     video.muted = true;
     video.preload = 'auto';
     let seekAttempt = 0;
-    const seekTimes = [0.5, 1.0, 0.1]; // try multiple seek points
+    let seekedFired = false;
+    let captureDone = false;
+    // v226en: widened seek points (4 instead of 3) to better cover videos with
+    // long fade-ins or dark openings.  0.5s catches fast-start clips, 1.0s and
+    // 2.0s catch typical scene starts, 0.2s is a last-ditch early frame.
+    const seekTimes = [0.5, 1.0, 2.0, 0.2];
 
     function cleanup() {
       clearTimeout(timer);
@@ -57,6 +67,7 @@ async function generateVideoThumb(blob) {
     }
 
     function captureFrame() {
+      if (captureDone) return;
       try {
         const canvas = document.createElement('canvas');
         canvas.width = 320; canvas.height = 180;
@@ -67,22 +78,37 @@ async function generateVideoThumb(blob) {
         let bright = 0;
         for (let i = 0; i < sample.length; i += 4) bright += sample[i] + sample[i+1] + sample[i+2];
         const avgBright = bright / (sample.length / 4 * 3);
-        if (avgBright < 8 && seekAttempt < seekTimes.length - 1) {
+        // v226en: threshold raised from 8 to 12 — avg brightness <8 treated
+        // genuinely dark source as black.  12 still catches near-black frames
+        // while giving legitimately-dark content (e.g., night scenes) a chance.
+        if (avgBright < 12 && seekAttempt < seekTimes.length - 1) {
           // Too dark — try next seek point
           seekAttempt++;
           video.currentTime = Math.min(seekTimes[seekAttempt], video.duration * 0.5);
           return; // onseeked will fire again
         }
+        captureDone = true;
         cleanup();
         resolve(canvas.toDataURL('image/jpeg', 0.8));
-      } catch(e) { cleanup(); resolve(null); }
+      } catch(e) { captureDone = true; cleanup(); resolve(null); }
     }
 
     video.onloadeddata = () => {
       video.currentTime = Math.min(seekTimes[0], video.duration * 0.5);
+      // v226en: safety fallback — some browsers/codecs never fire 'seeked' for
+      // certain videos (happens with some MP4 profiles).  After 3s waiting for
+      // seeked, capture whatever's currently on the video element.  If even
+      // that is black, at least we return something rather than null.
+      setTimeout(() => {
+        if (seekedFired || captureDone) return;
+        captureFrame();
+      }, 3000);
     };
-    video.onseeked = captureFrame;
-    video.onerror = () => { cleanup(); resolve(null); };
+    // v226en: small delay after seek before capturing — some browsers fire
+    // 'seeked' before the frame is actually painted, yielding a black canvas
+    // for the first attempt.  50ms is imperceptible but covers the gap.
+    video.onseeked = () => { seekedFired = true; setTimeout(captureFrame, 50); };
+    video.onerror = () => { captureDone = true; cleanup(); resolve(null); };
     video.src = url;
   });
 }
@@ -210,4 +236,65 @@ function _topazGetDims(blob) {
     el.onerror = () => { URL.revokeObjectURL(url); resolve({ w: 0, h: 0 }); };
     el.src = url;
   });
+}
+
+// Does this model's provider API accept a `seed` parameter?
+// Verified against fal.ai / provider docs.  Single source — used by UI
+// visibility (video-models), generate payloads (video-queue), and reuse
+// (video-gallery).
+function supportsSeed(model) {
+  if (!model) return false;
+  const t = model.type;
+  return t === 'pixverse_video'
+      || t === 'wan27_video'
+      || t === 'wan27e_video'
+      || t === 'seedance2_video'
+      || t === 'wan_video'
+      || t === 'seedance_video'
+      || t === 'vidu_video';
+}
+
+// Does this model's provider API accept a safety-checker flag?
+// Currently WAN 2.6 + 2.7 + 2.7-Edit; Kling/Luma/Veo/Grok/Seedance/Vidu don't
+// expose it.  (WAN 2.6 accepts it per fal docs but GIS doesn't wire UI yet.)
+function supportsSafety(model) {
+  if (!model) return false;
+  const t = model.type;
+  return t === 'wan27_video'
+      || t === 'wan27e_video';
+}
+
+// Number of audio URL slots to show for this model (0 = hide row).
+// WAN 2.7 R2V: 1 BG audio.  Seedance 2.0 R2V: 3 audio refs.
+function audioSlots(model) {
+  if (!model) return 0;
+  const t = model.type;
+  if (t === 'wan27_video'     && model.refMode === 'wan_r2v')       return 1;
+  if (t === 'seedance2_video' && model.refMode === 'seedance2_r2v') return 3;
+  return 0;
+}
+
+// Does this model type ever accept a source/motion video input?
+// Grok runtime mode gating happens in _vpApplyUnifiedLayer, not here.
+function supportsSourceVideo(model) {
+  if (!model) return false;
+  const t = model.type;
+  if (t === 'wan27e_video')                                  return true;  // Edit
+  if (t === 'wan27_video'  && model.refMode === 'single_end') return true; // I2V extend
+  if (t === 'grok_video')                                    return true;  // V2V/Edit/Extend
+  if (t === 'kling_video'  && model.refMode === 'video_ref') return true;  // Motion Control
+  return false;
+}
+
+function sourceVideoLabel(model) {
+  if (!model) return 'Source Video';
+  const t = model.type;
+  if (t === 'kling_video' && model.refMode === 'video_ref') return 'Motion Video';
+  if (t === 'wan27_video') return 'Extend Video';
+  return 'Source Video';
+}
+
+// Kling motion control is the only model accepting file upload of motion video.
+function sourceVideoSupportsUpload(model) {
+  return !!(model && model.type === 'kling_video' && model.refMode === 'video_ref');
 }

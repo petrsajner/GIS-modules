@@ -231,7 +231,7 @@ async function generateVideo() {
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 requires a fal.ai API key. Add it in the Setup tab.'); return; }
   } else if (model.type === 'wan27e_video') {
     if (!falKey) { showApiKeyWarning('fal.ai API Key missing', 'WAN 2.7 Video Edit requires a fal.ai API key. Add it in the Setup tab.'); return; }
-    if (!wan27eSrcVideoId) { toast('Select a source video first — click ▷ Use on any video in the gallery', 'err'); return; }
+    if (!unifiedSrcVideoId) { toast('Select a source video first — click ▷ Use on any video in the gallery', 'err'); return; }
   } else if (model.type === 'grok_video') {
     const xaiKey = (localStorage.getItem('gis_xai_apikey') || '').trim();
     if (!xaiKey)   { showApiKeyWarning('xAI API Key missing', 'Grok Video requires an xAI API key. Add it in the Setup tab.'); return; }
@@ -267,20 +267,20 @@ async function generateVideo() {
   if (refMode === 'keyframe' && videoRefs.length < 2) {
     toast(`Both start and end frames required (have ${videoRefs.length}/2)`, 'err'); return;
   }
-  if (refMode === 'video_ref' && !videoMotionFile && !videoMotionVideoId) {
+  if (refMode === 'video_ref' && !unifiedSrcVideoFile && !unifiedSrcVideoId) {
     toast('Upload or pick a motion reference video for Motion Control', 'err'); return;
   }
 
   // V2V: upload motion video to R2 before submitting jobs
   let motionVideoUrl = null;
-  if (refMode === 'video_ref' && (videoMotionFile || videoMotionVideoId)) {
+  if (refMode === 'video_ref' && (unifiedSrcVideoFile || unifiedSrcVideoId)) {
     toast('Uploading motion video…', 'ok');
     try {
-      if (videoMotionFile) {
-        motionVideoUrl = await uploadVideoToFal(videoMotionFile, falKey);
+      if (unifiedSrcVideoFile) {
+        motionVideoUrl = await uploadVideoToFal(unifiedSrcVideoFile, falKey);
       } else {
         // Gallery pick — load binary from DB and upload to R2
-        const full = await dbGet('videos', videoMotionVideoId);
+        const full = await dbGet('videos', unifiedSrcVideoId);
         if (!full?.videoData) throw new Error('Video data not found in gallery');
         const blob = new Blob([full.videoData], { type: full.mimeType || 'video/mp4' });
         motionVideoUrl = await uploadVideoToFal(blob, falKey);
@@ -311,55 +311,42 @@ async function generateVideo() {
   // Character ref for Ray3 (single asset ID stored in hidden input)
   const lumaCharRefAssetId = document.getElementById('lumaCharRefAssetId')?.value || null;
 
-  // WAN 2.7 I2V/T2V snap (wan27_video type — covers T2V + I2V + R2V)
-  // v225en: resolution/duration from unified; prompt expansion removed;
-  //   negPrompt removed (unified vpNegPromptSection reads directly in generate).
+  // WAN 2.7 I2V/T2V snap (covers T2V + I2V + R2V).
+  // seed + safety live in top-level params (via _deriveSeed/_deriveSafety).
+  // negPrompt read directly from #vpNegPrompt in the handler.
+  // audioUrl + extendVideoId read from unified slots (_deriveAudioUrls + unifiedSrcVideoId).
   const wan27vSnap = model.type === 'wan27_video' ? {
-    resolution:   getUnifiedResolution() || '1080p',
-    duration:     getUnifiedDuration() || 5,
-    safety:       document.getElementById('wan27vSafety')?.checked !== false,
-    seed:         document.getElementById('wan27vSeed')?.value?.trim() || null,
-    audioUrl:     document.getElementById('wan27vAudioUrl')?.value?.trim() || null,
-    extendVideoId: wan27vSrcVideoId || null,
+    resolution:    getUnifiedResolution() || '1080p',
+    duration:      getUnifiedDuration() || 5,
+    audioUrl:      _deriveAudioUrls(model)[0] || null,
+    extendVideoId: unifiedSrcVideoId || null,
   } : null;
 
-  // WAN 2.7 Video Edit snap
-  // v225en: resolution/duration from unified.  Match source = duration '0'.
+  // WAN 2.7 Video Edit snap.  Match source = duration '0' (string).
   const wan27eSnap = model.type === 'wan27e_video' ? {
-    srcVideoId:   wan27eSrcVideoId,
+    srcVideoId:   unifiedSrcVideoId,
     resolution:   getUnifiedResolution() || '1080p',
     duration:     getUnifiedDurationMatchSource() ? '0' : String(getUnifiedDuration() || 5),
     aspectRatio:  document.getElementById('wan27eAspect')?.value || 'auto',
     audioSetting: document.getElementById('wan27eAudio')?.value || 'auto',
-    safety:       document.getElementById('wan27eSafety')?.checked !== false,
-    seed:         document.getElementById('wan27eSeed')?.value?.trim() || null,
   } : null;
 
-  // Seedance 2.0 snap
-  // v225en: resolution/duration from unified.  Auto duration from unified checkbox.
+  // Seedance 2.0 snap.
   const sd2Snap = model.type === 'seedance2_video' ? {
     duration:      String(getUnifiedDuration() || 5),
     autoDuration:  getUnifiedDurationAuto(),
     resolution:    getUnifiedResolution() || '720p',
-    seed:          document.getElementById('sd2Seed')?.value?.trim() || null,
-    // R2V: source video IDs + audio URLs
     vidSrcIds:     [...sd2VidSrc],
-    audioUrls: [
-      document.getElementById('sd2AudioUrl1')?.value?.trim() || '',
-      document.getElementById('sd2AudioUrl2')?.value?.trim() || '',
-      document.getElementById('sd2AudioUrl3')?.value?.trim() || '',
-    ].filter(Boolean),
+    audioUrls:     _deriveAudioUrls(model),
   } : null;
 
   // Grok Video snap
-  // v225en: resolution/duration from unified (was per-mode constraint
-  //   handled by onGrokVideoModeChange applying to unified slider directly).
+  // V2V Edit / Extend: source video gallery ID (unified)
   const grokVideoSnap = model.type === 'grok_video' ? {
     mode:       document.getElementById('grokVideoMode')?.value || 't2v',
     duration:   getUnifiedDuration() || 8,
     resolution: getUnifiedResolution() || '720p',
-    // V2V Edit / Extend: source video gallery ID
-    srcVideoId: _grokVideoSrcId || null,
+    srcVideoId: unifiedSrcVideoId || null,
   } : null;
 
   // Submit count jobs (parallel)
@@ -486,6 +473,10 @@ async function runVideoJob(job) {
   }
   // multi_shots — Wan 2.6: send false to force single continuous shot (default = true = multi-shot)
   if (model.multiShots === false) payload.multi_shots = false;
+
+  // Seed — only attached for models whose API accepts it (see supportsSeed()).
+  const _seed = _deriveSeed(model);
+  if (_seed != null) payload.seed = _seed;
 
   // Ref fields depend on model refMode
   // imageField overrides the default start frame field name (e.g. Seedance/Vidu/Wan use image_url)
@@ -886,11 +877,14 @@ function _buildUnifiedVideoParams(modelKey, model, bag) {
     duration:       bag.duration || 5,
     cfgScale:       typeof bag.cfgScale === 'number' ? bag.cfgScale : 0.5,
     enableAudio:    !!bag.enableAudio,
-    seed:           _deriveSeed(model, bag),
+    seed:           _deriveSeed(model),
+    safety:         _deriveSafety(model),
     negativePrompt: _deriveNegPrompt(model),
 
-    // Source videos (model-specific; null if not used)
-    sourceVideoId:  _deriveSourceVideoId(model),
+    // Unified source video + audio URLs (top-level; model-specific payload
+    // derivation still reads from per-family snaps for non-unified legacy paths).
+    srcVideoId:     _deriveSourceVideoId(model),
+    audioUrls:      _deriveAudioUrls(model),
 
     // Reference images (already stored per-job as videoRefsSnapshot; here just
     // labels for convenient reuse restoration, if useful)
@@ -951,17 +945,17 @@ function _deriveResolution(model, bag) {
   return '';
 }
 
-function _deriveSeed(model, bag) {
-  // Per-family seed inputs
-  const seedEl =
-    (model.type === 'wan27_video'     && document.getElementById('wan27vSeed'))   ||
-    (model.type === 'wan27e_video'    && document.getElementById('wan27eSeed'))   ||
-    (model.type === 'seedance2_video' && document.getElementById('sd2Seed'))      ||
-    (model.type === 'pixverse_video'  && document.getElementById('pixverseSeed')) || null;
-  const raw = seedEl?.value?.trim();
+function _deriveSeed(model) {
+  if (!supportsSeed(model)) return null;
+  const raw = getUnifiedSeed();
   if (!raw) return null;
   const n = parseInt(raw);
   return isNaN(n) ? null : n;
+}
+
+function _deriveSafety(model) {
+  if (!supportsSafety(model)) return null;
+  return getUnifiedSafety();
 }
 
 function _deriveNegPrompt(model) {
@@ -974,11 +968,22 @@ function _deriveNegPrompt(model) {
 }
 
 function _deriveSourceVideoId(model) {
-  if (model.type === 'wan27e_video'    && typeof wan27eSrcVideoId    !== 'undefined') return wan27eSrcVideoId || null;
-  if (model.type === 'wan27_video'     && typeof wan27vSrcVideoId    !== 'undefined') return wan27vSrcVideoId || null;
-  if (model.type === 'grok_video'      && typeof _grokVideoSrcId      !== 'undefined') return _grokVideoSrcId || null;
-  // Seedance 2.0 uses multi-slot sd2VidSrc array — do not serialize (session-local)
-  return null;
+  // WAN 2.7 Edit, WAN 2.7 R2V Extend, Grok V2V/Edit/Extend, Kling Motion —
+  // all share unifiedSrcVideoId.  Seedance 2.0 (multi-slot sd2VidSrc) is
+  // session-local and not serialized here.
+  return supportsSourceVideo(model) ? (unifiedSrcVideoId || null) : null;
+}
+
+function _deriveAudioUrls(model) {
+  const n = audioSlots(model);
+  if (n <= 0) return [];
+  const urls = [];
+  for (let i = 0; i < n; i++) {
+    const el = document.getElementById('unifiedAudioUrl' + (i + 1));
+    const v  = el?.value?.trim();
+    if (v) urls.push(v);
+  }
+  return urls;
 }
 
 function _cloneSnap(snap) {

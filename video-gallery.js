@@ -8,10 +8,8 @@ let videoSearchTimer = null;
 let videoLbCurrentId = null;  // lightbox: current video id
 let videoLbDuration = 0;
 let videoRefs = [];           // [{data, mimeType, name}] — unified ref array per model
-let videoMotionFile    = null;   // V2V: File object (from upload)
-let videoMotionVideoId = null;   // V2V: gallery DB video ID (from gallery pick)
-let wan27eSrcVideoId   = null;   // WAN 2.7 Video Edit: source video gallery ID
-let wan27vSrcVideoId   = null;   // WAN 2.7 I2V: optional source video for extension
+let unifiedSrcVideoFile = null;     // File object (from upload, Kling Motion only)
+let unifiedSrcVideoId   = null;     // gallery DB video ID — covers wan27e/wan27v-extend/grok/kling-motion
 // Seedance 2.0 R2V: 3 source video slots (uploaded to R2 → URLs sent as video_urls[])
 let sd2VidSrc = [null, null, null]; // [videoId1, videoId2, videoId3]
 
@@ -98,17 +96,45 @@ function videoSlotPick(key) {
   toast(slot.pickToast || 'Select a video, then click ▷ Use on it', 'ok');
 }
 
-// ── WAN 2.7 I2V extend-video helpers ─────────────────────
-const _wan27vIds = { info:'wan27vSrcInfo', thumb:'wan27vSrcThumb', img:'wan27vSrcImg', meta:'wan27vSrcMeta', clearBtn:'wan27vSrcClearBtn', describeBtn:'wan27vSrcDescribeBtn' };
-VIDEO_SOURCE_SLOTS.wan27v = {
-  ids: _wan27vIds,
-  set: (id) => { wan27vSrcVideoId = id; },
+// ── Unified Source/Motion/Extend Video slot ──────────────
+// Single slot shared across WAN 2.7 Edit, WAN 2.7 R2V Extend,
+// Grok V2V/Edit/Extend, and Kling Motion Control.  Upload path (file input)
+// only wired for Kling motion models — gated in UI via sourceVideoSupportsUpload().
+const _unifiedSrcIds = { info:'unifiedSrcInfo', thumb:'unifiedSrcThumb', img:'unifiedSrcImg', meta:'unifiedSrcMeta', clearBtn:'unifiedSrcClearBtn', describeBtn:'unifiedSrcDescribeBtn' };
+VIDEO_SOURCE_SLOTS.unifiedSrc = {
+  ids: _unifiedSrcIds,
+  set: (id) => { unifiedSrcVideoFile = null; unifiedSrcVideoId = id; },
   pickToast: 'Select a video in the gallery, then click ▷ Use',
+  clearHook: () => {
+    unifiedSrcVideoFile = null; unifiedSrcVideoId = null;
+    const input = document.getElementById('unifiedSrcVideoInput');
+    if (input) input.value = '';
+  },
 };
-function wan27vClearSource()        { videoSlotClear('wan27v'); }
-async function wan27vSetSource(id)  { return videoSlotSet('wan27v', id); }
-function wan27vPickFromGallery()    { videoSlotPick('wan27v'); }
-async function wan27vDescribeSource() { await videoSlotDescribe('wan27v'); }
+function unifiedSrcClearSource()        { videoSlotClear('unifiedSrc'); }
+async function unifiedSrcSetSource(id)  { return videoSlotSet('unifiedSrc', id); }
+function unifiedSrcPickFromGallery()    { videoSlotPick('unifiedSrc'); }
+async function unifiedSrcDescribeSource() { await videoSlotDescribe('unifiedSrc'); }
+
+async function unifiedSrcVideoSelected(files) {
+  const file = files?.[0];
+  if (!file) return;
+  unifiedSrcVideoFile = file;
+  unifiedSrcVideoId   = null;
+  const el = id => document.getElementById(id);
+  const infoText = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
+  if (el('unifiedSrcInfo'))   el('unifiedSrcInfo').textContent = infoText;
+  if (el('unifiedSrcMeta'))   el('unifiedSrcMeta').innerHTML   = '';
+  if (el('unifiedSrcClearBtn')) el('unifiedSrcClearBtn').style.display = '';
+  try {
+    const thumb = await generateVideoThumb(file);
+    if (thumb && el('unifiedSrcImg') && el('unifiedSrcThumb')) {
+      el('unifiedSrcImg').src = thumb;
+      el('unifiedSrcThumb').style.display = 'block';
+      if (el('unifiedSrcDescribeBtn')) el('unifiedSrcDescribeBtn').style.display = '';
+    }
+  } catch(e) { /* thumb optional */ }
+}
 
 // ── Shared: open describe modal with a thumbnail dataURL ──────
 async function _describeFromThumb(thumbDataUrl) {
@@ -125,75 +151,6 @@ async function _describeFromThumb(thumbDataUrl) {
   setDescribeTab('prompt');
   await _runDescribe(apiKey, b64, 'image/jpeg', 'prompt');
 }
-
-// ── V2V / Motion Control helpers ─────────────────────────
-const _v2vIds = { info:'v2vSrcInfo', thumb:'v2vSrcThumb', img:'v2vSrcImg', meta:'v2vSrcMeta', clearBtn:'v2vClearBtn', describeBtn:'v2vDescribeBtn' };
-// V2V has two input paths (gallery pick + file upload). Registry handles the
-// gallery-pick path; file-upload path uses _v2vSetPanel directly.
-VIDEO_SOURCE_SLOTS.v2v = {
-  ids: _v2vIds,
-  set: (id) => { videoMotionFile = null; videoMotionVideoId = id; },
-  pickToast: 'Select a video in the gallery, then click ▷ Use',
-  clearHook: () => {
-    videoMotionFile = null; videoMotionVideoId = null;
-    const input = document.getElementById('v2vVideoInput');
-    if (input) input.value = '';
-  },
-};
-
-function _v2vSetPanel(thumbDataUrl, infoText) {
-  const el = id => document.getElementById(id);
-  if (_v2vIds.info) el(_v2vIds.info).textContent = infoText || '';
-  if (thumbDataUrl && el(_v2vIds.img) && el(_v2vIds.thumb)) {
-    el(_v2vIds.img).src = thumbDataUrl;
-    el(_v2vIds.thumb).style.display = 'block';
-  } else if (el(_v2vIds.thumb)) {
-    el(_v2vIds.thumb).style.display = 'none';
-  }
-  if (el(_v2vIds.meta)) el(_v2vIds.meta).innerHTML = '';
-  if (el(_v2vIds.clearBtn)) el(_v2vIds.clearBtn).style.display = '';
-  if (el(_v2vIds.describeBtn)) el(_v2vIds.describeBtn).style.display = thumbDataUrl ? '' : 'none';
-}
-
-async function v2vVideoSelected(files) {
-  const file = files?.[0];
-  if (!file) return;
-  videoMotionFile    = file;
-  videoMotionVideoId = null;
-  const infoText = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
-  _v2vSetPanel(null, infoText);
-  try {
-    const thumb = await generateVideoThumb(file);
-    if (thumb) _v2vSetPanel(thumb, infoText);
-  } catch(e) { /* thumb optional */ }
-}
-
-async function v2vSetFromGallery(videoId) {
-  videoMotionFile = null;
-  videoMotionVideoId = videoId;
-  const meta  = await dbGet('video_meta', videoId).catch(() => null);
-  const thumb = await dbGet('video_thumbs', videoId).catch(() => null);
-  const mb    = meta?.fileSize ? `${(meta.fileSize/1024/1024).toFixed(1)}MB` : '';
-  _v2vSetPanel(thumb?.data || null, `${meta?.duration || '?'}s · ${mb}`);
-}
-
-function clearV2VVideo() {
-  videoSlotClear('v2v');
-}
-
-function v2vPickFromGallery()       { videoSlotPick('v2v'); }
-async function v2vDescribeSource()  { await videoSlotDescribe('v2v'); }
-
-const _wan27eIds = { info:'wan27eSrcInfo', thumb:'wan27eSrcThumb', img:'wan27eSrcImg', meta:'wan27eSrcMeta', clearBtn:'wan27eSrcClearBtn', describeBtn:'wan27eSrcDescribeBtn' };
-VIDEO_SOURCE_SLOTS.wan27e = {
-  ids: _wan27eIds,
-  set: (id) => { wan27eSrcVideoId = id; },
-  pickToast: 'Select a video, then click ▷ Use on it',
-};
-function wan27eClearSource()        { videoSlotClear('wan27e'); }
-async function wan27eSetSource(id)  { return videoSlotSet('wan27e', id); }
-async function wan27eDescribeSource() { await videoSlotDescribe('wan27e'); }
-async function wan27ePickFromGallery() { videoSlotPick('wan27e'); }
 
 // ── Seedance 2.0 R2V: 3 source video slots ──────────────
 const _sd2VidIds = [
@@ -226,31 +183,31 @@ async function useVideoFromGallery(videoId) {
   switchView('gen');
   setGenMode('video');
   const activeKey = getActiveVideoModelKey();
+  const model     = VIDEO_MODELS[activeKey];
   if (TOPAZ_MODELS[activeKey]) {
     await topazSetSource(videoId);
     toast('Source video set', 'ok');
   } else if (MAGNIFIC_VIDEO_MODELS[activeKey]) {
     await topazSetSource(videoId);  // reuses same source display
     toast('Source video set for Magnific upscale', 'ok');
-  } else if (VIDEO_MODELS[activeKey]?.type === 'wan27e_video') {
-    await wan27eSetSource(videoId);
-    toast('Source video set for WAN 2.7 Edit', 'ok');
-  } else if (VIDEO_MODELS[activeKey]?.type === 'grok_video') {
-    const grokMode = document.getElementById('grokVideoMode')?.value;
-    if (grokMode === 'edit' || grokMode === 'extend') {
-      await setGrokVideoSrc(videoId);
-      toast(`Source video set for Grok ${grokMode === 'edit' ? 'Edit' : 'Extend'}`, 'ok');
-    } else {
-      toast('Switch Grok Video mode to Edit or Extend to use a source video', 'info');
-    }
-  } else if (VIDEO_MODELS[activeKey]?.refMode === 'seedance2_r2v') {
+  } else if (model?.refMode === 'seedance2_r2v') {
     await sd2VidUseFromGallery(videoId);
-  } else if (VIDEO_MODELS[activeKey]?.refMode === 'video_ref') {
-    await v2vSetFromGallery(videoId);
-    toast('Motion reference video set', 'ok');
-  } else if (VIDEO_MODELS[activeKey]?.type === 'wan27_video' && VIDEO_MODELS[activeKey]?.refMode === 'single_end') {
-    await wan27vSetSource(videoId);
-    toast('Extend source video set for WAN 2.7 I2V', 'ok');
+  } else if (supportsSourceVideo(model)) {
+    // Grok mode gate — Edit/Extend only
+    if (model.type === 'grok_video') {
+      const grokMode = document.getElementById('grokVideoMode')?.value;
+      if (grokMode !== 'edit' && grokMode !== 'extend' && grokMode !== 'v2v') {
+        toast('Switch Grok Video mode to Edit or Extend to use a source video', 'info');
+        return;
+      }
+    }
+    // WAN 2.7 I2V extend — only valid in single_end refMode
+    if (model.type === 'wan27_video' && model.refMode !== 'single_end') {
+      toast('Switch to WAN 2.7 I2V mode to extend a video', 'info');
+      return;
+    }
+    await unifiedSrcSetSource(videoId);
+    toast(`${sourceVideoLabel(model)} set`, 'ok');
   } else {
     toast('Switch to a model that uses a source video first', 'info');
   }
@@ -317,7 +274,24 @@ function setGenMode(mode) {
   document.getElementById('genModeImgBtn').classList.toggle('active', !isVideo);
   document.getElementById('genModeVidBtn').classList.toggle('active', isVideo);
   window.aiPromptContext = isVideo ? 'video' : 'image';
-  if (isVideo) { updateVideoFolderDropdown(); updateVideoResInfo(); initVideoCountHighlight(); moveStyleTagsToVideo(isVideo); updateAudioToggleUI(); }
+  if (isVideo) {
+    updateVideoFolderDropdown(); updateVideoResInfo(); initVideoCountHighlight(); moveStyleTagsToVideo(isVideo); updateAudioToggleUI();
+    // v226en fix: apply current video model to trigger DOM moves + unified
+    // layer visibility on first switch to video tab.  Without this, extracted
+    // bottom toggles (Luma Loop, PixVerse MultiClip, PixVerse OffPeak) remain
+    // at their template positions directly under the Prompt section until the
+    // user changes the model.
+    //
+    // IMPORTANT: We must use getActiveVideoModelKey() (not the raw select
+    // value) because groups like 'seedance2', 'kling_v3', 'kling_o3', etc.
+    // are dispatcher keys in KLING_GROUPS — they aren't actual VIDEO_MODELS
+    // entries.  getActiveVideoModelKey expands them to the concrete variant
+    // (e.g. 'seedance2' → 'seedance2_t2v').
+    if (typeof _applyVideoModel === 'function' && typeof getActiveVideoModelKey === 'function') {
+      const _actualKey = getActiveVideoModelKey();
+      if (_actualKey) _applyVideoModel(_actualKey);
+    }
+  }
 }
 
 // ── Video refs (unified: start frame, end frame, multi-ref) ──
@@ -1640,96 +1614,58 @@ function _applyVideoMetaToLegacyUi(params, modelKey) {
   const model = VIDEO_MODELS[modelKey];
   if (!model) return;
 
-  // Negative prompt — v225en: unified vpNegPrompt is the single source.
-  if (typeof params.negativePrompt === 'string' &&
-      (model.type === 'wan27_video' || model.type === 'pixverse_video')) {
-    _setValue('vpNegPrompt', params.negativePrompt);
+  // Grok mode must be applied BEFORE the unified setters below — it installs
+  // per-mode min/max constraints on the duration slider and the resolution
+  // button set.  Other families have no such dependency.
+  if (params.grok && model.type === 'grok_video') {
+    _setValue('grokVideoMode', params.grok.mode);
+    if (typeof onGrokVideoModeChange === 'function' && params.grok.mode) onGrokVideoModeChange(params.grok.mode);
   }
 
-  // Veo
-  // v225en: Resolution via unified helper; duration via unified slider.
+  // Unified reuse — shared fields written via shared setters.  Setters
+  // no-op when their DOM isn't present (wrong model selected), so these can
+  // run unconditionally.
+  if (typeof params.negativePrompt === 'string') _setValue('vpNegPrompt', params.negativePrompt);
+  if (params.resolution)     setUnifiedResolution(params.resolution);
+  if (params.duration)       setUnifiedDuration(params.duration);
+  if (params.seed   != null) setUnifiedSeed(params.seed);
+  if (params.safety != null) setUnifiedSafety(params.safety);
+  // Audio URLs — top-level array for WAN 2.7 R2V (1 slot) / Seedance 2.0 R2V (3 slots).
+  if (Array.isArray(params.audioUrls)) {
+    for (let i = 0; i < 3; i++) setUnifiedAudioUrl(i, params.audioUrls[i] || '');
+  }
+  // Source/Motion/Extend video — top-level id for WAN 2.7e / WAN 2.7 extend /
+  // Grok V2V/Edit/Extend / Kling Motion Control.
+  if (params.srcVideoId) unifiedSrcSetSource(params.srcVideoId);
+
+  // Per-family — only fields with no unified equivalent.
+
   if (params.veo && model.type === 'veo') {
-    _setValue('veoRefMode',   params.veo.refMode);
-    if (params.veo.resolution) setUnifiedResolution(params.veo.resolution);
+    _setValue('veoRefMode', params.veo.refMode);
     if (typeof onVeoRefModeChange === 'function') onVeoRefModeChange(params.veo.refMode);
   }
 
-  // Luma
-  // v225en: Resolution via unified helper; Luma duration was stored as "5s"/"9s"
-  //   format — strip 's' suffix and use as number on unified slider.
   if (params.luma && model.type === 'luma_video') {
-    if (params.luma.resolution) setUnifiedResolution(params.luma.resolution);
-    _setChecked('lumaLoop',     params.luma.loop);
-    _setValue('lumaColorMode',  params.luma.colorMode);
+    _setChecked('lumaLoop',    params.luma.loop);
+    _setValue('lumaColorMode', params.luma.colorMode);
   }
 
-  // WAN 2.7 (T2V / I2V / R2V)
-  // v225en: resolution/duration via unified helpers.  Prompt expansion and
-  //   legacy negative prompt removed — not part of new system.
-  if (params.wan27v && model.type === 'wan27_video') {
-    const s = params.wan27v;
-    if (s.resolution) setUnifiedResolution(s.resolution);
-    if (s.duration)   setUnifiedDuration(s.duration);
-    _setChecked('wan27vSafety',    s.safety !== false);
-    _setValue('wan27vSeed',        s.seed);
-    _setValue('wan27vAudioUrl',    s.audioUrl);
-  }
-
-  // WAN 2.7 Video Edit
-  // v225en: duration='0' means "match source" → unified checkbox, else numeric.
   if (params.wan27e && model.type === 'wan27e_video') {
     const s = params.wan27e;
-    if (s.resolution) setUnifiedResolution(s.resolution);
+    // Duration semantics: '0' = match source (overrides unified duration reuse above)
     const matchSrc = (String(s.duration) === '0' || s.duration === 0);
     setUnifiedDurationMatchSource(matchSrc);
-    if (!matchSrc && s.duration) setUnifiedDuration(s.duration);
-    _setValue('wan27eAspect',     s.aspectRatio);
-    _setValue('wan27eAudio',      s.audioSetting);
-    _setChecked('wan27eSafety',    s.safety !== false);
-    _setValue('wan27eSeed',        s.seed);
+    _setValue('wan27eAspect', s.aspectRatio);
+    _setValue('wan27eAudio',  s.audioSetting);
   }
 
-  // Seedance 2.0
-  // v225en: unified duration slider + Auto checkbox; resolution via helper.
   if (params.seedance2 && model.type === 'seedance2_video') {
-    const s = params.seedance2;
-    if (s.duration) setUnifiedDuration(s.duration);
-    setUnifiedDurationAuto(!!s.autoDuration);
-    if (s.resolution) setUnifiedResolution(s.resolution);
-    _setValue('sd2Seed',        s.seed);
-    // Audio URLs (up to 3)
-    if (Array.isArray(s.audioUrls)) {
-      _setValue('sd2AudioUrl1', s.audioUrls[0] || '');
-      _setValue('sd2AudioUrl2', s.audioUrls[1] || '');
-      _setValue('sd2AudioUrl3', s.audioUrls[2] || '');
-    }
+    setUnifiedDurationAuto(!!params.seedance2.autoDuration);
   }
 
-  // PixVerse
-  // v225en: quality (resolution) via unified helper.
   if (params.pixverse && model.type === 'pixverse_video') {
-    const s = params.pixverse;
-    if (s.quality) setUnifiedResolution(s.quality);
-    _setChecked('pixverseMultiClip', s.multiClip);
-    _setChecked('pixverseOffPeak',   s.offPeak);
-  }
-
-  // Grok Video
-  // v225en: mode select stays (mode-first panel above prompt);
-  //   resolution/duration via unified helpers.
-  if (params.grok && model.type === 'grok_video') {
-    const s = params.grok;
-    _setValue('grokVideoMode',  s.mode);
-    if (typeof onGrokVideoModeChange === 'function' && s.mode) onGrokVideoModeChange(s.mode);
-    // setUnified* must come AFTER onGrokVideoModeChange — it applies per-mode
-    //   constraints (min/max, allowed values) to the unified slider/buttons.
-    if (s.duration)   setUnifiedDuration(s.duration);
-    if (s.resolution) setUnifiedResolution(s.resolution);
-  }
-
-  // WAN 2.6
-  if (params.wan26 && model.type === 'wan_video') {
-    if (params.wan26.resolution) setUnifiedResolution(params.wan26.resolution);
+    _setChecked('pixverseMultiClip', params.pixverse.multiClip);
+    _setChecked('pixverseOffPeak',   params.pixverse.offPeak);
   }
 }
 

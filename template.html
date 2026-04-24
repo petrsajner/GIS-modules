@@ -105,6 +105,15 @@ input:focus { border-color:var(--accent); }
 .ctrl-label { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--text); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
 .ctrl-label .cv { color:var(--accent); font-size:10px; text-transform:none; letter-spacing:0; }
 
+/* v226en fix: #vpParams has bare direct children (unifiedResRow, videoAspectRow,
+   videoCfgRow, videoDurRow, unifiedSeedRow, videoAudioCtrl, videoCountRow,
+   the "Parameters" plabel moved in STEP 4, per-family panels like wan27vParams,
+   "Save to folder", and extracted bottom toggles) which need the same horizontal
+   padding that .psec gives to image-panel controls. Image panel has its upParams
+   wrapped in a psec with padding:14px; video panel does not. The :not(.psec)
+   selector spares psec children (they have their own padding:14px). */
+#vpParams > :not(.psec) { padding-left:14px; padding-right:14px; }
+
 select, input[type=number], input[type=text].ctrl-input {
   width:100%; background:var(--s2); border:1px solid var(--border); color:var(--text);
   font-family:'IBM Plex Mono',monospace; font-size:11px; padding:6px 9px;
@@ -3242,9 +3251,6 @@ select.inpaint-num option { background:#fff; color:#111; }
           </select>
           <div id="grokVideoModeNote" style="font-size:10px;color:var(--dim2);margin-top:3px;">Prompt-only generation with native audio</div>
         </div>
-        <div id="grokVideoSrcRow" style="display:none;margin-top:6px;">
-          <div style="font-size:10px;color:var(--dim2);margin-bottom:3px;">Source video: <span id="grokVideoSrcLabel" style="color:var(--accent);">none — click ▷ Use on a gallery video</span></div>
-        </div>
       </div>
 
       <!-- Video prompt -->
@@ -3305,23 +3311,35 @@ select.inpaint-num option { background:#fff; color:#111; }
         <div style="font-size:11px;color:var(--dim2);margin-top:4px;">Maintains character identity across shots</div>
       </div>
 
-      <!-- V2V / Motion Control: video input — unified panel -->
-      <div class="psec" id="videoV2VSection" style="display:none;">
-        <div class="plabel">Motion Video
-          <span id="v2vSrcInfo" style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">No video selected</span>
+      <!-- Unified Source / Motion / Extend Video — single panel for WAN 2.7 Edit,
+           WAN 2.7 R2V Extend, Grok V2V/Edit/Extend, Kling Motion Control.
+           Label, required-status, Upload button, description are all set
+           per-model in _vpApplyUnifiedLayer. -->
+      <div class="psec" id="unifiedSrcVideoRow" style="display:none;">
+        <div class="plabel"><span id="unifiedSrcVideoLabel">Source Video</span>
+          <span id="unifiedSrcInfo" style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">None selected</span>
         </div>
-        <div id="v2vSrcThumb" style="display:none;margin-bottom:6px;">
-          <img id="v2vSrcImg" src="" style="width:100%;max-height:140px;object-fit:contain;background:#111;display:block;border-radius:2px;">
-          <div id="v2vSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:5px 0 2px;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.6;"></div>
+        <div id="unifiedSrcThumb" style="display:none;margin-bottom:6px;">
+          <img id="unifiedSrcImg" src="" style="width:100%;max-height:140px;object-fit:contain;background:#111;display:block;border-radius:2px;">
+          <div id="unifiedSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:5px 0 2px;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.6;"></div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-          <button class="ibtn" onclick="document.getElementById('v2vVideoInput').click()" style="font-size:10px;padding:3px 9px;">↑ Upload</button>
-          <button class="ibtn" onclick="v2vPickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
-          <button class="ibtn" id="v2vDescribeBtn" onclick="v2vDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
-          <button class="ibtn" id="v2vClearBtn" onclick="clearV2VVideo()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
+          <button class="ibtn" id="unifiedSrcUploadBtn" onclick="document.getElementById('unifiedSrcVideoInput').click()" style="font-size:10px;padding:3px 9px;display:none;">↑ Upload</button>
+          <button class="ibtn" onclick="unifiedSrcPickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
+          <button class="ibtn" id="unifiedSrcDescribeBtn" onclick="unifiedSrcDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
+          <button class="ibtn" id="unifiedSrcClearBtn" onclick="unifiedSrcClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
         </div>
-        <input type="file" id="v2vVideoInput" accept="video/*" style="display:none" onchange="v2vVideoSelected(this.files)">
-        <div style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;">Motion will be transferred to the character image in Refs below.</div>
+        <input type="file" id="unifiedSrcVideoInput" accept="video/*" style="display:none" onchange="unifiedSrcVideoSelected(this.files)">
+        <div id="unifiedSrcFooter" style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;"></div>
+      </div>
+
+      <!-- Unified Audio URLs — up to 3 slots (per-model count via audioSlots()).
+           WAN 2.7 R2V: 1 slot (BG music).  Seedance 2.0 R2V: 3 slots (audio refs). -->
+      <div class="psec" id="unifiedAudioUrlRow" style="display:none;">
+        <div class="plabel">Audio URL<span id="unifiedAudioUrlHint" style="color:var(--dim2);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;">(optional · MP3/WAV)</span></div>
+        <input type="url" id="unifiedAudioUrl1" placeholder="Audio URL #1 (MP3, WAV)" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
+        <input type="url" id="unifiedAudioUrl2" placeholder="Audio URL #2" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;display:none;">
+        <input type="url" id="unifiedAudioUrl3" placeholder="Audio URL #3" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;display:none;">
       </div>
 
       <!-- Topaz: Source Video — appears when Topaz model is selected -->
@@ -3339,74 +3357,6 @@ select.inpaint-num option { background:#fff; color:#111; }
           <button class="ibtn" id="topazSrcClearBtn" onclick="topazClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
         </div>
         <div style="font-size:11px;color:var(--dim2);margin-top:5px;line-height:1.5;">Click <b>✦ Upscale</b> on any video in the gallery to set it here.</div>
-      </div>
-
-      <!-- WAN 2.7 Video Edit: source video — unified panel -->
-
-      <!-- WAN 2.7 I2V/T2V/R2V params — shown for wan27_video type.
-           v225en: legacy Resolution/Duration/NegPrompt/PromptExpand/Seed
-           removed — all driven by unified layer. -->
-        <div id="wan27vParams" style="display:none">
-          <div class="plabel">WAN 2.7 Settings</div>
-
-          <!-- Safety checker -->
-          <div class="ctrl">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-              <input type="checkbox" id="wan27vSafety" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-              <span style="font-size:11px;color:var(--dim);">Safety checker</span>
-            </label>
-          </div>
-
-          <!-- Seed input (wrapper extracted to unified Seed slot at runtime) -->
-          <div class="ctrl">
-            <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-            <input type="number" id="wan27vSeed" placeholder="42" min="0" max="2147483647"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <!-- Audio URL — optional background audio for T2V / I2V
-               (extracted to source slot under refs at runtime) -->
-          <div class="ctrl">
-            <div class="ctrl-label">Audio URL <span style="color:var(--dim2);font-weight:400;">(optional · MP3/WAV)</span></div>
-            <input type="url" id="wan27vAudioUrl" placeholder="https://…/audio.mp3"
-              style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-          </div>
-
-          <!-- Extend Video — I2V only: source video for continuation
-               (extracted to source slot under refs at runtime) -->
-          <div id="wan27vExtendRow" style="display:none;">
-            <div style="font-size:10px;color:var(--dim2);margin-bottom:5px;line-height:1.5;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
-              <b style="color:var(--dim);">Extend video</b> — optional source video to continue
-            </div>
-            <div style="font-size:10px;color:var(--dim);margin-bottom:5px;" id="wan27vSrcInfo">None selected</div>
-            <div id="wan27vSrcThumb" style="display:none;margin-bottom:6px;">
-              <img id="wan27vSrcImg" src="" style="width:100%;max-height:120px;object-fit:contain;background:#111;display:block;border-radius:2px;">
-              <div id="wan27vSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 0;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;"></div>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <button class="ibtn" onclick="wan27vPickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
-              <button class="ibtn" id="wan27vSrcDescribeBtn" onclick="wan27vDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
-              <button class="ibtn" id="wan27vSrcClearBtn" onclick="wan27vClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
-            </div>
-          </div>
-
-        </div>
-
-
-      <div class="psec" id="wan27eSrcRow" style="display:none;">
-        <div class="plabel">Source Video
-          <span id="wan27eSrcInfo" style="color:var(--dim);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;">None selected</span>
-        </div>
-        <div id="wan27eSrcThumb" style="display:none;margin-bottom:6px;">
-          <img id="wan27eSrcImg" src="" style="width:100%;max-height:140px;object-fit:contain;background:#111;display:block;border-radius:2px;">
-          <div id="wan27eSrcMeta" style="display:flex;gap:6px;flex-wrap:wrap;padding:5px 0 2px;font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.6;"></div>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-          <button class="ibtn" onclick="wan27ePickFromGallery()" style="font-size:10px;padding:3px 9px;">☰ Gallery</button>
-          <button class="ibtn" id="wan27eSrcDescribeBtn" onclick="wan27eDescribeSource()" style="font-size:10px;padding:3px 9px;display:none;">✦ Describe</button>
-          <button class="ibtn" id="wan27eSrcClearBtn" onclick="wan27eClearSource()" style="font-size:10px;padding:3px 9px;display:none;">✕ Clear</button>
-        </div>
-        <div style="font-size:10px;color:var(--dim2);margin-top:6px;line-height:1.5;">Click <b>▷ Use</b> on any video in the gallery, or use <b>☰ Gallery</b> to pick one.</div>
       </div>
 
       <!-- WAN 2.7 Video Edit: params -->
@@ -3441,20 +3391,7 @@ select.inpaint-num option { background:#fff; color:#111; }
           </select>
         </div>
 
-        <!-- Seed (wrapper extracted to unified Seed slot at runtime) -->
-        <div class="ctrl">
-          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-          <input type="number" id="wan27eSeed" placeholder="42" min="0" max="2147483647"
-            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-        </div>
-
-        <!-- Safety checker -->
-        <div class="ctrl">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="wan27eSafety" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
-            <span style="font-size:11px;color:var(--dim);">Safety checker</span>
-          </label>
-        </div>
+        <!-- v227en: Safety checker removed — unified #unifiedSafety replaces it. -->
 
         <div style="font-size:10px;color:var(--dim2);margin-top:4px;line-height:1.5;">
           Source video required · Must be &lt;10s · Optional ref image below for style guidance
@@ -3464,14 +3401,14 @@ select.inpaint-num option { background:#fff; color:#111; }
 
       <!-- PixVerse C1 params — v225en: legacy Resolution (Quality) removed.
            MultiClip + OffPeak checkboxes extracted to bottom toggles at runtime.
-           Seed input extracted to unified Seed slot at runtime.
+           v226en: Seed input removed — unified #unifiedSeed replaces it.
            NegPrompt kept — still legacy mirror target for #vpNegPrompt. -->
-      <!-- v225en: PixVerse extracted controls (MultiClip, OffPeak, Seed).
+      <!-- v225en: PixVerse extracted controls (MultiClip, OffPeak).
            Runtime moveWrapper picks these up and moves them to:
              - MultiClip → bottom toggles
              - OffPeak   → bottom toggles
-             - Seed      → unified Seed slot
-           Legacy NegPrompt removed — unified #vpNegPrompt replaces it. -->
+           Legacy NegPrompt removed — unified #vpNegPrompt replaces it.
+           v226en: Seed removed — unified #unifiedSeed replaces it. -->
       <div class="ctrl">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
           <input type="checkbox" id="pixverseMultiClip" style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
@@ -3484,21 +3421,10 @@ select.inpaint-num option { background:#fff; color:#111; }
           <span style="font-size:11px;color:var(--dim);">Off-peak mode (~50% cheaper, up to 24h)</span>
         </label>
       </div>
-      <div class="ctrl">
-        <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-        <input type="number" id="pixverseSeed" placeholder="42" min="0" max="2147483647"
-          style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-      </div>
 
-      <!-- v225en: Seedance 2.0 extracted controls (Seed + R2V section).
-           Runtime moveWrapper picks these up and moves them to:
-             - Seed         → unified Seed slot
-             - sd2R2VSection → source slot area pod videoRefSection -->
-      <div class="ctrl">
-        <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
-        <input type="number" id="sd2Seed" placeholder="42" min="0" max="2147483647"
-          style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
-      </div>
+      <!-- v225en: Seedance 2.0 extracted controls (R2V section).
+           Runtime moveWrapper picks sd2R2VSection → source slot area pod videoRefSection.
+           v226en: Seed removed — unified #unifiedSeed replaces it. -->
 
       <!-- R2V section: video slots + audio URLs (hidden unless R2V)
            Extracted to source slot area under videoRefSection at runtime. -->
@@ -3547,14 +3473,6 @@ select.inpaint-num option { background:#fff; color:#111; }
           <div style="margin-bottom:8px;">
             <button class="ibtn" onclick="sd2VidPick()" style="font-size:10px;padding:3px 9px;">☰ Pick from Gallery</button>
           </div>
-
-          <!-- Audio URL inputs (3x) -->
-          <div class="ctrl">
-            <div class="ctrl-label">Audio References <span style="color:var(--dim2);font-weight:400;">(max 3 · paste URL · use [Audio1] in prompt)</span></div>
-          </div>
-          <input type="text" id="sd2AudioUrl1" placeholder="Audio URL #1 (WAV, MP3)" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
-          <input type="text" id="sd2AudioUrl2" placeholder="Audio URL #2" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
-          <input type="text" id="sd2AudioUrl3" placeholder="Audio URL #3" style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;margin-bottom:4px;">
 
           <div style="font-size:10px;color:var(--dim2);line-height:1.5;margin-top:2px;">
             Reference in prompt: <b>[Image1]</b> <b>[Video1]</b> <b>[Audio1]</b> etc.
@@ -3792,6 +3710,25 @@ select.inpaint-num option { background:#fff; color:#111; }
           </div>
           <div id="videoDurRadioRow" style="display:none;padding:4px 0;"></div>
           <div id="videoDurNote" style="font-size:11px;color:var(--dim2);margin-top:3px;"></div>
+        </div>
+
+        <!-- v226en: Unified Seed input — single source for wan27v / wan27e / pixverse / seedance2.
+             Visibility managed in _vpApplyUnifiedLayer via supportsSeed whitelist. -->
+        <div class="ctrl" id="unifiedSeedRow" style="display:none;">
+          <div class="ctrl-label">Seed <span style="color:var(--dim2);font-weight:400;">(optional)</span></div>
+          <input type="number" id="unifiedSeed" placeholder="42" min="0" max="2147483647"
+            style="width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 9px;outline:none;">
+        </div>
+
+        <!-- v227en: Unified Safety checker — single source for wan27v / wan27e.
+             Default checked=true.  Visibility managed in _vpApplyUnifiedLayer
+             via supportsSafety whitelist.  Replaces legacy wan27vSafety + wan27eSafety
+             which lived inside their per-family panels. -->
+        <div class="ctrl" id="unifiedSafetyRow" style="display:none;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="unifiedSafety" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--acc);">
+            <span style="font-size:11px;color:var(--dim);">Safety checker</span>
+          </label>
         </div>
 
         <!-- Audio toggle — prominent button -->
